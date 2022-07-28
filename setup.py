@@ -34,7 +34,8 @@ INSTALL_REQUIRES = INSTALL_REQUIRES.split('\n')
 
 from setup_cext import prepare_extensions, build_ext
 from torch import __version__ as torch_version
-torch_version = torch_version.split('.')[:3]
+torch_version = torch_version.split('.')
+torch_version = '.'.join(torch_version[:3])
 SETUP_KWARGS['ext_package'] = 'fastfields'
 SETUP_KWARGS['ext_modules'] = prepare_extensions()
 INSTALL_REQUIRES += [f'torch=={torch_version}']
