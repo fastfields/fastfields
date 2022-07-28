@@ -3,7 +3,7 @@
 `fastfields` is a PyTorch extension written in C++/CUDA specialized for 
 dense scalar or vector fields. This package contains a limited set of tools
 that are implemented in C++/CUDA, and is aimed to serve as a core dependency of 
-higher level packages (such as [`nitorch`](https://github.com/balbasty/nitorch).
+higher level packages (such as [`nitorch`](https://github.com/balbasty/nitorch)).
 
 
 ## Installation
@@ -48,6 +48,7 @@ extrapolation methods, and does not encode coordinates in (-1, ..., 1) but in
 - 4 or 'fourth'
 - 5 or 'fifth'
 - etc.
+
 A list of values can be provided to specify dimension-specific interpolation orders.
 
 `bound` must be a `str`. Possible values are:
@@ -58,6 +59,7 @@ A list of values can be provided to specify dimension-specific interpolation ord
 - 'dst2'       or 'antireflect' : -c -b -a  |  a  b  c  d  | -d -c -b
 - 'dft'        or 'wrap'        :  b  c  d  |  a  b  c  d  |  a  b  c
 - 'zero'       or 'zeros'       :  0  0  0  |  a  b  c  d  |  0  0  0
+
 A list of values can be provided to specify dimension-specific boundary conditions.
 Note that
 - `dft` corresponds to the boundary conditions of a [DFT](https://en.wikipedia.org/wiki/Discrete_Fourier_transform) (circular)
@@ -103,7 +105,7 @@ function. To perform interpolation, a dense field must first be converted into
 interpolating spline coefficients 
 (see [Unser et al. (1993)](http://bigwww.epfl.ch/publications/unser9301.html)), 
 which can be efficiently done using a separable recursive filter. Such a 
-_prefiltering_ function is implemented in TorchScript in 
+_prefiltering_ function is implemented (using TorchScript) in 
 [`torch-interpol`](https://github.com/balbasty/torch-interpol).
 
 Since splines are differentiable, we can use the same encoding to sample 
@@ -137,10 +139,10 @@ output : (..., [channel], *shape, dim) tensor
 ```
 
 The function implemented by `grid_pull` is linear with respect to the input 
-tensor and can be thought of as the matrix-vector product **B**x**v**, where
+tensor and can be thought of as the matrix-vector product **Bv**, where
 **B** is a matrix that encodes the sampling grid (`grid`) and spline 
 coefficients, while **v** is a vector that contains the flattened `input`. The 
-adjoint operation **B**<sup>T</sup>x**v**, which utilizes the transposed matrix 
+adjoint operation **B**<sup>T</sup>**v**, which utilizes the transposed matrix 
 **B**<sup>T</sup>, is also linear in **v**. We implement it efficiently as the 
 function `grid_push`:
 
@@ -205,7 +207,7 @@ output : (..., [1], *shape) tensor
 In imaging inverse problems, it is common to use regularizers that penalize the 
 (voxelwise) l2 norm of some components of the spatial derivatives of a dense 
 field. Consequently, inversion often consists of solving a linear system of 
-equations of the form (**H** + **L**)<sup>-1<\sup>(**g** + **Lv**), where 
+equations of the form (**H** + **L**)<sup>-1</sup>(**g** + **Lv**), where 
 **H** is block-diagonal, and **L** = **K**<sup>T</sup>**K** encodes the 
 regularizer. This section implements regularizers and solvers for such problems.
 
@@ -213,13 +215,19 @@ The regularizers that we implement are identical to those implemented in
 [SPM](https://github.com/spm/spm12). They are a combination of three 
 (for scalar fields) or five (for vector fields that encode dense displacements 
 or velocities) energies. For dense scalar fields, we implement:
-- the absolute energy \int ||f(**x**)||<sup>2</sup> d**x**
-- the membrane energy \int ||\nabla f(**x**)||<sup>2</sup> d**x**
-- the bending energy \int ||\nabla<sup>2</sup> f(**x**)||<sub>F</sub><sup>2</sup> d**x**
+- the absolute energy ∫ ||f(**x**)||<sup>2</sup> d**x**
+- the membrane energy ∫ ||∇ f(**x**)||<sup>2</sup> d**x**
+- the bending energy ∫ ||∇<sup>2</sup> f(**x**)||<sub>F</sub><sup>2</sup> d**x**
+
 For vector fields, we further implement two components of the linear-elastic 
 energy, known as the Lamé coefficients:
-- the trace of the strain tensor \int tr(**Df**(**x**)) d**x**
-- the shear modulus \int ||**Df**(**x**) + **Df**(**x**)<sup>T</sup>||<sub>F</sub><sup>2</sup>  d**x** 
+- the trace of the strain tensor ∫ tr(**Df**(**x**)) d**x**
+- the shear modulus ∫ ||**Df**(**x**) + **Df**(**x**)<sup>T</sup>||<sub>F</sub><sup>2</sup>  d**x** 
+
+As opposed to SPM, we have the possibility to include a voxel-wise modulation of these energies, 
+in which case the regularizer can be written as **L** = **K**<sup>T</sup>**WK**, where **W** is
+diagonal. This voxel-wise modulation can be used to implement spatially varying regularization, 
+or edge-preserving regularizers under an iteratively reweighted scheme.
 
 Note that **none of the functions in this section are automatically 
 differentiable**.
@@ -336,7 +344,7 @@ fmg(hessian, gradient, weight=None, dim=None,
     absolute=0, membrane=0, bending=0, factor=1,
     voxel_size=1, bound='dct2',
     nb_cycles=2, nb_iter=2, max_levels=16,
-    solver='cg', output=None):
+    solver='cg', output=None)
 """Solve a regularised linear system by full multi-grid
         solution = (hessian + regulariser) \ gradient
 
@@ -453,7 +461,7 @@ output : (N, *shape, D) tensor
 ```python
 pcg_grid(gradient, weight=None, hessian=None,
          absolute=0, membrane=0, bending=0, lame=0, factor=1,
-         voxel_size=1, bound='dft', nb_iter=16, tol=1e-4, output=None):
+         voxel_size=1, bound='dft', nb_iter=16, tol=1e-4, output=None)
 """Solve a regularised linear system by conjugate gradient
         solution = (hessian + regulariser) \ gradient
 
@@ -484,7 +492,7 @@ fmg_grid(hessian, gradient, weight=None,
          absolute=0, membrane=0, bending=0, lame=0, factor=1,
          voxel_size=1, bound='dft',
          nb_cycles=2, nb_iter=2, max_levels=16,
-         solver='cg', output=None):
+         solver='cg', output=None)
 """Solve a regularised linear system by full multi-grid
         solution = (hessian + regulariser) \ gradient
 
