@@ -48,14 +48,17 @@ def v2str(v):
 def same_version(v1, v2):
     ok = all(x == y for x, y in zip(v1, v2))
     if not ok:
-        print(f'-- Incompatible CUDA: {v2str(v1)} vs {v2str(v2)}')
+        print(f'-- Incompatible CUDA: looking for {v2str(v1)} '
+              f'but found {v2str(v2)}')
+    return ok
 
 
 def cuda_home(version=None):
     """Home of local CUDA."""
-    version_ok = lambda h, v: not v or same_version(v, cuda_version(h))
+    version_ok = lambda h, v: (not v) or same_version(v, cuda_version(h))
     # Guess #1: environment variables
-    home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH')
+    home = os.environ.get('CUDA_HOME', None) or os.environ.get('CUDA_PATH', None)
+    print(home)
     if home and version_ok(home, version):
         print(f'-- Found CUDA {v2str(cuda_version(home))}.')
         return home
