@@ -38,9 +38,11 @@ We implement an "interpolation" function akin to PyTorch's
 [`grid_sample`](https://pytorch.org/docs/stable/generated/torch.nn.functional.grid_sample.html),
 except that is supports spline encoding up to order 7, more out-of-bound 
 extrapolation methods, and does not encode coordinates in (-1, ..., 1) but in 
-(0, ..., N).
+(0, ..., N-1).
 
-`interpolation` can be an `int` or a `str`. Possible values are:
+`interpolation` can be an `int` or a `str`.
+A list of values can be provided to specify dimension-specific interpolation orders.
+Possible values are:
 - 0 or 'nearest'
 - 1 or 'linear'
 - 2 or 'quadratic'
@@ -49,9 +51,10 @@ extrapolation methods, and does not encode coordinates in (-1, ..., 1) but in
 - 5 or 'fifth'
 - etc.
 
-A list of values can be provided to specify dimension-specific interpolation orders.
-
-`bound` must be a `str`. Possible values are:
+`bound` must be a `str`. 
+A list of values can be provided to specify dimension-specific boundary conditions.
+Possible values are:
+```
 - 'replicate'  or 'nearest'     :  a  a  a  |  a  b  c  d  |  d  d  d
 - 'dct1'       or 'mirror'      :  d  c  b  |  a  b  c  d  |  c  b  a
 - 'dct2'       or 'reflect'     :  c  b  a  |  a  b  c  d  |  d  c  b
@@ -59,13 +62,12 @@ A list of values can be provided to specify dimension-specific interpolation ord
 - 'dst2'       or 'antireflect' : -c -b -a  |  a  b  c  d  | -d -c -b
 - 'dft'        or 'wrap'        :  b  c  d  |  a  b  c  d  |  a  b  c
 - 'zero'       or 'zeros'       :  0  0  0  |  a  b  c  d  |  0  0  0
+```
 
-A list of values can be provided to specify dimension-specific boundary conditions.
 Note that
 - `dft` corresponds to the boundary conditions of a [DFT](https://en.wikipedia.org/wiki/Discrete_Fourier_transform) (circular)
 - `dct2` corresponds to the boundary conditions of a [DCT-II](https://en.wikipedia.org/wiki/Discrete_cosine_transform), or to Neumann boundary conditions (symmetric)
 - `dst2` corresponds to the boundary conditions of a [DCT-II](https://en.wikipedia.org/wiki/Discrete_sine_transform), or to Dirichlet boundary conditions (antisymmetric)
-
 
 ```python
 grid_pull(input, grid, interpolation='linear', bound='zero', extrapolate=False)
