@@ -268,8 +268,8 @@ def relax_grid(gradient, weight=None, hessian=None,
 def precond(gradient, weight=None, hessian=None, dim=None,
             absolute=0, membrane=0, bending=0, factor=1,
             voxel_size=1, bound='dct2', output=None):
-    """Solve a regularised linear system by relaxation (Gauss-Seidel)
-            solution = (hessian + regulariser) \ gradient
+    """Apply the preconditioner of  a regularised linear system
+            solution = (inv(hessian) + diag(regulariser)) \ gradient
 
     Parameters
     ----------
@@ -327,8 +327,8 @@ def precond(gradient, weight=None, hessian=None, dim=None,
 def precond_grid(gradient, weight=None, hessian=None,
                  absolute=0, membrane=0, bending=0, lame=0, factor=1,
                  voxel_size=1, bound='dft', output=None):
-    """Solve a regularised linear system by relaxation (Gauss-Seidel)
-            solution = (hessian + regulariser) \ gradient
+    """Apply the preconditioner of  a regularised linear system
+            solution = (inv(hessian) + diag(regulariser)) \ gradient
 
     Parameters
     ----------
