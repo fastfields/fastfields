@@ -5,7 +5,7 @@
 #include <vector>
 #include <utility>
 
-namespace ni {
+namespace ff {
 
 at::Tensor resize(
   const at::Tensor                      & input, 
@@ -51,4 +51,4 @@ at::Tensor restriction_backward(
   const std::vector<BoundType>          & bound         = std::vector<BoundType>(),
   const std::vector<InterpolationType>  & interpolation = std::vector<InterpolationType>());
 
-}
+} // namespace ff

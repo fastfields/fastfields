@@ -2,7 +2,7 @@
 #include <vector>
 
 
-namespace ni {
+namespace ff {
   
 at::Tensor fmg(
   const at::Tensor             & hessian, 
@@ -36,4 +36,4 @@ at::Tensor fmg_grid(
   int64_t max_levels = 16,
   bool    use_cg     = false);
 
-}
+} // namespace ff

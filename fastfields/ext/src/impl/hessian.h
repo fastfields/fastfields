@@ -6,8 +6,8 @@
 
 #define OnePlusTiny 1.000001;
 
-namespace ni {
-NI_NAMESPACE_DEVICE {
+namespace ff {
+FF_NAMESPACE_DEVICE {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                                Enum
@@ -21,7 +21,7 @@ enum class HessianType: uint8_t {
   Sym           // Symmetric matrix
 };
 
-static NI_HOST NI_INLINE
+static FF_HOST FF_INLINE
 HessianType guess_hessian_type(int32_t C, int32_t CC)
 {
   if (CC == 0)
@@ -48,7 +48,7 @@ namespace Cholesky {
   // @param[inout]  a:  CxC matrix
   //
   // https://en.wikipedia.org/wiki/Cholesky_decomposition
-  template <typename reduce_t, typename offset_t> NI_INLINE NI_DEVICE static
+  template <typename reduce_t, typename offset_t> FF_INLINE FF_DEVICE static
   void decompose(offset_t C, reduce_t a[])
   {
     reduce_t sm, sm0;
@@ -81,7 +81,7 @@ namespace Cholesky {
   // @param[in]    a: CxC matrix
   // @param[in]    p: C vector
   // @param[inout] x: C vector
-  template <typename reduce_t, typename offset_t> NI_INLINE NI_DEVICE static
+  template <typename reduce_t, typename offset_t> FF_INLINE FF_DEVICE static
   void solve(offset_t C, const reduce_t a[], reduce_t x[])
   {
     reduce_t sm;
@@ -112,7 +112,7 @@ template <typename Child>
 struct HessianCommon 
 {
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE 
+  static FF_INLINE FF_DEVICE 
   void set(int32_t C, scalar_t * out, offset_t stride, const reduce_t * inp)
   {
     for (int32_t c = 0; c < C; ++c, out += stride)
@@ -120,7 +120,7 @@ struct HessianCommon
   }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE 
+  static FF_INLINE FF_DEVICE 
   void add(int32_t C, scalar_t * out, offset_t stride, const reduce_t * inp)
   {
     for (int32_t c = 0; c < C; ++c, out += stride)
@@ -128,7 +128,7 @@ struct HessianCommon
   }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_DEVICE 
+  static FF_DEVICE 
   void invert(int32_t C, 
               scalar_t * x, offset_t sx, const scalar_t * h, offset_t sh,
               reduce_t * v, const reduce_t * w)
@@ -140,7 +140,7 @@ struct HessianCommon
   }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_DEVICE 
+  static FF_DEVICE 
   void addinvert(int32_t C, 
                  scalar_t * x, offset_t sx, const scalar_t * h, offset_t sh,
                  reduce_t * v, const reduce_t * w)
@@ -177,17 +177,17 @@ struct HessianUtils<HessianType::None, MaxC>: HessianCommonNone<MaxC>
   static const int32_t max_size   = 0; 
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   get(int32_t C, const scalar_t * inp, offset_t stride, reduce_t * out)
   {}
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   submatvec_(int32_t C, const scalar_t * inp, offset_t stride, const reduce_t * h, reduce_t * out)
   {}
 
   template <typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   invert_(int32_t C, reduce_t * h, reduce_t * v, const reduce_t * w) {
     for (int32_t c = 0; c < C; ++c)
       v[c] /= w[c];
@@ -196,7 +196,7 @@ struct HessianUtils<HessianType::None, MaxC>: HessianCommonNone<MaxC>
   // specialize parent functions to avoid defining zero-sized arrays
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_DEVICE 
+  static FF_DEVICE 
   void invert(int32_t C, 
               scalar_t * x, offset_t sx, const scalar_t * h, offset_t sh,
               reduce_t * v, const reduce_t * w)
@@ -208,7 +208,7 @@ struct HessianUtils<HessianType::None, MaxC>: HessianCommonNone<MaxC>
   }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_DEVICE 
+  static FF_DEVICE 
   void addinvert(int32_t C, 
                  scalar_t * x, offset_t sx, const scalar_t * h, offset_t sh,
                  reduce_t * v, const reduce_t * w)
@@ -227,14 +227,14 @@ struct HessianUtils<HessianType::Eye, MaxC>: HessianCommonEye<MaxC>
   static const int32_t max_size   = 1; 
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   get(int32_t C, const scalar_t * inp, offset_t stride, reduce_t * out)
   {
     *out = static_cast<reduce_t>(*inp);
   }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   submatvec_(int32_t C, const scalar_t * inp, offset_t stride, const reduce_t * h, reduce_t * out)
   {
     reduce_t hh = *h;
@@ -243,7 +243,7 @@ struct HessianUtils<HessianType::Eye, MaxC>: HessianCommonEye<MaxC>
   }
 
   template <typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   invert_(int32_t C, reduce_t * h, reduce_t * v, const reduce_t * w) {
     reduce_t hh = *h;
     for (int32_t c = 0; c < C; ++c)
@@ -258,7 +258,7 @@ struct HessianUtils<HessianType::Diag, MaxC>: HessianCommonDiag<MaxC>
   static const int32_t max_size   = MaxC; 
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   get(int32_t C, const scalar_t * inp, offset_t stride, reduce_t * out)
   {
     for (int32_t c = 0; c < C; ++c, inp += stride)
@@ -266,7 +266,7 @@ struct HessianUtils<HessianType::Diag, MaxC>: HessianCommonDiag<MaxC>
   }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   submatvec_(int32_t C, const scalar_t * inp, offset_t stride, const reduce_t * h, reduce_t * out)
   {
     for (int32_t c = 0; c < C; ++c, inp += stride)
@@ -274,7 +274,7 @@ struct HessianUtils<HessianType::Diag, MaxC>: HessianCommonDiag<MaxC>
   }
 
   template <typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   invert_(int32_t C, reduce_t * h, reduce_t * v, const reduce_t * w) {
     for (int32_t c = 0; c < C; ++c)
       v[c] /= h[c] + w[c];
@@ -288,7 +288,7 @@ struct HessianUtils<HessianType::ESTATICS, MaxC>: HessianCommonEst<MaxC>
   static const int32_t max_size   = 2*MaxC-1;
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   get(int32_t C, const scalar_t * inp, offset_t stride, reduce_t * out)
   {
     for (int32_t c = 0; c < 2*C-1; ++c, inp += stride)
@@ -296,7 +296,7 @@ struct HessianUtils<HessianType::ESTATICS, MaxC>: HessianCommonEst<MaxC>
   }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   submatvec_(int32_t C, const scalar_t * inp, offset_t stride, const reduce_t * h, reduce_t * out)
   {
     const reduce_t * o = h + C; // pointer to off-diagonal elements
@@ -309,7 +309,7 @@ struct HessianUtils<HessianType::ESTATICS, MaxC>: HessianCommonEst<MaxC>
   }
 
   template <typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   invert_(int32_t C, reduce_t * h, reduce_t * v, const reduce_t * w) {
     reduce_t * o = h + C;  // pointer to off-diagonal elements
     reduce_t oh = h[C-1] + w[C-1], ov = 0., tmp;
@@ -337,7 +337,7 @@ struct HessianUtils<HessianType::Sym, MaxC>: HessianCommonSym<MaxC>
   static const int32_t max_size   = MaxC*MaxC; //< How much we allocate on the stack!
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   get(int32_t C, const scalar_t * inp, offset_t stride, reduce_t * out)
   {
     for (int32_t c = 0; c < C; ++c, inp += stride)
@@ -348,7 +348,7 @@ struct HessianUtils<HessianType::Sym, MaxC>: HessianCommonSym<MaxC>
   }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static NI_INLINE NI_DEVICE void 
+  static FF_INLINE FF_DEVICE void 
   submatvec_(int32_t C, const scalar_t * inp, offset_t stride, const reduce_t * h, reduce_t * out)
   {
     reduce_t acc;
@@ -361,7 +361,7 @@ struct HessianUtils<HessianType::Sym, MaxC>: HessianCommonSym<MaxC>
   }
 
   template <typename reduce_t> 
-  static NI_INLINE NI_DEVICE void invert_(
+  static FF_INLINE FF_DEVICE void invert_(
     int32_t C, reduce_t * h, reduce_t * v, const reduce_t * w) 
   {
     for (int32_t c = 0; c < C; ++c)
@@ -375,60 +375,60 @@ struct HessianUtils<HessianType::Sym, MaxC>: HessianCommonSym<MaxC>
 //                            Dispatcher
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#define NI_CASE_ENUM_USING_HINT(value, HINT, ...)             \
+#define FF_CASE_ENUM_USING_HINT(value, HINT, ...)             \
   case value: {                                               \
     static const auto HINT = value;                           \
     return __VA_ARGS__();                                     \
   }
 
-#define NI_CASE_HESSIAN(type, ...) \
-  NI_CASE_ENUM_USING_HINT(type, hessian_t, __VA_ARGS__)
+#define FF_CASE_HESSIAN(type, ...) \
+  FF_CASE_ENUM_USING_HINT(type, hessian_t, __VA_ARGS__)
 
-#define NI_DFLT_ENUM_USING_HINT(value, HINT, ...)             \
+#define FF_DFLT_ENUM_USING_HINT(value, HINT, ...)             \
   default: {                                                  \
     static const auto HINT = value;                           \
     return __VA_ARGS__();                                     \
   }
 
-#define NI_DFLT_HESSIAN(type, ...) \
-  NI_DFLT_ENUM_USING_HINT(type, hessian_t, __VA_ARGS__)
+#define FF_DFLT_HESSIAN(type, ...) \
+  FF_DFLT_ENUM_USING_HINT(type, hessian_t, __VA_ARGS__)
 
-#define NI_DISPATCH_HESSIAN_TYPE(TYPE, ...)                                 \
+#define FF_DISPATCH_HESSIAN_TYPE(TYPE, ...)                                 \
   [&] {                                                                     \
     const auto& the_type = TYPE;                                            \
     /* don't use TYPE again in case it is an expensive or side-effect op */ \
     switch (the_type) {                                                     \
-      NI_CASE_HESSIAN(HessianType::None,     __VA_ARGS__)                   \
-      NI_CASE_HESSIAN(HessianType::Eye,      __VA_ARGS__)                   \
-      NI_CASE_HESSIAN(HessianType::Diag,     __VA_ARGS__)                   \
-      NI_CASE_HESSIAN(HessianType::ESTATICS, __VA_ARGS__)                   \
-      NI_CASE_HESSIAN(HessianType::Sym,      __VA_ARGS__)                   \
+      FF_CASE_HESSIAN(HessianType::None,     __VA_ARGS__)                   \
+      FF_CASE_HESSIAN(HessianType::Eye,      __VA_ARGS__)                   \
+      FF_CASE_HESSIAN(HessianType::Diag,     __VA_ARGS__)                   \
+      FF_CASE_HESSIAN(HessianType::ESTATICS, __VA_ARGS__)                   \
+      FF_CASE_HESSIAN(HessianType::Sym,      __VA_ARGS__)                   \
     }                                                                       \
   }()
 
 // If 1 channel (logC = 0) -> only None and Eye needed
-#define NI_DISPATCH_HESSIAN_TYPE0(TYPE, ...)                                \
+#define FF_DISPATCH_HESSIAN_TYPE0(TYPE, ...)                                \
   [&] {                                                                     \
     const auto& the_type = TYPE;                                            \
     /* don't use TYPE again in case it is an expensive or side-effect op */ \
     switch (the_type) {                                                     \
-      NI_CASE_HESSIAN(HessianType::None,     __VA_ARGS__)                   \
-      NI_DFLT_HESSIAN(HessianType::Eye,      __VA_ARGS__)                   \
+      FF_CASE_HESSIAN(HessianType::None,     __VA_ARGS__)                   \
+      FF_DFLT_HESSIAN(HessianType::Eye,      __VA_ARGS__)                   \
     }                                                                       \
   }()
 
 // If 2 channels (logC = 1) -> only None, Eye and ESTATICS needed
-#define NI_DISPATCH_HESSIAN_TYPE1(TYPE, ...)                                \
+#define FF_DISPATCH_HESSIAN_TYPE1(TYPE, ...)                                \
   [&] {                                                                     \
     const auto& the_type = TYPE;                                            \
     /* don't use TYPE again in case it is an expensive or side-effect op */ \
     switch (the_type) {                                                     \
-      NI_CASE_HESSIAN(HessianType::None,     __VA_ARGS__)                   \
-      NI_CASE_HESSIAN(HessianType::Eye,      __VA_ARGS__)                   \
-      NI_DFLT_HESSIAN(HessianType::ESTATICS, __VA_ARGS__)                   \
+      FF_CASE_HESSIAN(HessianType::None,     __VA_ARGS__)                   \
+      FF_CASE_HESSIAN(HessianType::Eye,      __VA_ARGS__)                   \
+      FF_DFLT_HESSIAN(HessianType::ESTATICS, __VA_ARGS__)                   \
     }                                                                       \
   }()
 
 
 } // namespace device
-} // namespace ni
+} // namespace ff

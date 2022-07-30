@@ -3,8 +3,8 @@
 #define MIN(a,b) ((a) < (b) ? a : b)
 #define MAX(a,b) ((a) > (b) ? a : b)
 
-#ifndef NI_MAX_NUM_CHANNELS
-#  define NI_MAX_NUM_CHANNELS 512
+#ifndef FF_MAX_NUM_CHANNELS
+#  define FF_MAX_NUM_CHANNELS 512
 #endif
 
 #define CALL_MEMBER_FN(object,ptrToMember) ((object).*(ptrToMember))
@@ -26,9 +26,9 @@
 #define DEC_8 7
 #define DEC_9 8
 
-#ifdef NI_DEBUG
+#ifdef FF_DEBUG
 #  include <cstdio>
-#  define NI_TRACE(...) {printf(__VA_ARGS__); std::fflush(stdout);}
+#  define FF_TRACE(...) {printf(__VA_ARGS__); std::fflush(stdout);}
 #else 
-#  define NI_TRACE(...) {}
+#  define FF_TRACE(...) {}
 #endif

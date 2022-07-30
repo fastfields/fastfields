@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include "../bounds.h"
 
-#define NI_PRECOND_GRID_DECLARE(space) \
+#define FF_PRECOND_GRID_DECLARE(space) \
   namespace space { \
     at::Tensor precond_grid_impl( \
       at::Tensor hessian, const at::Tensor& gradient, at::Tensor solution, at::Tensor weight, \
@@ -12,8 +12,8 @@
   }
 
 
-namespace ni {
-NI_PRECOND_GRID_DECLARE(cpu)
-NI_PRECOND_GRID_DECLARE(cuda)
-NI_PRECOND_GRID_DECLARE(notimplemented)
-} // namespace ni
+namespace ff {
+FF_PRECOND_GRID_DECLARE(cpu)
+FF_PRECOND_GRID_DECLARE(cuda)
+FF_PRECOND_GRID_DECLARE(notimplemented)
+} // namespace ff

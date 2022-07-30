@@ -5,7 +5,7 @@
 #include <vector>
 #include <utility>
 
-namespace ni {
+namespace ff {
 
 at::Tensor fmg_prolongation(
   const at::Tensor                      & input, 

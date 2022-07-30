@@ -42,8 +42,8 @@ using c10::ArrayRef;
            INAME.size() > 1 ? INAME[1] :            \
            INAME.size() > 0 ? INAME[0] : DEFAULT)
 
-namespace ni {
-NI_NAMESPACE_DEVICE { // cpu / cuda / ...
+namespace ff {
+FF_NAMESPACE_DEVICE { // cpu / cuda / ...
 
 namespace { // anonymous namespace > everything inside has internal linkage
 
@@ -58,7 +58,7 @@ public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-  NI_HOST
+  FF_HOST
   PrecondAllocator(int dim, ArrayRef<double> absolute, 
                    ArrayRef<double> membrane, ArrayRef<double> bending,
                    ArrayRef<double> voxel_size, BoundVectorRef bound):
@@ -78,7 +78,7 @@ public:
 
   /* ~~~ FUNCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-  NI_HOST void ioset
+  FF_HOST void ioset
   (const Tensor& hess, const Tensor& grad, const Tensor& solution, const Tensor& weight)
   {
     init_all();
@@ -97,11 +97,11 @@ public:
 private:
 
   /* ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-  NI_HOST void init_all();
-  NI_HOST void init_gradient(const Tensor&);
-  NI_HOST void init_hessian(const Tensor&);
-  NI_HOST void init_solution(const Tensor&);
-  NI_HOST void init_weight(const Tensor&);
+  FF_HOST void init_all();
+  FF_HOST void init_gradient(const Tensor&);
+  FF_HOST void init_hessian(const Tensor&);
+  FF_HOST void init_solution(const Tensor&);
+  FF_HOST void init_weight(const Tensor&);
 
   /* ~~~ OPTIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
   int               dim;            // dimensionality (1 or 2 or 3)
@@ -146,7 +146,7 @@ private:
 };
 
 
-NI_HOST
+FF_HOST
 void PrecondAllocator::init_all()
 {
   N = C = CC = X = Y = Z = 1L;
@@ -158,7 +158,7 @@ void PrecondAllocator::init_all()
   grd_32b_ok = hes_32b_ok = sol_32b_ok = wgt_32b_ok = true;
 }
 
-NI_HOST
+FF_HOST
 void PrecondAllocator::init_gradient(const Tensor& input)
 {
   N       = input.size(0);
@@ -175,7 +175,7 @@ void PrecondAllocator::init_gradient(const Tensor& input)
   grd_32b_ok = tensorCanUse32BitIndexMath(input);
 }
 
-NI_HOST
+FF_HOST
 void PrecondAllocator::init_hessian(const Tensor& input)
 {
   if (!input.defined() || input.numel() == 0)
@@ -190,7 +190,7 @@ void PrecondAllocator::init_hessian(const Tensor& input)
   hes_32b_ok = tensorCanUse32BitIndexMath(input);
 }
 
-NI_HOST
+FF_HOST
 void PrecondAllocator::init_solution(const Tensor& input)
 {
   sol_sN  = input.stride(0);
@@ -202,7 +202,7 @@ void PrecondAllocator::init_solution(const Tensor& input)
   sol_32b_ok = tensorCanUse32BitIndexMath(input);
 }
 
-NI_HOST
+FF_HOST
 void PrecondAllocator::init_weight(const Tensor& weight)
 {
   if (!weight.defined() || weight.numel() == 0)
@@ -223,7 +223,7 @@ void PrecondAllocator::init_weight(const Tensor& weight)
 /* ========================================================================== */
 
 template <typename reduce_t, typename offset_t>
-NI_HOST NI_INLINE bool any(const reduce_t * v, offset_t C) {
+FF_HOST FF_INLINE bool any(const reduce_t * v, offset_t C) {
   for (offset_t c = 0; c < C; ++c, ++v) {
     if (*v) return true;
   }
@@ -250,7 +250,7 @@ public:
     Y(static_cast<offset_t>(info.Y)),
     Z(static_cast<offset_t>(info.Z)),
 
-#define INIT_ALLOC_INFO_5D(NAME) \
+#define IFFT_ALLOC_INFO_5D(NAME) \
     NAME##_sN(static_cast<offset_t>(info.NAME##_sN)), \
     NAME##_sC(static_cast<offset_t>(info.NAME##_sC)), \
     NAME##_sX(static_cast<offset_t>(info.NAME##_sX)), \
@@ -258,10 +258,10 @@ public:
     NAME##_sZ(static_cast<offset_t>(info.NAME##_sZ)), \
     NAME##_ptr(static_cast<scalar_t*>(info.NAME##_ptr))
 
-    INIT_ALLOC_INFO_5D(grd),
-    INIT_ALLOC_INFO_5D(hes),
-    INIT_ALLOC_INFO_5D(sol),
-    INIT_ALLOC_INFO_5D(wgt)
+    IFFT_ALLOC_INFO_5D(grd),
+    IFFT_ALLOC_INFO_5D(hes),
+    IFFT_ALLOC_INFO_5D(sol),
+    IFFT_ALLOC_INFO_5D(wgt)
   {
     if (C > MaxC) throw std::logic_error("C > MaxC. This should not happen.");
 
@@ -272,7 +272,7 @@ public:
  #endif
   }
 
-  NI_HOST void set_factors(ArrayRef<double> a, ArrayRef<double> m, ArrayRef<double> b)
+  FF_HOST void set_factors(ArrayRef<double> a, ArrayRef<double> m, ArrayRef<double> b)
   {
     offset_t na = static_cast<int32_t>(a.size());
     offset_t nm = static_cast<int32_t>(m.size());
@@ -296,7 +296,7 @@ public:
          + (wgt_ptr ? 16 : 0);
   } 
 
-  NI_HOST void set_kernel(double vx0, double vx1, double vx2) 
+  FF_HOST void set_kernel(double vx0, double vx1, double vx2) 
   {
     for (offset_t c = 0; c < C; ++c)
       w000[c] = static_cast<reduce_t>((
@@ -320,7 +320,7 @@ public:
   }
 
 #ifndef __CUDACC__
-  NI_HOST void set_precond() 
+  FF_HOST void set_precond() 
   {
 #   define ABSOLUTE 4
 #   define MEMBRANE 8
@@ -357,14 +357,14 @@ public:
 #ifdef __CUDACC__
   // Loop over voxels that belong to one CUDA block
   // This function is called by the CUDA kernel
-  NI_DEVICE void loop(int threadIdx, int blockIdx,
+  FF_DEVICE void loop(int threadIdx, int blockIdx,
                       int blockDim, int gridDim) const;
 #else
   // Loop over all voxels
   void loop() const;
 #endif
 
-  NI_HOST NI_DEVICE int64_t voxcount() const {
+  FF_HOST FF_DEVICE int64_t voxcount() const {
     return N * X * Y * Z;
   }
  
@@ -372,11 +372,11 @@ public:
 private:
 
   /* ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-  NI_DEVICE void precond(
+  FF_DEVICE void precond(
     offset_t x, offset_t y, offset_t z, offset_t n) const;
 
 #define DEFINE_PRECOND(SUFFIX) \
-  NI_DEVICE void precond##SUFFIX( \
+  FF_DEVICE void precond##SUFFIX( \
     offset_t x, offset_t y, offset_t z, offset_t n) const;
 #define DEFINE_PRECOND_DIM(DIM)        \
   DEFINE_PRECOND(DIM##d)               \
@@ -442,7 +442,7 @@ private:
 //                             LOOP
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond(
     offset_t x, offset_t y, offset_t z, offset_t n) const 
 {
@@ -481,7 +481,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond(
 
 #ifdef __CUDACC__
 
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop(
   int threadIdx, int blockIdx, int blockDim, int gridDim) const {
 
@@ -506,7 +506,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop(
 // This bit loops over all target voxels. We therefore need to
 // convert linear indices to multivariate indices. The way I do it
 // might not be optimal.
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_HOST
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_HOST
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop() const
 {
   // Parallelize across voxels
@@ -577,7 +577,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop() const
   GET_WARP2_(y, Y, 1) \
   GET_WARP2_(z, Z, 2)
 
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -595,7 +595,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d_rls_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -629,7 +629,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d_rls_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d_rls_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -682,7 +682,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d_rls_absolute(
   GET_WARP2_(x, X, 0) \
   GET_WARP2_(y, Y, 1)
 
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -700,7 +700,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d_rls_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -732,7 +732,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d_rls_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d_rls_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -771,7 +771,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d_rls_absolute(
 #undef  GET_WARP2
 #define GET_WARP2 GET_WARP2_(x, X, 0)
 
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond1d(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -789,7 +789,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond1d(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond1d_rls_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -819,7 +819,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond1d_rls_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond1d_rls_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -854,7 +854,7 @@ __global__ void precond_kernel(const PrecondImpl<scalar_t,offset_t,reduce_t,hess
 }
 #endif
 
-NI_HOST std::tuple<Tensor, Tensor, Tensor>
+FF_HOST std::tuple<Tensor, Tensor, Tensor>
 prepare_tensors(const Tensor & gradient,
                 Tensor hessian, Tensor solution, Tensor weight)
 {
@@ -896,10 +896,10 @@ prepare_tensors(const Tensor & gradient,
     static const int32_t MaxC = power_of_two<LogMaxC>::value;
 
     template <typename A, typename H, typename S>
-    static NI_HOST void 
+    static FF_HOST void 
     f(const A & alloc, const H & hessian_type, const S & scalar_type) 
     {
-      NI_DISPATCH_HESSIAN_TYPE(hessian_type, [&] {
+      FF_DISPATCH_HESSIAN_TYPE(hessian_type, [&] {
         AT_DISPATCH_FLOATING_TYPES(scalar_type, "precond_impl", [&] {
           using utils_t = HessianUtils<hessian_t, MaxC>;
 #ifdef __CUDACC__
@@ -974,7 +974,7 @@ prepare_tensors(const Tensor & gradient,
 // Note that dispatch<0, 10> means that we support channels in the 
 // range [2**0 -> 2**9] (included) == [1 -> 512]
 
-NI_HOST Tensor precond_impl(
+FF_HOST Tensor precond_impl(
   Tensor hessian, const Tensor& gradient, Tensor solution, Tensor weight,
   ArrayRef<double> absolute, ArrayRef<double> membrane, ArrayRef<double> bending, 
   ArrayRef<double> voxel_size, BoundVectorRef bound)
@@ -1004,7 +1004,7 @@ NI_HOST Tensor precond_impl(
 
 namespace notimplemented {
 
-NI_HOST Tensor precond_impl(
+FF_HOST Tensor precond_impl(
   Tensor hessian, const Tensor& gradient, Tensor solution, Tensor weight,
   ArrayRef<double> absolute, ArrayRef<double> membrane, ArrayRef<double> bending,
   ArrayRef<double> voxel_size, BoundVectorRef bound)
@@ -1015,4 +1015,4 @@ NI_HOST Tensor precond_impl(
 
 } // namespace notimplemented
 
-} // namespace ni
+} // namespace ff

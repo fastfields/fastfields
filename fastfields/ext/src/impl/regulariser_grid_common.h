@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include "../bounds.h"
 
-#define NI_REGULARISER_GRID_DECLARE(space) \
+#define FF_REGULARISER_GRID_DECLARE(space) \
   namespace space { \
     at::Tensor regulariser_grid_impl( \
       const at::Tensor& input, at::Tensor output, at::Tensor weight, at::Tensor hessian, \
@@ -12,8 +12,8 @@
   }
 
 
-namespace ni {
-NI_REGULARISER_GRID_DECLARE(cpu)
-NI_REGULARISER_GRID_DECLARE(cuda)
-NI_REGULARISER_GRID_DECLARE(notimplemented)
-} // namespace ni
+namespace ff {
+FF_REGULARISER_GRID_DECLARE(cpu)
+FF_REGULARISER_GRID_DECLARE(cuda)
+FF_REGULARISER_GRID_DECLARE(notimplemented)
+} // namespace ff

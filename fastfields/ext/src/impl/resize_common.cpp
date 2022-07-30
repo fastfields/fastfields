@@ -1,5 +1,5 @@
 /*
-WARNING
+WARFFNG
 
 The "restrict" functions are not very robust.
 I'd like to reimplement restrict similarly to what I did in "multires",
@@ -36,8 +36,8 @@ some thinking to work with arbitrary scaling factors.
 // maximum number of channels
 // > not used in mode isotropic nearest/linear
 // We override the (small) default
-#undef  NI_MAX_NUM_CHANNELS
-#define NI_MAX_NUM_CHANNELS 1024
+#undef  FF_MAX_NUM_CHANNELS
+#define FF_MAX_NUM_CHANNELS 1024
 
 #define VEC_UNFOLD(ONAME, INAME, DEFAULT)             \
   ONAME##0(INAME.size() > 0 ? INAME[0] : DEFAULT),  \
@@ -52,8 +52,8 @@ using at::TensorOptions;
 using c10::IntArrayRef;
 using c10::ArrayRef;
 
-namespace ni {
-NI_NAMESPACE_DEVICE { // cpu / cuda / ...
+namespace ff {
+FF_NAMESPACE_DEVICE { // cpu / cuda / ...
 
 namespace { // anonymous namespace > everything inside has internal linkage
 
@@ -66,7 +66,7 @@ public:
 
   // ~~~ CONSTRUCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  NI_HOST
+  FF_HOST
   ResizeAllocator(int dim, BoundVectorRef bound,
                     InterpolationVectorRef interpolation,
                     ArrayRef<double> shift,
@@ -86,7 +86,7 @@ public:
   // ~~~ FUNCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-  NI_HOST void ioset
+  FF_HOST void ioset
   (const Tensor& source, const Tensor& target)
   {
     init_all();
@@ -103,9 +103,9 @@ public:
 private:
 
   // ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  NI_HOST void init_all();
-  NI_HOST void init_source(const Tensor& source);
-  NI_HOST void init_target(const Tensor& target);
+  FF_HOST void init_all();
+  FF_HOST void init_source(const Tensor& source);
+  FF_HOST void init_target(const Tensor& target);
 
   // ~~~ OPTIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   int               dim;            // dimensionality (2 or 3)
@@ -150,11 +150,11 @@ private:
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//                          INITIALISATION
+//                          IFFTIALISATION
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-NI_HOST
+FF_HOST
 void ResizeAllocator::init_all()
 {
   N = C = 1L;
@@ -164,7 +164,7 @@ void ResizeAllocator::init_all()
   src_32b_ok = tgt_32b_ok = true;
 }
 
-NI_HOST
+FF_HOST
 void ResizeAllocator::init_source(const Tensor& input)
 {
   N       = input.size(0);
@@ -181,7 +181,7 @@ void ResizeAllocator::init_source(const Tensor& input)
   src_32b_ok = tensorCanUse32BitIndexMath(input);
 }
 
-NI_HOST
+FF_HOST
 void ResizeAllocator::init_target(const Tensor& input)
 {
   tgt_X   = input.size(2);
@@ -224,7 +224,7 @@ public:
     COPY_FROM_INFO(N),
     COPY_FROM_INFO(C),
 
-#define INIT_ALLOC_INFO_5D(NAME) \
+#define IFFT_ALLOC_INFO_5D(NAME) \
     NAME##_X(static_cast<offset_t>(info.NAME##_X)),   \
     NAME##_Y(static_cast<offset_t>(info.NAME##_Y)),   \
     NAME##_Z(static_cast<offset_t>(info.NAME##_Z)),   \
@@ -235,8 +235,8 @@ public:
     NAME##_sZ(static_cast<offset_t>(info.NAME##_sZ)), \
     NAME##_ptr(static_cast<scalar_t*>(info.NAME##_ptr))
 
-    INIT_ALLOC_INFO_5D(src),
-    INIT_ALLOC_INFO_5D(tgt)
+    IFFT_ALLOC_INFO_5D(src),
+    IFFT_ALLOC_INFO_5D(tgt)
   {
 #ifndef __CUDACC__
       set_resize();
@@ -244,7 +244,7 @@ public:
   }
 
 #ifndef __CUDACC__
-  NI_HOST NI_INLINE void set_resize() 
+  FF_HOST FF_INLINE void set_resize() 
   {
 #   define ADJ 4
 #   define ISO 8
@@ -342,14 +342,14 @@ public:
 #ifdef __CUDACC__
   // Loop over voxels that belong to one CUDA block
   // This function is called by the CUDA kernel
-  NI_DEVICE void loop(int threadIdx, int blockIdx, 
+  FF_DEVICE void loop(int threadIdx, int blockIdx, 
                       int blockDim, int gridDim) const;
 #else
   // Loop over all voxels
   void loop() const;
 #endif
 
-  NI_HOST NI_DEVICE int64_t voxcount() const { 
+  FF_HOST FF_DEVICE int64_t voxcount() const { 
     return N * tgt_X * tgt_Y * tgt_Z;
   }
 
@@ -357,11 +357,11 @@ private:
 
   // ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  NI_DEVICE NI_INLINE void resize(
+  FF_DEVICE FF_INLINE void resize(
     offset_t w, offset_t h, offset_t d, offset_t n) const;
 
 #define DECLARE_RESIZE(name) \
-  NI_DEVICE void name( \
+  FF_DEVICE void name( \
     offset_t w, offset_t h, offset_t d, offset_t n) const;
 
   DECLARE_RESIZE(resize1d)
@@ -436,7 +436,7 @@ private:
 //                             LOOP
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize(
     offset_t x, offset_t y, offset_t z, offset_t n) const {
 #ifdef __CUDACC__
@@ -536,7 +536,7 @@ void ResizeImpl<scalar_t,offset_t>::resize(
 
 #ifdef __CUDACC__
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::loop(
   int threadIdx, int blockIdx, int blockDim, int gridDim) const {
 
@@ -567,7 +567,7 @@ void ResizeImpl<scalar_t,offset_t>::loop(
 //
 // TODO: check that the default grain size is optimal. We do quite a lot
 //       of compute per voxel, so a smaller value might be better suited.
-template <typename scalar_t, typename offset_t> NI_HOST
+template <typename scalar_t, typename offset_t> FF_HOST
 void ResizeImpl<scalar_t,offset_t>::loop() const
 {
   if (!has_atomic_add<scalar_t>::value && (do_adjoint))
@@ -672,7 +672,7 @@ void ResizeImpl<scalar_t,offset_t>::loop() const
   scalar_t *tgt_ptr_NCXYZ0 = tgt_ptr + n * tgt_sN + w * tgt_sX    \
                                      + h * tgt_sY + d * tgt_sZ;
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize3d(
   offset_t w, offset_t h, offset_t d, offset_t n) const
 {
@@ -704,13 +704,13 @@ void ResizeImpl<scalar_t,offset_t>::resize3d(
   } // z
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict3d(
   offset_t w, offset_t h, offset_t d, offset_t n) const
 {
   GET_INDEX
 
-  scalar_t target[NI_MAX_NUM_CHANNELS];
+  scalar_t target[FF_MAX_NUM_CHANNELS];
   scalar_t * tgt_ptr_NCXYZ = tgt_ptr_NCXYZ0;
   for (offset_t c = 0; c < C; ++c, tgt_ptr_NCXYZ += tgt_sC)
     target[c] = *tgt_ptr_NCXYZ;
@@ -777,7 +777,7 @@ void ResizeImpl<scalar_t,offset_t>::restrict3d(
   scalar_t *tgt_ptr_NCXYZ0 = tgt_ptr + n * tgt_sN + w * tgt_sX    \
                                      + h * tgt_sY;
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize2d(offset_t w, offset_t h, offset_t d, offset_t n) const 
 {
   GET_INDEX
@@ -803,12 +803,12 @@ void ResizeImpl<scalar_t,offset_t>::resize2d(offset_t w, offset_t h, offset_t d,
   } // y
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict2d(offset_t w, offset_t h, offset_t d, offset_t n) const 
 {
   GET_INDEX
 
-  scalar_t target[NI_MAX_NUM_CHANNELS];
+  scalar_t target[FF_MAX_NUM_CHANNELS];
   scalar_t * tgt_ptr_NCXYZ = tgt_ptr_NCXYZ0;
   for (offset_t c = 0; c < C; ++c, tgt_ptr_NCXYZ += tgt_sC)
     target[c] = *tgt_ptr_NCXYZ;
@@ -855,7 +855,7 @@ void ResizeImpl<scalar_t,offset_t>::restrict2d(offset_t w, offset_t h, offset_t 
   scalar_t *src_ptr_NC0    = src_ptr  + n * src_sN;               \
   scalar_t *tgt_ptr_NCXYZ0 = tgt_ptr + n * tgt_sN + w * tgt_sX;
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize1d(offset_t w, offset_t h, offset_t d, offset_t n) const 
 {
   GET_INDEX
@@ -874,12 +874,12 @@ void ResizeImpl<scalar_t,offset_t>::resize1d(offset_t w, offset_t h, offset_t d,
   } // x
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict1d(offset_t w, offset_t h, offset_t d, offset_t n) const
 {
   GET_INDEX
 
-  scalar_t target[NI_MAX_NUM_CHANNELS];
+  scalar_t target[FF_MAX_NUM_CHANNELS];
   scalar_t * tgt_ptr_NCXYZ = tgt_ptr_NCXYZ0;
   for (offset_t c = 0; c < C; ++c, tgt_ptr_NCXYZ += tgt_sC)
     target[c] = *tgt_ptr_NCXYZ;
@@ -1040,7 +1040,7 @@ void ResizeImpl<scalar_t,offset_t>::restrict1d(offset_t w, offset_t h, offset_t 
                           + h * tgt_sY + d * tgt_sZ;  \
   scalar_t *src_ptr_NC = src_ptr + n * src_sN;
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize3d_quadratic(
   offset_t w, offset_t h, offset_t d, offset_t n) const
 {
@@ -1083,7 +1083,7 @@ void ResizeImpl<scalar_t,offset_t>::resize3d_quadratic(
   }
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict3d_quadratic(
   offset_t w, offset_t h, offset_t d, offset_t n) const
 {
@@ -1122,13 +1122,13 @@ void ResizeImpl<scalar_t,offset_t>::restrict3d_quadratic(
   }
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize2d_quadratic(offset_t w, offset_t h, offset_t d, offset_t n) const {}
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict2d_quadratic(offset_t w, offset_t h, offset_t d, offset_t n) const {}
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize1d_quadratic(offset_t w, offset_t h, offset_t d, offset_t n) const {}
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict1d_quadratic(offset_t w, offset_t h, offset_t d, offset_t n) const {}
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1204,7 +1204,7 @@ void ResizeImpl<scalar_t,offset_t>::restrict1d_quadratic(offset_t w, offset_t h,
                           + h * tgt_sY + d * tgt_sZ;  \
   scalar_t *src_ptr_NC = src_ptr + n * src_sN;
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize3d_linear(
   offset_t w, offset_t h, offset_t d, offset_t n) const
 {
@@ -1223,7 +1223,7 @@ void ResizeImpl<scalar_t,offset_t>::resize3d_linear(
   }
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict3d_linear(
   offset_t w, offset_t h, offset_t d, offset_t n) const
 {
@@ -1279,7 +1279,7 @@ void ResizeImpl<scalar_t,offset_t>::restrict3d_linear(
                           + n * tgt_sN + w * tgt_sX + h * tgt_sY;  \
   scalar_t *src_ptr_NC = src_ptr + n * src_sN;
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize2d_linear(offset_t w, offset_t h, offset_t d, offset_t n) const 
 {
   GET_INDEX
@@ -1293,7 +1293,7 @@ void ResizeImpl<scalar_t,offset_t>::resize2d_linear(offset_t w, offset_t h, offs
   }
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict2d_linear(offset_t w, offset_t h, offset_t d, offset_t n) const
 {
   GET_INDEX
@@ -1323,7 +1323,7 @@ void ResizeImpl<scalar_t,offset_t>::restrict2d_linear(offset_t w, offset_t h, of
                           + n * tgt_sN + w * tgt_sX + h * tgt_sY;  \
   scalar_t *src_ptr_NC = src_ptr + n * src_sN;
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize1d_linear(offset_t w, offset_t h, offset_t d, offset_t n) const  
 {
   GET_INDEX
@@ -1335,7 +1335,7 @@ void ResizeImpl<scalar_t,offset_t>::resize1d_linear(offset_t w, offset_t h, offs
   }
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict1d_linear(offset_t w, offset_t h, offset_t d, offset_t n) const 
 {
   GET_INDEX
@@ -1371,7 +1371,7 @@ void ResizeImpl<scalar_t,offset_t>::restrict1d_linear(offset_t w, offset_t h, of
   scalar_t *src_ptr_NC = src_ptr + n * src_sN;
 
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize3d_nearest(
   offset_t w, offset_t h, offset_t d, offset_t n) const
 {
@@ -1381,7 +1381,7 @@ void ResizeImpl<scalar_t,offset_t>::resize3d_nearest(
     *tgt_ptr_NCXYZ = bound::get(src_ptr_NC, o, s);
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict3d_nearest(
   offset_t w, offset_t h, offset_t d, offset_t n) const
 {
@@ -1405,7 +1405,7 @@ void ResizeImpl<scalar_t,offset_t>::restrict3d_nearest(
   scalar_t *src_ptr_NC = src_ptr + n * src_sN;
 
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize2d_nearest(offset_t w, offset_t h, offset_t d, offset_t n) const 
 {
   GET_INDEX
@@ -1414,7 +1414,7 @@ void ResizeImpl<scalar_t,offset_t>::resize2d_nearest(offset_t w, offset_t h, off
     *tgt_ptr_NCXYZ = bound::get(src_ptr_NC, o, s);
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict2d_nearest(offset_t w, offset_t h, offset_t d, offset_t n) const 
 {
   GET_INDEX
@@ -1431,7 +1431,7 @@ void ResizeImpl<scalar_t,offset_t>::restrict2d_nearest(offset_t w, offset_t h, o
   scalar_t *tgt_ptr_NCXYZ = tgt_ptr + n * tgt_sN + w * tgt_sX + h * tgt_sY;  \
   scalar_t *src_ptr_NC = src_ptr + n * src_sN;
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::resize1d_nearest(offset_t w, offset_t h, offset_t d, offset_t n) const 
 {
   GET_INDEX
@@ -1440,7 +1440,7 @@ void ResizeImpl<scalar_t,offset_t>::resize1d_nearest(offset_t w, offset_t h, off
     *tgt_ptr_NCXYZ = bound::get(src_ptr_NC, ix, sx);
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void ResizeImpl<scalar_t,offset_t>::restrict1d_nearest(offset_t w, offset_t h, offset_t d, offset_t n) const 
 {
   GET_INDEX
@@ -1467,7 +1467,7 @@ __global__ void resize_kernel(const ResizeImpl<scalar_t,offset_t> * f) {
 //                    FUNCTIONAL FORM WITH DISPATCH
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-NI_HOST NI_INLINE void
+FF_HOST FF_INLINE void
 check_same_nonspatial(Tensor source, Tensor target)
 {
   bool same_nonspatial = (source.dim()   == target.dim())    &&
@@ -1486,7 +1486,7 @@ check_same_nonspatial(Tensor source, Tensor target)
   }
 }
 
-NI_HOST NI_INLINE std::tuple<Tensor, Tensor>
+FF_HOST FF_INLINE std::tuple<Tensor, Tensor>
 prepare_tensors(Tensor source, Tensor target, ArrayRef<double> factor, bool do_adjoint)
 {
   bool source_defined = (source.defined() && source.numel() > 0);
@@ -1543,7 +1543,7 @@ prepare_tensors(Tensor source, Tensor target, ArrayRef<double> factor, bool do_a
   return std::tuple<Tensor, Tensor>(source, target);
 }
 
-NI_HOST NI_INLINE  std::pair<double, double>
+FF_HOST FF_INLINE  std::pair<double, double>
 prepare_affine(double factor, double Ds, double Dt, GridAlignType mode)
 {
   double shift = 0., scale = 1./factor;
@@ -1565,7 +1565,7 @@ prepare_affine(double factor, double Ds, double Dt, GridAlignType mode)
   return std::make_pair(shift, scale);
 }
 
-NI_HOST NI_INLINE std::pair<std::vector<double>,  std::vector<double> >
+FF_HOST FF_INLINE std::pair<std::vector<double>,  std::vector<double> >
 prepare_affines(Tensor source, Tensor target, ArrayRef<double> factor, GridAlignVectorRef mode, bool do_adjoint)
 {
 
@@ -1606,7 +1606,7 @@ prepare_affines(Tensor source, Tensor target, ArrayRef<double> factor, GridAlign
 
 // ~~~ CUDA ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  
-NI_HOST
+FF_HOST
 Tensor resize_impl(
   Tensor source, Tensor target, ArrayRef<double> factor,
   BoundVectorRef bound, InterpolationVectorRef interpolation, 
@@ -1663,7 +1663,7 @@ Tensor resize_impl(
 
 // ~~~ CPU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-NI_HOST
+FF_HOST
 Tensor resize_impl(
   Tensor source, Tensor target, ArrayRef<double> factor,
   BoundVectorRef bound, InterpolationVectorRef interpolation,  
@@ -1703,7 +1703,7 @@ Tensor resize_impl(
 
 namespace notimplemented {
 
-NI_HOST
+FF_HOST
 Tensor resize_impl(
   Tensor source, Tensor target, ArrayRef<double> factor,
   BoundVectorRef bound, InterpolationVectorRef interpolation, 
@@ -1714,4 +1714,4 @@ Tensor resize_impl(
 
 } // namespace notimplemented
 
-} // namespace ni
+} // namespace ff

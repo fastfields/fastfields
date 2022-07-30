@@ -3,7 +3,7 @@
 #include <vector>
 #include <utility>
 
-namespace ni {
+namespace ff {
 
 at::Tensor pcg(
   const at::Tensor& hessian,  
@@ -31,4 +31,4 @@ at::Tensor pcg_grid(
   const std::vector<BoundType> & bound, 
   int64_t nb_iter, double tol = 0.);
 
-}
+} // namespace ff

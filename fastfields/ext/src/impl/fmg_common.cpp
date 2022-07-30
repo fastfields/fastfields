@@ -22,8 +22,8 @@ using std::vector;
 // using at::indexing::Slice;
 
 
-namespace ni {
-NI_NAMESPACE_DEVICE {
+namespace ff {
+FF_NAMESPACE_DEVICE {
 
 /* =========================================================== */
 /*                            UTILS                            */
@@ -109,7 +109,7 @@ namespace {
       vx1[d] = vx0[d] * (static_cast<double>(shape0[d]) / static_cast<double>(shape1[d]));
   }
 
-#ifdef NI_DEBUG
+#ifdef FF_DEBUG
   inline bool allfinite(const Tensor & x) {
     return at::all(at::isfinite(x)).item<bool>();
   }
@@ -573,4 +573,4 @@ namespace notimplemented {
   }
 }
 
-} // namespace ni
+} // namespace ff

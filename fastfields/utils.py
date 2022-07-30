@@ -92,7 +92,7 @@ else:
 
 
 def convert_bound(bound, as_type='str'):
-    """Convert boundary type to niTorch's convention.
+    """Convert boundary type to FastFields's convention.
 
     Parameters
     ----------
@@ -104,7 +104,7 @@ def convert_bound(bound, as_type='str'):
     Returns
     -------
     bound : [list of] str or BoundType
-        Boundary condition in NITorch's convention
+        Boundary condition in FastFields's convention
 
     """
     intype = type(bound)
@@ -141,7 +141,7 @@ def convert_bound(bound, as_type='str'):
 
 
 def convert_interpolation(inter, as_type='str'):
-    """Convert interpolation order to NITorch's convention.
+    """Convert interpolation order to FastFields's convention.
 
     Parameters
     ----------
@@ -189,7 +189,7 @@ def convert_interpolation(inter, as_type='str'):
 
 
 def convert_align(align, as_type='str'):
-    """Convert alignment mode to niTorch's convention.
+    """Convert alignment mode to FastFields's convention.
 
     Parameters
     ----------
@@ -201,7 +201,7 @@ def convert_align(align, as_type='str'):
     Returns
     -------
     align : [list of] str or GridAlignType
-        Alignment mode in NITorch's convention
+        Alignment mode in FastFields's convention
 
     """
 

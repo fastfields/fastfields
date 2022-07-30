@@ -4,7 +4,7 @@
 #include "../bounds.h"
 
 
-#define NI_PCG_DECLARE(space) \
+#define FF_PCG_DECLARE(space) \
   namespace space { \
     at::Tensor pcg_impl(const at::Tensor & hessian, \
                 const at::Tensor & gradient, \
@@ -31,8 +31,8 @@
   }
 
 
-namespace ni {
-NI_PCG_DECLARE(cpu)
-NI_PCG_DECLARE(cuda)
-NI_PCG_DECLARE(notimplemented)
-} // namespace ni
+namespace ff {
+FF_PCG_DECLARE(cpu)
+FF_PCG_DECLARE(cuda)
+FF_PCG_DECLARE(notimplemented)
+} // namespace ff

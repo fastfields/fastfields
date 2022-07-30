@@ -4,7 +4,7 @@
 #include <vector>
 #include <utility>
 
-#ifndef NI_WITH_CUDA
+#ifndef FF_WITH_CUDA
 #  define cuda notimplemented
 #endif
 
@@ -14,7 +14,7 @@ using c10::ArrayRef;
 using std::vector;
 
 
-namespace ni {
+namespace ff {
 
 typedef at::Tensor (*ResizeFn)( \
       Tensor source, Tensor target, \
@@ -25,20 +25,20 @@ Tensor fmg_prolongation(const Tensor             & input,
                         const Tensor             & output,
                         const vector<BoundType>  & bound) 
 {
-  NI_CHECK_DEFINED(input)
+  FF_CHECK_DEFINED(input)
   auto input_opt = input.options();
-  NI_CHECK_OPT_STRIDED(input_opt)
-  NI_CHECK_1D_2D_OR_3D(input)
-  NI_CHECK_NOT_EMPTY(input)
+  FF_CHECK_OPT_STRIDED(input_opt)
+  FF_CHECK_1D_2D_OR_3D(input)
+  FF_CHECK_NOT_EMPTY(input)
 
   if (output.defined() && output.numel() > 0)
   {
     auto output_opt  = output.options();
-    NI_CHECK_OPT_STRIDED(output_opt)
-    NI_CHECK_OPT_SAME_DEVICE(input_opt, output_opt)
-    NI_CHECK_OPT_SAME_DTYPE(input_opt, output_opt)
-    NI_CHECK_1D_2D_OR_3D(output)
-    NI_CHECK_NOT_EMPTY(output)
+    FF_CHECK_OPT_STRIDED(output_opt)
+    FF_CHECK_OPT_SAME_DEVICE(input_opt, output_opt)
+    FF_CHECK_OPT_SAME_DTYPE(input_opt, output_opt)
+    FF_CHECK_1D_2D_OR_3D(output)
+    FF_CHECK_NOT_EMPTY(output)
   }
 
   ResizeFn multires_impl = input.is_cuda() ? cuda::multires_impl : cpu::multires_impl;
@@ -52,20 +52,20 @@ Tensor fmg_restriction(const Tensor             & input,
                        const Tensor             & output,
                        const vector<BoundType>  & bound) 
 {
-  NI_CHECK_DEFINED(input)
+  FF_CHECK_DEFINED(input)
   auto input_opt = input.options();
-  NI_CHECK_OPT_STRIDED(input_opt)
-  NI_CHECK_1D_2D_OR_3D(input)
-  NI_CHECK_NOT_EMPTY(input)
+  FF_CHECK_OPT_STRIDED(input_opt)
+  FF_CHECK_1D_2D_OR_3D(input)
+  FF_CHECK_NOT_EMPTY(input)
 
   if (output.defined() && output.numel() > 0)
   {
     auto output_opt  = output.options();
-    NI_CHECK_OPT_STRIDED(output_opt)
-    NI_CHECK_OPT_SAME_DEVICE(input_opt, output_opt)
-    NI_CHECK_OPT_SAME_DTYPE(input_opt, output_opt)
-    NI_CHECK_1D_2D_OR_3D(output)
-    NI_CHECK_NOT_EMPTY(output)
+    FF_CHECK_OPT_STRIDED(output_opt)
+    FF_CHECK_OPT_SAME_DEVICE(input_opt, output_opt)
+    FF_CHECK_OPT_SAME_DTYPE(input_opt, output_opt)
+    FF_CHECK_1D_2D_OR_3D(output)
+    FF_CHECK_NOT_EMPTY(output)
   }
 
   ResizeFn multires_impl = input.is_cuda() ? cuda::multires_impl : cpu::multires_impl;
@@ -75,4 +75,4 @@ Tensor fmg_restriction(const Tensor             & input,
                        true);
 }
 
-} // namespace ni
+} // namespace ff

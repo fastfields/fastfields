@@ -50,8 +50,8 @@
 // maximum number of channels
 // > not used in mode isotropic nearest/linear
 // We override the (small) default
-#undef  NI_MAX_NUM_CHANNELS
-#define NI_MAX_NUM_CHANNELS 1024
+#undef  FF_MAX_NUM_CHANNELS
+#define FF_MAX_NUM_CHANNELS 1024
 
 // This parameter allows for a little bit of tolerance when considering 
 // a coordinate as "out-of-bound" (if !extrapolate)
@@ -61,8 +61,8 @@ using at::Tensor;
 using at::TensorOptions;
 using c10::IntArrayRef;
 
-namespace ni {
-NI_NAMESPACE_DEVICE { // cpu / cuda / ...
+namespace ff {
+FF_NAMESPACE_DEVICE { // cpu / cuda / ...
 
 namespace { // anonymous namespace > everything inside has internal linkage
 
@@ -87,7 +87,7 @@ public:
 
   // ~~~ CONSTRUCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  NI_HOST
+  FF_HOST
   PushPullAllocator(int dim, BoundVectorRef bound,
                     InterpolationVectorRef interpolation,
                     int extrapolate, bool do_pull, bool do_push,
@@ -122,7 +122,7 @@ public:
   // TODO: remove constructors that take non-vector Bound/Interpolation
   //       as they are not used anymore.
 
-  NI_HOST
+  FF_HOST
   PushPullAllocator(int dim, BoundType bound, InterpolationVectorRef interpolation,
                     int extrapolate, bool do_pull, bool do_push,
                     bool do_count, bool do_grad, bool do_sgrad):
@@ -150,7 +150,7 @@ public:
           interpolation0 == interpolation2;
   }
 
-  NI_HOST
+  FF_HOST
   PushPullAllocator(int dim, BoundVectorRef bound, InterpolationType interpolation,
                     int extrapolate, bool do_pull, bool do_push,
                     bool do_count, bool do_grad, bool do_sgrad):
@@ -175,7 +175,7 @@ public:
           interpolation0 == interpolation2;
   }
 
-  NI_HOST
+  FF_HOST
   PushPullAllocator(int dim, BoundType bound, InterpolationType interpolation,
                     int extrapolate, bool do_pull, bool do_push,
                     bool do_count, bool do_grad, bool do_sgrad):
@@ -204,7 +204,7 @@ public:
   // - do_push  -> fails
   // - do_grad  -> return J(source)[grid]
   // - do_sgrad -> return H(source)[grid]
-  NI_HOST void ioset
+  FF_HOST void ioset
   (const Tensor& source, const Tensor& grid)
   {
     init_all();
@@ -218,7 +218,7 @@ public:
   // - do_push  -> return push(target, grid, source.shape)
   // - do_grad  -> return J(source)[grid]
   // - do_sgrad -> return H(source)[grid]
-  NI_HOST void ioset
+  FF_HOST void ioset
   (const Tensor& source, const Tensor& grid, const Tensor& target)
   {
     init_all();
@@ -233,7 +233,7 @@ public:
   // - do_push  -> return push(target, grid, source_size)
   // - do_grad  -> fails
   // - do_sgrad -> fails
-  NI_HOST void ioset
+  FF_HOST void ioset
   (IntArrayRef source_size, const Tensor& grid, const Tensor& target)
   {
     init_all();
@@ -248,7 +248,7 @@ public:
   // - do_push  -> return push(ones, grid, source_size)
   // - do_grad  -> fails
   // - do_sgrad -> fails
-  NI_HOST void ioset
+  FF_HOST void ioset
   (IntArrayRef source_size, const Tensor& grid)
   {
     init_all();
@@ -303,12 +303,12 @@ private:
   }
 
   // ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  NI_HOST void init_all();
-  NI_HOST void init_source(const Tensor& source);
-  NI_HOST void init_source(IntArrayRef source_size);
-  NI_HOST void init_grid(const Tensor& grid);
-  NI_HOST void init_target(const Tensor& target);
-  NI_HOST void init_output();
+  FF_HOST void init_all();
+  FF_HOST void init_source(const Tensor& source);
+  FF_HOST void init_source(IntArrayRef source_size);
+  FF_HOST void init_grid(const Tensor& grid);
+  FF_HOST void init_target(const Tensor& target);
+  FF_HOST void init_output();
 
   // ~~~ OPTIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   int               dim;            // dimensionality (2 or 3)
@@ -385,10 +385,10 @@ private:
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//                          INITIALISATION
+//                          IFFTIALISATION
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-NI_HOST
+FF_HOST
 void PushPullAllocator::init_all()
 {
   src_opt = grid_opt = trgt_opt = TensorOptions();
@@ -405,7 +405,7 @@ void PushPullAllocator::init_all()
   src_32b_ok = trgt_32b_ok = grid_32b_ok = out_32b_ok = grad_32b_ok = true;
 }
 
-NI_HOST
+FF_HOST
 void PushPullAllocator::init_source(const Tensor& source)
 {
   N       = source.size(0);
@@ -423,7 +423,7 @@ void PushPullAllocator::init_source(const Tensor& source)
   src_32b_ok = tensorCanUse32BitIndexMath(source);
 }
 
-NI_HOST
+FF_HOST
 void PushPullAllocator::init_source(IntArrayRef source_size)
 {
   src_X = source_size[0];
@@ -431,7 +431,7 @@ void PushPullAllocator::init_source(IntArrayRef source_size)
   src_Z = dim < 3 ? 1L : source_size[2];
 }
 
-NI_HOST
+FF_HOST
 void PushPullAllocator::init_grid(const Tensor& grid)
 {
   N        = grid.size(0);
@@ -448,7 +448,7 @@ void PushPullAllocator::init_grid(const Tensor& grid)
   grid_32b_ok = tensorCanUse32BitIndexMath(grid);
 }
 
-NI_HOST
+FF_HOST
 void PushPullAllocator::init_target(const Tensor& target)
 {
   N        = target.size(0);
@@ -472,7 +472,7 @@ void PushPullAllocator::init_target(const Tensor& target)
   trgt_32b_ok = tensorCanUse32BitIndexMath(target);
 }
 
-NI_HOST
+FF_HOST
 void PushPullAllocator::init_output()
 {
   output.clear();
@@ -640,7 +640,7 @@ public:
 
   std::deque<Tensor> output;
 
-  // NI_HOST NI_DEVICE void printInfo() const {
+  // FF_HOST FF_DEVICE void printInfo() const {
   //   printf("dim: %d\n", dim);
   //   printf("do_pull:  %d\n", do_pull);
   //   printf("do_push:  %d\n", do_push);
@@ -667,69 +667,69 @@ public:
 #ifdef __CUDACC__
   // Loop over voxels that belong to one CUDA block
   // This function is called by the CUDA kernel
-  NI_DEVICE void loop(int threadIdx, int blockIdx, 
+  FF_DEVICE void loop(int threadIdx, int blockIdx, 
                       int blockDim, int gridDim) const;
 #else
   // Loop over all voxels
   void loop() const;
 #endif
 
-  NI_HOST NI_DEVICE int64_t voxcount() const { 
+  FF_HOST FF_DEVICE int64_t voxcount() const { 
     return N * trgt_X * trgt_Y * trgt_Z;
   }
 
 private:
 
   // ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  NI_DEVICE void check1d(offset_t w, offset_t n) const;
-  NI_DEVICE void check2d(offset_t w, offset_t h, offset_t n) const;
-  NI_DEVICE void check3d(offset_t w, offset_t h, offset_t d, offset_t n) const;
-  NI_DEVICE void interpolate1d(
+  FF_DEVICE void check1d(offset_t w, offset_t n) const;
+  FF_DEVICE void check2d(offset_t w, offset_t h, offset_t n) const;
+  FF_DEVICE void check3d(offset_t w, offset_t h, offset_t d, offset_t n) const;
+  FF_DEVICE void interpolate1d(
     scalar_t x, offset_t w, offset_t n) const;
-  NI_DEVICE void interpolate1d_nearest(
+  FF_DEVICE void interpolate1d_nearest(
     scalar_t x, offset_t w, offset_t n) const;
-  NI_DEVICE void interpolate1d_linear(
+  FF_DEVICE void interpolate1d_linear(
     scalar_t x, offset_t w, offset_t n) const;
-  NI_DEVICE void interpolate1d_sliding(
+  FF_DEVICE void interpolate1d_sliding(
     scalar_t x, offset_t w, offset_t n) const {/*TODO*/}
-  NI_DEVICE void interpolate1d_sliding_nearest(
+  FF_DEVICE void interpolate1d_sliding_nearest(
     scalar_t x, offset_t w, offset_t n) const {/*TODO*/}
-  NI_DEVICE void interpolate1d_sliding_linear(
+  FF_DEVICE void interpolate1d_sliding_linear(
     scalar_t x, offset_t w, offset_t n) const {/*TODO*/}
-  NI_DEVICE void interpolate2d(
+  FF_DEVICE void interpolate2d(
     scalar_t x, scalar_t y,
     offset_t w, offset_t h, offset_t n) const;
-  NI_DEVICE void interpolate2d_nearest(
+  FF_DEVICE void interpolate2d_nearest(
     scalar_t x, scalar_t y,
      offset_t w, offset_t h, offset_t n) const;
-  NI_DEVICE void interpolate2d_bilinear(
+  FF_DEVICE void interpolate2d_bilinear(
     scalar_t x, scalar_t y,
     offset_t w, offset_t h,  offset_t n) const;
-  NI_DEVICE void interpolate2d_sliding(
+  FF_DEVICE void interpolate2d_sliding(
     scalar_t x, scalar_t y,
     offset_t w, offset_t h, offset_t n) const {/*TODO*/}
-  NI_DEVICE void interpolate2d_sliding_nearest(
+  FF_DEVICE void interpolate2d_sliding_nearest(
     scalar_t x, scalar_t y, 
     offset_t w, offset_t h, offset_t n) const {/*TODO*/}
-  NI_DEVICE void interpolate2d_sliding_bilinear(
+  FF_DEVICE void interpolate2d_sliding_bilinear(
     scalar_t x, scalar_t y,
     offset_t w, offset_t h, offset_t n) const {/*TODO*/}
-  NI_DEVICE void interpolate3d(
+  FF_DEVICE void interpolate3d(
     scalar_t x, scalar_t y, scalar_t z, 
     offset_t w, offset_t h, offset_t d, offset_t n) const;
-  NI_DEVICE void interpolate3d_nearest(
+  FF_DEVICE void interpolate3d_nearest(
     scalar_t x, scalar_t y, scalar_t z, 
     offset_t w, offset_t h, offset_t d, offset_t n) const;
-  NI_DEVICE void interpolate3d_trilinear(
+  FF_DEVICE void interpolate3d_trilinear(
     scalar_t x, scalar_t y, scalar_t z, 
     offset_t w, offset_t h, offset_t d, offset_t n) const;
-  NI_DEVICE void interpolate3d_sliding(
+  FF_DEVICE void interpolate3d_sliding(
     scalar_t x, scalar_t y, scalar_t z, 
     offset_t w, offset_t h, offset_t d, offset_t n) const {/*TODO*/}
-  NI_DEVICE void interpolate3d_sliding_nearest(
+  FF_DEVICE void interpolate3d_sliding_nearest(
     scalar_t x, scalar_t y, scalar_t z, 
     offset_t w, offset_t h, offset_t d, offset_t n) const {/*TODO*/}
-  NI_DEVICE void interpolate3d_sliding_trilinear(
+  FF_DEVICE void interpolate3d_sliding_trilinear(
     scalar_t x, scalar_t y, scalar_t z, 
     offset_t w, offset_t h, offset_t d, offset_t n) const {/*TODO*/}
 
@@ -799,7 +799,7 @@ private:
 
 #ifdef __CUDACC__
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>::loop(
   int threadIdx, int blockIdx, int blockDim, int gridDim) const {
 
@@ -835,7 +835,7 @@ void PushPullImpl<scalar_t,offset_t>::loop(
 //
 // TODO: check that the default grain size is optimal. We do quite a lot
 //       of compute per voxel, so a smaller value might be better suited.
-template <typename scalar_t, typename offset_t> NI_HOST
+template <typename scalar_t, typename offset_t> FF_HOST
 void PushPullImpl<scalar_t,offset_t>::loop() const
 {
   if (!has_atomic_add<scalar_t>::value && (do_push || do_count))
@@ -892,7 +892,7 @@ void PushPullImpl<scalar_t,offset_t>::loop() const
 //                        CHECK OUT-OF-BOUND
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 bool inbounds3d(scalar_t x, scalar_t y, scalar_t z,
                 offset_t w, offset_t h, offset_t d,
                 int edge)
@@ -901,7 +901,7 @@ bool inbounds3d(scalar_t x, scalar_t y, scalar_t z,
   return inbounds(x, w, tol) && inbounds(y, h, tol) && inbounds(z, d, tol);
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 bool inbounds2d(scalar_t x, scalar_t y,
                 offset_t w, offset_t h,
                 int edge)
@@ -910,7 +910,7 @@ bool inbounds2d(scalar_t x, scalar_t y,
   return inbounds(x, w, tol) && inbounds(y, h, tol);
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 bool inbounds1d(scalar_t x, offset_t w, int edge)
 {
   scalar_t tol = static_cast<scalar_t>(edge ? 0.5 + TINY : TINY);
@@ -922,7 +922,7 @@ bool inbounds1d(scalar_t x, offset_t w, int edge)
 // 3) check if the source coordinate is in bounds 
 
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>
 ::check3d(offset_t w, offset_t h, offset_t d, offset_t n) const
 {
@@ -973,7 +973,7 @@ void PushPullImpl<scalar_t,offset_t>
   }
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>
 ::check2d(offset_t w, offset_t h, offset_t n) const
 {
@@ -1024,7 +1024,7 @@ void PushPullImpl<scalar_t,offset_t>
  
 }
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>
 ::check1d(offset_t w, offset_t n) const
 {
@@ -1074,7 +1074,7 @@ void PushPullImpl<scalar_t,offset_t>
 //                     GENERIC INTERPOLATION 3D
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>::interpolate3d(
   scalar_t x, scalar_t y, scalar_t z,
   offset_t w, offset_t h, offset_t d, offset_t n) const
@@ -1095,7 +1095,7 @@ void PushPullImpl<scalar_t,offset_t>::interpolate3d(
                                       + h * out_sY  + d * out_sZ;
   scalar_t *trgt_ptr_NCXYZ = trgt_ptr + n * trgt_sN + w * trgt_sX 
                                       + h * trgt_sY + d * trgt_sZ;
-  scalar_t target[3*NI_MAX_NUM_CHANNELS]; 
+  scalar_t target[3*FF_MAX_NUM_CHANNELS]; 
   if (trgt_ptr && (do_push || do_grad))
     for (offset_t c = 0; c < C; ++c, trgt_ptr_NCXYZ += trgt_sC) {
       target[c]     = *trgt_ptr_NCXYZ;
@@ -1304,7 +1304,7 @@ void PushPullImpl<scalar_t,offset_t>::interpolate3d(
 //                     GENERIC INTERPOLATION 2D
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>::interpolate2d(
   scalar_t x, scalar_t y,
   offset_t w, offset_t h, offset_t n) const
@@ -1325,7 +1325,7 @@ void PushPullImpl<scalar_t,offset_t>::interpolate2d(
   scalar_t *trgt_ptr_NCXY = trgt_ptr + n * trgt_sN
                                      + w * trgt_sX
                                      + h * trgt_sY;
-  scalar_t target[2*NI_MAX_NUM_CHANNELS]; 
+  scalar_t target[2*FF_MAX_NUM_CHANNELS]; 
   if (trgt_ptr && (do_push || do_grad))
     for (offset_t c = 0; c < C; ++c, trgt_ptr_NCXY += trgt_sC) {
       target[c]     = *trgt_ptr_NCXY;
@@ -1498,7 +1498,7 @@ void PushPullImpl<scalar_t,offset_t>::interpolate2d(
 //                     GENERIC INTERPOLATION 1D
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>::interpolate1d(
   scalar_t x, offset_t w, offset_t n) const
 {
@@ -1512,7 +1512,7 @@ void PushPullImpl<scalar_t,offset_t>::interpolate1d(
   scalar_t *out_ptr_NC0   = out_ptr  + n * out_sN;
   scalar_t *out_ptr_NCX0  = out_ptr  + n * out_sN  + w * out_sX;
   scalar_t *trgt_ptr_NCX  = trgt_ptr + n * trgt_sN + w * trgt_sX;
-  scalar_t target[2*NI_MAX_NUM_CHANNELS];
+  scalar_t target[2*FF_MAX_NUM_CHANNELS];
   if (trgt_ptr && (do_push || do_grad))
     for (offset_t c = 0; c < C; ++c, trgt_ptr_NCX += trgt_sC) {
       target[c]     = *trgt_ptr_NCX;
@@ -1652,7 +1652,7 @@ void PushPullImpl<scalar_t,offset_t>::interpolate1d(
 //                     LINEAR INTERPOLATION 3D
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>::interpolate3d_trilinear(
   scalar_t x, scalar_t y, scalar_t z,
   offset_t w, offset_t h, offset_t d, offset_t n) const
@@ -1978,7 +1978,7 @@ void PushPullImpl<scalar_t,offset_t>::interpolate3d_trilinear(
 //                     LINEAR INTERPOLATION 2D
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>::interpolate2d_bilinear(
   scalar_t x, scalar_t y,
   offset_t w, offset_t h, offset_t n) const
@@ -2186,7 +2186,7 @@ void PushPullImpl<scalar_t,offset_t>::interpolate2d_bilinear(
 //                     LINEAR INTERPOLATION 1D
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>::interpolate1d_linear(
   scalar_t x, offset_t w, offset_t n) const
 {
@@ -2313,7 +2313,7 @@ void PushPullImpl<scalar_t,offset_t>::interpolate1d_linear(
 //                  NEAREST NEIGHBOR INTERPOLATION 3D
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>::interpolate3d_nearest(
   scalar_t x, scalar_t y, scalar_t z,
   offset_t w, offset_t h, offset_t d, offset_t n) const
@@ -2363,7 +2363,7 @@ void PushPullImpl<scalar_t,offset_t>::interpolate3d_nearest(
 //                  NEAREST NEIGHBOR INTERPOLATION 2D
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>::interpolate2d_nearest(
   scalar_t x, scalar_t y,
   offset_t w, offset_t h, offset_t n) const
@@ -2412,7 +2412,7 @@ void PushPullImpl<scalar_t,offset_t>::interpolate2d_nearest(
 //                  NEAREST NEIGHBOR INTERPOLATION 1D
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t> NI_DEVICE
+template <typename scalar_t, typename offset_t> FF_DEVICE
 void PushPullImpl<scalar_t,offset_t>::interpolate1d_nearest(
   scalar_t x, offset_t w, offset_t n) const
 {
@@ -2495,7 +2495,7 @@ __global__ void pushpull_kernel(PushPullImpl<scalar_t,offset_t> f) {
 // Two arguments (source, grid)
 // > `bound` and `interpolation` can be single arguments or vectors.
 template <typename BoundType, typename InterpolationType, typename SourceType> 
-NI_HOST
+FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType& source, const Tensor& grid, 
   BoundType bound, InterpolationType interpolation, int extrapolate,
@@ -2527,7 +2527,7 @@ std::deque<Tensor> pushpull(
 // > `bound` and `interpolation` can be single arguments or vectors.
 // > `source` can be a tensor or a vector of dimensions.
 template <typename BoundType, typename InterpolationType, typename SourceType> 
-NI_HOST
+FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType & source, const Tensor& grid, const Tensor& target, 
   BoundType bound, InterpolationType interpolation, int extrapolate,
@@ -2573,7 +2573,7 @@ std::deque<Tensor> pushpull(
 // Two arguments (source, grid)
 // > `bound` and `interpolation` can be single arguments or vectors.
 template <typename BoundType, typename InterpolationType, typename SourceType>
-NI_HOST
+FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType& source, const Tensor& grid, 
   BoundType bound, InterpolationType interpolation, int extrapolate,
@@ -2594,7 +2594,7 @@ std::deque<Tensor> pushpull(
 // > `bound` and `interpolation` can be single arguments or vectors.
 // > `source` can be a tensor or a vector of dimensions.
 template <typename BoundType, typename InterpolationType, typename SourceType>
-NI_HOST
+FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType & source, const Tensor& grid, const Tensor& target, 
   BoundType bound, InterpolationType interpolation, int extrapolate,
@@ -2622,7 +2622,7 @@ PUSHPULL_INSTANTIATE;
 namespace notimplemented {
 
 template <typename BoundType, typename InterpolationType, typename SourceType>
-NI_HOST
+FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType& source, const Tensor& grid, 
   BoundType bound, InterpolationType interpolation, int extrapolate,
@@ -2632,7 +2632,7 @@ std::deque<Tensor> pushpull(
 }
 
 template <typename BoundType, typename InterpolationType, typename SourceType>
-NI_HOST
+FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType & source, const Tensor& grid, const Tensor& target, 
   BoundType bound, InterpolationType interpolation, int extrapolate,
@@ -2645,4 +2645,4 @@ PUSHPULL_INSTANTIATE;
 
 } // namespace notimplemented
 
-} // namespace ni
+} // namespace ff

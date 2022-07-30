@@ -37,8 +37,8 @@ using c10::ArrayRef;
            INAME.size() > 1 ? INAME[1] :            \
            INAME.size() > 0 ? INAME[0] : DEFAULT)
 
-namespace ni {
-NI_NAMESPACE_DEVICE { // cpu / cuda / ...
+namespace ff {
+FF_NAMESPACE_DEVICE { // cpu / cuda / ...
 
 namespace { // anonymous namespace > everything inside has internal linkage
 
@@ -53,7 +53,7 @@ public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-  NI_HOST
+  FF_HOST
   RelaxGridAllocator(int dim, 
                      double absolute, double membrane, double bending,
                      double lame_shear, double lame_div,
@@ -76,7 +76,7 @@ public:
 
   /* ~~~ FUNCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-  NI_HOST void ioset
+  FF_HOST void ioset
   (const Tensor& hess, const Tensor& grad, const Tensor& solution, const Tensor& weight)
   {
     init_all();
@@ -95,11 +95,11 @@ public:
 private:
 
   /* ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-  NI_HOST void init_all();
-  NI_HOST void init_gradient(const Tensor&);
-  NI_HOST void init_hessian(const Tensor&);
-  NI_HOST void init_solution(const Tensor&);
-  NI_HOST void init_weight(const Tensor&);
+  FF_HOST void init_all();
+  FF_HOST void init_gradient(const Tensor&);
+  FF_HOST void init_hessian(const Tensor&);
+  FF_HOST void init_solution(const Tensor&);
+  FF_HOST void init_weight(const Tensor&);
 
   /* ~~~ OPTIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
   int               dim;            // dimensionality (1 or 2 or 3)
@@ -144,7 +144,7 @@ private:
 };
 
 
-NI_HOST
+FF_HOST
 void RelaxGridAllocator::init_all()
 {
   N = C = CC = X = Y = Z = 1L;
@@ -156,7 +156,7 @@ void RelaxGridAllocator::init_all()
   grd_32b_ok = hes_32b_ok = sol_32b_ok = wgt_32b_ok = true;
 }
 
-NI_HOST
+FF_HOST
 void RelaxGridAllocator::init_gradient(const Tensor& input)
 {
   N       = input.size(0);
@@ -173,7 +173,7 @@ void RelaxGridAllocator::init_gradient(const Tensor& input)
   grd_32b_ok = tensorCanUse32BitIndexMath(input);
 }
 
-NI_HOST
+FF_HOST
 void RelaxGridAllocator::init_hessian(const Tensor& input)
 {
   if (!input.defined() || input.numel() == 0)
@@ -188,7 +188,7 @@ void RelaxGridAllocator::init_hessian(const Tensor& input)
   hes_32b_ok = tensorCanUse32BitIndexMath(input);
 }
 
-NI_HOST
+FF_HOST
 void RelaxGridAllocator::init_solution(const Tensor& input)
 {
   sol_sN  = input.stride(0);
@@ -200,7 +200,7 @@ void RelaxGridAllocator::init_solution(const Tensor& input)
   sol_32b_ok = tensorCanUse32BitIndexMath(input);
 }
 
-NI_HOST
+FF_HOST
 void RelaxGridAllocator::init_weight(const Tensor& weight)
 {
   if (!weight.defined() || weight.numel() == 0)
@@ -244,7 +244,7 @@ public:
     Y(static_cast<offset_t>(info.Y)),
     Z(static_cast<offset_t>(info.Z)),
 
-#define INIT_ALLOC_INFO_5D(NAME) \
+#define IFFT_ALLOC_INFO_5D(NAME) \
     NAME##_sN(static_cast<offset_t>(info.NAME##_sN)), \
     NAME##_sC(static_cast<offset_t>(info.NAME##_sC)), \
     NAME##_sX(static_cast<offset_t>(info.NAME##_sX)), \
@@ -252,10 +252,10 @@ public:
     NAME##_sZ(static_cast<offset_t>(info.NAME##_sZ)), \
     NAME##_ptr(static_cast<scalar_t*>(info.NAME##_ptr))
 
-    INIT_ALLOC_INFO_5D(grd),
-    INIT_ALLOC_INFO_5D(hes),
-    INIT_ALLOC_INFO_5D(sol),
-    INIT_ALLOC_INFO_5D(wgt)
+    IFFT_ALLOC_INFO_5D(grd),
+    IFFT_ALLOC_INFO_5D(hes),
+    IFFT_ALLOC_INFO_5D(sol),
+    IFFT_ALLOC_INFO_5D(wgt)
   {
     set_kernel();
     set_bandwidth();
@@ -265,7 +265,7 @@ public:
 #endif
   }
 
-  NI_HOST NI_INLINE void set_kernel() 
+  FF_HOST FF_INLINE void set_kernel() 
   {
     mode = dim 
          + (bending ? 12 : membrane ? 8 : absolute ? 4 : 0)
@@ -306,7 +306,7 @@ public:
     wz000 *= OnePlusTiny;
   }
 
-  NI_HOST NI_INLINE void set_bandwidth() 
+  FF_HOST FF_INLINE void set_bandwidth() 
   { 
     if (bending)
       bandwidth = 3;
@@ -332,7 +332,7 @@ public:
   }
 
 #ifndef __CUDACC__
-  NI_HOST NI_INLINE void set_relax() 
+  FF_HOST FF_INLINE void set_relax() 
   {
 #   define ABSOLUTE 4
 #   define MEMBRANE 8
@@ -393,7 +393,7 @@ public:
     }
   }
 
-  NI_HOST NI_INLINE void set_invert() 
+  FF_HOST FF_INLINE void set_invert() 
   {
     if (hes_ptr) {
       if (CC == 1) {
@@ -434,11 +434,11 @@ public:
 #if __CUDACC__
   // Loop over voxels that belong to one CUDA block
   // This function is called by the CUDA kernel
-  NI_DEVICE void loop(int threadIdx, int blockIdx,
+  FF_DEVICE void loop(int threadIdx, int blockIdx,
                       int blockDim, int gridDim) const;
-  NI_DEVICE void loop_band(int threadIdx, int blockIdx,
+  FF_DEVICE void loop_band(int threadIdx, int blockIdx,
                            int blockDim, int gridDim) const;
-  NI_DEVICE void loop_redblack(int threadIdx, int blockIdx,
+  FF_DEVICE void loop_redblack(int threadIdx, int blockIdx,
                                int blockDim, int gridDim) const;
 #else
   // Loop over all voxels
@@ -447,19 +447,19 @@ public:
   void loop_redblack();
 #endif
 
-  NI_HOST NI_DEVICE int64_t voxcount() const {
+  FF_HOST FF_DEVICE int64_t voxcount() const {
     return N * X * Y * Z;
   }
 
-  NI_HOST NI_DEVICE int64_t voxcountfold() const {
+  FF_HOST FF_DEVICE int64_t voxcountfold() const {
     return bandwidth == 0 ? voxcount() : N * Xf * Yf * Zf;
   }
 
-  NI_HOST NI_DEVICE int64_t foldcount() const {
+  FF_HOST FF_DEVICE int64_t foldcount() const {
     return bandwidth == 0 ? 2 : Fx * Fy * Fz;
   }
 
-  NI_HOST void set_fold(offset_t i) {
+  FF_HOST void set_fold(offset_t i) {
     if (bandwidth == 0)
       // checkerboard
       redblack = i;
@@ -480,7 +480,7 @@ private:
 
   /* ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 #define DEFINE_RELAX(SUFFIX) \
-  NI_DEVICE void relax##SUFFIX( \
+  FF_DEVICE void relax##SUFFIX( \
     offset_t x, offset_t y, offset_t z, offset_t n) const;
 #define DEFINE_RELAX_DIM(DIM)        \
   DEFINE_RELAX(DIM##d_absolute)      \
@@ -490,7 +490,7 @@ private:
   DEFINE_RELAX(DIM##d_all)           \
   DEFINE_RELAX(DIM##d_rls_absolute)  \
   DEFINE_RELAX(DIM##d_rls_membrane)  \
-  NI_DEVICE void solve##DIM##d(      \
+  FF_DEVICE void solve##DIM##d(      \
     offset_t x, offset_t y, offset_t z, offset_t n) const;
 
   DEFINE_RELAX()
@@ -499,7 +499,7 @@ private:
   DEFINE_RELAX_DIM(3)
 
 #define DEFINE_INVERT(SUFFIX) \
-  NI_DEVICE void invert##SUFFIX(  \
+  FF_DEVICE void invert##SUFFIX(  \
     const scalar_t *, scalar_t *, \
     reduce_t, reduce_t, reduce_t, \
     reduce_t, reduce_t, reduce_t) const;
@@ -600,7 +600,7 @@ private:
 //                             LOOP
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax(
     offset_t x, offset_t y, offset_t z, offset_t n) const 
 {
@@ -669,7 +669,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax(
 
 #if __CUDACC__
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop(
   int threadIdx, int blockIdx, int blockDim, int gridDim) const {
 
@@ -679,7 +679,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop(
     return loop_band(threadIdx, blockIdx, blockDim, gridDim);
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop_band(
   int threadIdx, int blockIdx, int blockDim, int gridDim) const {
 
@@ -699,7 +699,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop_band(
   }
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop_redblack(
   int threadIdx, int blockIdx, int blockDim, int gridDim) const {
 
@@ -722,7 +722,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop_redblack(
 
 #else
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_HOST
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_HOST
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop()
 {
   if (bandwidth == 0)
@@ -731,7 +731,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop()
     return loop_band();
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_HOST
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_HOST
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop_redblack()
 {
   // Parallelize across voxels
@@ -756,7 +756,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop_redblack()
   }
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_HOST
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_HOST
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop_band()
 {
   for (offset_t fold = 0; fold < Fx*Fy*Fz; ++fold) {
@@ -786,7 +786,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::loop_band()
 /*                                   INVERT                                   */
 /* ========================================================================== */
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert(
     const scalar_t * h, scalar_t * s, 
     reduce_t v0, reduce_t v1, reduce_t v2, 
@@ -826,7 +826,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert(
 #endif
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert3d_sym(
     const scalar_t * h, scalar_t * s, 
     reduce_t v0, reduce_t v1, reduce_t v2, 
@@ -852,7 +852,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert3d_sym(
   s[2*sol_sC] += idt*(v0*(h01*h12-h02*h11) + v1*(h01*h02-h00*h12) + v2*(h00*h11-h01*h01));
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert2d_sym(
     const scalar_t * h, scalar_t * s, 
     reduce_t v0, reduce_t v1, reduce_t /*unused*/, 
@@ -873,7 +873,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert2d_sym(
   s[sol_sC] += idt*(v1*h00 - v0*h01);
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert3d_diag(
     const scalar_t * h, scalar_t * s, 
     reduce_t v0, reduce_t v1, reduce_t v2, 
@@ -893,7 +893,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert3d_diag(
   s[2*sol_sC] += v2 / (h22 * OnePlusTiny + w2);
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert2d_diag(
     const scalar_t * h, scalar_t * s, 
     reduce_t v0, reduce_t v1, reduce_t /*unused*/, 
@@ -911,7 +911,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert2d_diag(
   s[sol_sC] += v1 / (h11 * OnePlusTiny + w1);
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert3d_eye(
     const scalar_t * h, scalar_t * s, 
     reduce_t v0, reduce_t v1, reduce_t v2, 
@@ -931,7 +931,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert3d_eye(
   s[2*sol_sC] += v2 / (h00 + w2);
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert2d_eye(
     const scalar_t * h, scalar_t * s, 
     reduce_t v0, reduce_t v1, reduce_t /*unused*/, 
@@ -949,7 +949,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert2d_eye(
   s[sol_sC] += v1 / (h00 + w1);
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert1d(
     const scalar_t * h, scalar_t * s, 
     reduce_t v0, reduce_t  /*unused*/, reduce_t  /*unused*/, 
@@ -964,7 +964,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert1d(
   (*s) += v0 / (h00 * OnePlusTiny + w0);
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert3d_none(
     const scalar_t * h, scalar_t * s, 
     reduce_t v0, reduce_t v1, reduce_t v2, 
@@ -975,7 +975,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert3d_none(
   s[2*sol_sC] += v2 / w2;
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert2d_none(
     const scalar_t * h, scalar_t * s, 
     reduce_t v0, reduce_t v1, reduce_t  /*unused*/, 
@@ -985,7 +985,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert2d_none(
   s[sol_sC] += v1 / w1;
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert1d_none(
     const scalar_t * h, scalar_t * s, 
     reduce_t v0, reduce_t  /*unused*/, reduce_t  /*unused*/, 
@@ -1061,7 +1061,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::invert1d_none(
                  *sol1 = sol0 + sol_sC, *sol2 = sol1 + sol_sC;
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_all(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1166,7 +1166,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_all(
 }
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_lame(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1237,7 +1237,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_lame(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_bending(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1327,7 +1327,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_bending(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1386,7 +1386,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1411,7 +1411,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_absolute(
 
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_rls_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1494,7 +1494,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_rls_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_rls_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1563,7 +1563,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax3d_rls_absolute(
                  *sol1 = sol0 + sol_sC;
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_all(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1624,7 +1624,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_all(
 }
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_lame(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1670,7 +1670,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_lame(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_bending(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1724,7 +1724,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_bending(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1766,7 +1766,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1787,7 +1787,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_absolute(
 
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_rls_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1845,7 +1845,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_rls_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_rls_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1892,7 +1892,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax2d_rls_absolute(
         scalar_t *sol0 = sol_ptr + (x*sol_sX + n*sol_sN);
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_all(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1927,7 +1927,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_all(
 }
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_lame(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1954,7 +1954,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_lame(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_bending(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1986,7 +1986,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_bending(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -2013,7 +2013,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -2030,7 +2030,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_absolute(
 
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_rls_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -2068,7 +2068,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_rls_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_rls_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -2091,7 +2091,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::relax1d_rls_absolute(
 /* ========================================================================== */
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::solve1d(offset_t x, offset_t y, offset_t z, offset_t n) const 
 {
   const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + z*grd_sZ + n*grd_sN),          
@@ -2101,7 +2101,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::solve1d(offset_t x, offset_t y, 
   invert(hes, sol, grd[0], grd[grd_sC], grd[2*grd_sC], 0, 0, 0);
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::solve2d(offset_t x, offset_t y, offset_t z, offset_t n) const 
 {
   const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + n*grd_sN),
@@ -2111,7 +2111,7 @@ void RelaxGridImpl<scalar_t,offset_t,reduce_t>::solve2d(offset_t x, offset_t y, 
   invert(hes, sol, grd[0], grd[grd_sC], 0, 0, 0, 0);
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RelaxGridImpl<scalar_t,offset_t,reduce_t>::solve3d(offset_t x, offset_t y, offset_t z, offset_t n) const 
 {
   const scalar_t *grd = grd_ptr + (x*grd_sX + n*grd_sN),                 
@@ -2135,7 +2135,7 @@ __global__ void relax_kernel(RelaxGridImpl<scalar_t,offset_t,reduce_t> f) {
 }
 #endif
 
-NI_HOST std::tuple<Tensor, Tensor, Tensor>
+FF_HOST std::tuple<Tensor, Tensor, Tensor>
 prepare_tensors(const Tensor & gradient,
                 Tensor hessian, Tensor solution, Tensor weight)
 {
@@ -2177,7 +2177,7 @@ prepare_tensors(const Tensor & gradient,
 
 // ~~~ CUDA ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-NI_HOST Tensor relax_grid_impl(
+FF_HOST Tensor relax_grid_impl(
   Tensor hessian, const Tensor& gradient, Tensor solution, Tensor weight,
   double absolute, double membrane, double bending, double lame_shear, double lame_div,
   ArrayRef<double> voxel_size, BoundVectorRef bound, int64_t nb_iter)
@@ -2231,7 +2231,7 @@ NI_HOST Tensor relax_grid_impl(
 
 // ~~~ CPU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-NI_HOST Tensor relax_grid_impl(
+FF_HOST Tensor relax_grid_impl(
   Tensor hessian, const Tensor& gradient, Tensor solution, Tensor weight,
   double absolute, double membrane, double bending, double lame_shear, double lame_div,
   ArrayRef<double> voxel_size, BoundVectorRef bound, int64_t nb_iter)
@@ -2261,7 +2261,7 @@ NI_HOST Tensor relax_grid_impl(
 
 namespace notimplemented {
 
-NI_HOST Tensor relax_grid_impl(
+FF_HOST Tensor relax_grid_impl(
   Tensor hessian, const Tensor& gradient, Tensor solution, Tensor weight,
   double absolute, double membrane, double bending, double lame_shear, double lame_div,
   ArrayRef<double> voxel_size, BoundVectorRef bound, int64_t nb_iter)
@@ -2272,4 +2272,4 @@ NI_HOST Tensor relax_grid_impl(
 
 } // namespace notimplemented
 
-} // namespace ni
+} // namespace ff

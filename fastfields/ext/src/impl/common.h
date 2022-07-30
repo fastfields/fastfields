@@ -26,15 +26,15 @@
 #  include <ATen/cuda/CUDAApplyUtils.cuh>
 #  include <THC/THCAtomics.cuh>
 // --- DEFINES ---------------------------------------------------------
-#  define NI_INLINE __forceinline__
-#  define NI_NOINLINE __noinline__
-#  define NI_DEVICE __device__
-#  define NI_HOST   __host__
-#  define NI_DEVICE_NAME cuda
-#  define NI_NAMESPACE_DEVICE namespace cuda
+#  define FF_INLINE __forceinline__
+#  define FF_NOINLINE __noinline__
+#  define FF_DEVICE __device__
+#  define FF_HOST   __host__
+#  define FF_DEVICE_NAME cuda
+#  define FF_NAMESPACE_DEVICE namespace cuda
 // --- ATOMIC ADD ------------------------------------------------------
-#  define NI_ATOMIC_ADD ni::gpuAtomicAdd
-namespace ni {
+#  define FF_ATOMIC_ADD ff::gpuAtomicAdd
+namespace ff {
   // compile-time helper used in pushpull_common.cpp
   template <typename scalar_t>
   struct has_atomic_add { enum { value = true }; };
@@ -42,16 +42,14 @@ namespace ni {
   template <typename scalar_t, typename offset_t>
   static __forceinline__ __device__ 
   void gpuAtomicAdd(scalar_t * ptr, offset_t offset, scalar_t value) {
-#   if NI_TORCH_VERSION >= 10500
+#   if FF_TORCH_VERSION >= 10500
       ::gpuAtomicAdd(ptr+offset, value);
 #   else
       ::atomicAdd(ptr+offset, value);
 #   endif
   }
-}
-namespace ni {
 template <typename T>
-static NI_HOST NI_INLINE 
+static FF_HOST FF_INLINE 
 T * alloc_on_device(const T * obj)
 {
   T * pointer_device;
@@ -59,32 +57,32 @@ T * alloc_on_device(const T * obj)
   return pointer_device;
 }
 template <typename T, typename Stream>
-static NI_HOST NI_INLINE 
+static FF_HOST FF_INLINE 
 T * copy_to_device(const T * obj, T * pointer_device, Stream stream)
 {
   cudaMemcpyAsync(pointer_device, obj, sizeof(T), cudaMemcpyHostToDevice, stream);
   return pointer_device;
 }
 template <typename T, typename Stream>
-static NI_HOST NI_INLINE 
+static FF_HOST FF_INLINE 
 T * alloc_and_copy_to_device(const T * obj, Stream stream)
 {
   T * pointer_device = alloc_on_device(obj);
   copy_to_device(obj, pointer_device, stream);
   return pointer_device;
 }
-}
+} // namespace ff
 // === CPU =============================================================
 #else
 // --- DEFINES ---------------------------------------------------------
-#  define NI_INLINE inline
-#  define NI_NOINLINE
-#  define NI_DEVICE
-#  define NI_HOST
-#  define NI_DEVICE_NAME cpu
-#  define NI_NAMESPACE_DEVICE namespace cpu
+#  define FF_INLINE inline
+#  define FF_NOINLINE
+#  define FF_DEVICE
+#  define FF_HOST
+#  define FF_DEVICE_NAME cpu
+#  define FF_NAMESPACE_DEVICE namespace cpu
 // --- ATOMIC ADD ------------------------------------------------------
-#  define NI_ATOMIC_ADD ni::cpuAtomicAdd
+#  define FF_ATOMIC_ADD ff::cpuAtomicAdd
 #  if AT_PARALLEL_NATIVE
 #    include <atomic>
 template <typename T>
@@ -105,7 +103,7 @@ public:
 #  elif AT_PARALLEL_NATIVE_TBB
 #    include <tbb/atomic.h>
 #  endif
-namespace ni {
+namespace ff {
   template <typename scalar_t>
   struct has_atomic_add
   {
@@ -157,6 +155,6 @@ namespace ni {
   static inline void cpuAtomicAdd(scalar_t * ptr, offset_t offset, scalar_t value) {
     return AtomicAdd<has_atomic_add<scalar_t>::value>::atomic_add(ptr, offset, value);
   }
-} // namespace ni
+} // namespace ff
 #endif
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

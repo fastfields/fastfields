@@ -5,7 +5,7 @@
 #include "../interpolation.h"
 #include <deque>
 
-#define NI_PUSHPULL_DECLARE(space) \
+#define FF_PUSHPULL_DECLARE(space) \
   namespace space { \
     template <typename BoundType, typename InterpolationType, typename SourceType> \
     std::deque<at::Tensor> pushpull( \
@@ -19,8 +19,8 @@
       bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad); \
   }
 
-namespace ni {
-NI_PUSHPULL_DECLARE(cpu)
-NI_PUSHPULL_DECLARE(cuda) 
-NI_PUSHPULL_DECLARE(notimplemented)
-} // namespace ni
+namespace ff {
+FF_PUSHPULL_DECLARE(cpu)
+FF_PUSHPULL_DECLARE(cuda) 
+FF_PUSHPULL_DECLARE(notimplemented)
+} // namespace ff

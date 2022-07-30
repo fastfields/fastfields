@@ -2,6 +2,8 @@
 #include <ATen/ATen.h>
 #include <limits>
 
+namespace ff {
+
 class Allocator {
 protected:
 
@@ -41,3 +43,5 @@ protected:
   }
 
 };
+
+} // namespace ff

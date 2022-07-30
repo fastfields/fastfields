@@ -5,7 +5,7 @@
 #include <vector>
 #include <deque>
 
-namespace ni {
+namespace ff {
 
 at::Tensor grid_pull(
   const at::Tensor& input, const at::Tensor& grid,
@@ -56,5 +56,4 @@ std::deque<at::Tensor> grid_grad_backward(
   int extrapolate);
 
 
-
-} // namespace ni
+} // namespace ff

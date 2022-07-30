@@ -37,8 +37,8 @@ using c10::ArrayRef;
            INAME.size() > 1 ? INAME[1] :            \
            INAME.size() > 0 ? INAME[0] : DEFAULT)
 
-namespace ni {
-NI_NAMESPACE_DEVICE { // cpu / cuda / ...
+namespace ff {
+FF_NAMESPACE_DEVICE { // cpu / cuda / ...
 
 namespace { // anonymous namespace > everything inside has internal linkage
 
@@ -53,7 +53,7 @@ public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-  NI_HOST
+  FF_HOST
   RegulariserGridAllocator(int dim, 
                            double absolute, double membrane, double bending,
                            double lame_shear, double lame_div,
@@ -76,7 +76,7 @@ public:
 
   /* ~~~ FUNCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-  NI_HOST void ioset
+  FF_HOST void ioset
   (const Tensor& input, const Tensor& output, const Tensor& weight, const Tensor& hessian)
   {
     init_all();
@@ -95,11 +95,11 @@ public:
 private:
 
   /* ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-  NI_HOST void init_all();
-  NI_HOST void init_input(const Tensor&);
-  NI_HOST void init_weight(const Tensor&);
-  NI_HOST void init_output(const Tensor&);
-  NI_HOST void init_hessian(const Tensor&);
+  FF_HOST void init_all();
+  FF_HOST void init_input(const Tensor&);
+  FF_HOST void init_weight(const Tensor&);
+  FF_HOST void init_output(const Tensor&);
+  FF_HOST void init_hessian(const Tensor&);
 
   /* ~~~ OPTIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
   int               dim;            // dimensionality (1 or 2 or 3)
@@ -144,7 +144,7 @@ private:
 };
 
 
-NI_HOST
+FF_HOST
 void RegulariserGridAllocator::init_all()
 {
   N = C = CC = X = Y = Z = 1L;
@@ -156,7 +156,7 @@ void RegulariserGridAllocator::init_all()
   inp_32b_ok = wgt_32b_ok = out_32b_ok = hes_32b_ok = true;
 }
 
-NI_HOST
+FF_HOST
 void RegulariserGridAllocator::init_input(const Tensor& input)
 {
   N       = input.size(0);
@@ -173,7 +173,7 @@ void RegulariserGridAllocator::init_input(const Tensor& input)
   inp_32b_ok = tensorCanUse32BitIndexMath(input);
 }
 
-NI_HOST
+FF_HOST
 void RegulariserGridAllocator::init_weight(const Tensor& weight)
 {
   if (!weight.defined() || weight.numel() == 0)
@@ -187,7 +187,7 @@ void RegulariserGridAllocator::init_weight(const Tensor& weight)
   wgt_32b_ok = tensorCanUse32BitIndexMath(weight);
 }
 
-NI_HOST
+FF_HOST
 void RegulariserGridAllocator::init_output(const Tensor& output)
 {
   out_sN   = output.stride(0);
@@ -199,7 +199,7 @@ void RegulariserGridAllocator::init_output(const Tensor& output)
   out_32b_ok = tensorCanUse32BitIndexMath(output);
 }
 
-NI_HOST
+FF_HOST
 void RegulariserGridAllocator::init_hessian(const Tensor& hessian)
 {
   if (!hessian.defined() || hessian.numel() == 0)
@@ -242,7 +242,7 @@ public:
     Y(static_cast<offset_t>(info.Y)),
     Z(static_cast<offset_t>(info.Z)),
 
-#define INIT_ALLOC_INFO_5D(NAME) \
+#define IFFT_ALLOC_INFO_5D(NAME) \
     NAME##_sN(static_cast<offset_t>(info.NAME##_sN)), \
     NAME##_sC(static_cast<offset_t>(info.NAME##_sC)), \
     NAME##_sX(static_cast<offset_t>(info.NAME##_sX)), \
@@ -250,10 +250,10 @@ public:
     NAME##_sZ(static_cast<offset_t>(info.NAME##_sZ)), \
     NAME##_ptr(static_cast<scalar_t*>(info.NAME##_ptr))
 
-    INIT_ALLOC_INFO_5D(inp),
-    INIT_ALLOC_INFO_5D(wgt),
-    INIT_ALLOC_INFO_5D(out),
-    INIT_ALLOC_INFO_5D(hes)
+    IFFT_ALLOC_INFO_5D(inp),
+    IFFT_ALLOC_INFO_5D(wgt),
+    IFFT_ALLOC_INFO_5D(out),
+    IFFT_ALLOC_INFO_5D(hes)
   {
     set_kernel();
 #ifndef __CUDACC__
@@ -262,7 +262,7 @@ public:
 #endif
   }
 
-  NI_HOST NI_INLINE void set_kernel() 
+  FF_HOST FF_INLINE void set_kernel() 
   {
     mode = dim 
          + (bending ? 12 : membrane ? 8 : absolute ? 4 : 0)
@@ -298,7 +298,7 @@ public:
   }
 
 #ifndef __CUDACC__
-  NI_HOST NI_INLINE void set_vel2mom() 
+  FF_HOST FF_INLINE void set_vel2mom() 
   {
     if (wgt_ptr)
     {
@@ -370,7 +370,7 @@ public:
         throw std::logic_error("RLS only implemented for dimension 1/2/3.");
   }
 
-  NI_HOST NI_INLINE void set_matvec() 
+  FF_HOST FF_INLINE void set_matvec() 
   {
     if (hes_ptr) {
       if (CC == 1) {
@@ -406,26 +406,26 @@ public:
 #if __CUDACC__
   // Loop over voxels that belong to one CUDA block
   // This function is called by the CUDA kernel
-  NI_DEVICE void loop(int threadIdx, int blockIdx,
+  FF_DEVICE void loop(int threadIdx, int blockIdx,
                       int blockDim, int gridDim) const;
 #else
   // Loop over all voxels
   void loop() const;
 #endif
 
-  NI_HOST NI_INLINE int64_t voxcount() const { return N * X * Y * Z; }
+  FF_HOST FF_INLINE int64_t voxcount() const { return N * X * Y * Z; }
  
 
 private:
 
   /* ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-  NI_DEVICE NI_INLINE void dispatch(
+  FF_DEVICE FF_INLINE void dispatch(
     offset_t x, offset_t y, offset_t z, offset_t n) const;
-  NI_DEVICE NI_INLINE void zeros(
+  FF_DEVICE FF_INLINE void zeros(
     offset_t x, offset_t y, offset_t z, offset_t n) const;
 
 #define DEFINE_VEL2MOM(SUFFIX) \
-  NI_DEVICE void vel2mom##SUFFIX( \
+  FF_DEVICE void vel2mom##SUFFIX( \
     offset_t x, offset_t y, offset_t z, offset_t n) const;
 #define DEFINE_VEL2MOM_DIM(DIM)      \
   DEFINE_VEL2MOM(DIM##d_absolute)  \
@@ -441,10 +441,10 @@ private:
   DEFINE_VEL2MOM_DIM(3)
 
 
-NI_DEVICE void matvec(const scalar_t *, const scalar_t *, scalar_t *) const;
+FF_DEVICE void matvec(const scalar_t *, const scalar_t *, scalar_t *) const;
 
 #define DEFINE_MATVEC(SUFFIX) \
-  NI_DEVICE void matvec##SUFFIX(const scalar_t *, const scalar_t *, scalar_t *) const;
+  FF_DEVICE void matvec##SUFFIX(const scalar_t *, const scalar_t *, scalar_t *) const;
 #define DEFINE_MATVEC_DIM(DIM)        \
   DEFINE_MATVEC(DIM##d_sym)           \
   DEFINE_MATVEC(DIM##d_diag)          \
@@ -524,7 +524,7 @@ NI_DEVICE void matvec(const scalar_t *, const scalar_t *, scalar_t *) const;
 /*                                    LOOP                                    */
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::dispatch(
     offset_t x, offset_t y, offset_t z, offset_t n) const 
 {
@@ -588,7 +588,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::dispatch(
 
 #if __CUDACC__
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::loop(
   int threadIdx, int blockIdx, int blockDim, int gridDim) const {
 
@@ -613,7 +613,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::loop(
 // This bit loops over all target voxels. We therefore need to
 // convert linear indices to multivariate indices. The way I do it
 // might not be optimal.
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_HOST
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_HOST
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::loop() const
 {
   // Parallelize across voxels
@@ -640,7 +640,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::loop() const
 /*                                   MATVEC                                   */
 /* ========================================================================== */
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec(
     const scalar_t * h, const scalar_t * x, scalar_t * s) const 
 {
@@ -672,7 +672,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec(
 #endif
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec3d_sym(
     const scalar_t * h, const scalar_t * x, scalar_t * s) const 
 {
@@ -685,7 +685,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec3d_sym(
   s[2*out_sC] += h02*x0 + h12*x1 + h22*x2;
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec2d_sym(
     const scalar_t * h, const scalar_t * x, scalar_t * s) const 
 {
@@ -696,7 +696,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec2d_sym(
   s[out_sC] += h01*x0 + h11*x1;
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec3d_diag(
     const scalar_t * h, const scalar_t * x, scalar_t * s) const 
 {
@@ -708,7 +708,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec3d_diag(
   *s += x2*h22;
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec2d_diag(
     const scalar_t * h, const scalar_t * x, scalar_t * s) const 
 {
@@ -719,7 +719,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec2d_diag(
   s[  out_sC] += x1*h11;
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec3d_eye(
     const scalar_t * h, const scalar_t * x, scalar_t * s) const 
 {
@@ -730,7 +730,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec3d_eye(
   *s += h00 * x2;
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec2d_eye(
     const scalar_t * h, const scalar_t * x, scalar_t * s) const 
 {
@@ -740,14 +740,14 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec2d_eye(
   s[  out_sC] += h00 * x1;
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec1d(
     const scalar_t * h, const scalar_t * x, scalar_t * s) const 
 {
   (*s) += (*h) * (*x);
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec_none(
     const scalar_t * h, const scalar_t * x, scalar_t * s) const 
 {}
@@ -819,7 +819,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::matvec_none(
   scalar_t *inp1 = inp0 + inp_sC, *inp2 = inp1 + inp_sC;
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_all(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -923,7 +923,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_all(
 }
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_lame(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -994,7 +994,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_lame(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_bending(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1084,7 +1084,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_bending(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1143,7 +1143,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1167,7 +1167,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_absolute(
 
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_rls_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1247,7 +1247,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_rls_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_rls_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1314,7 +1314,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom3d_rls_absolute(
   scalar_t *inp1 = inp0 + inp_sC; 
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_all(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1374,7 +1374,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_all(
 }
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_lame(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1420,7 +1420,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_lame(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_bending(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1474,7 +1474,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_bending(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1516,7 +1516,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1536,7 +1536,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_absolute(
 
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_rls_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1592,7 +1592,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_rls_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_rls_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1638,7 +1638,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom2d_rls_absolute(
   scalar_t *hes0 = hes_ptr + (x*hes_sX + n*inp_sN); 
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_all(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1672,7 +1672,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_all(
 }
 
  
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_lame(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1699,7 +1699,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_lame(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_bending(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1731,7 +1731,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_bending(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1758,7 +1758,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1774,7 +1774,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_absolute(
 
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_rls_membrane(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1810,7 +1810,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_rls_membrane(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_rls_absolute(
   offset_t x, offset_t y, offset_t z, offset_t n) const
 {
@@ -1837,7 +1837,7 @@ void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_rls_absolute(
   scalar_t *hes0 = hes_ptr + (x*hes_sX + y*hes_sY + z*hes_sZ + n*inp_sN);  \
   scalar_t *out1 = out0 + out_sC, *out2 = out1 + out_sC;
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void RegulariserGridImpl<scalar_t,offset_t,reduce_t>::zeros(offset_t x, offset_t y, offset_t z, offset_t n) const 
 {
   GET_POINTERS
@@ -1864,7 +1864,7 @@ __global__ void regulariser_kernel(RegulariserGridImpl<scalar_t,offset_t,reduce_
 //                    ALLOCATE OUTPUT // RESHAPE WEIGHT
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-NI_HOST std::tuple<Tensor, Tensor, Tensor>
+FF_HOST std::tuple<Tensor, Tensor, Tensor>
 prepare_tensors(const Tensor & input, Tensor output, Tensor weight, Tensor hessian)
 {
   if (!(output.defined() && output.numel() > 0))
@@ -1905,7 +1905,7 @@ prepare_tensors(const Tensor & input, Tensor output, Tensor weight, Tensor hessi
 // ~~~ CUDA ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Two arguments (input, weight)
-NI_HOST Tensor regulariser_grid_impl(
+FF_HOST Tensor regulariser_grid_impl(
   const Tensor& input, Tensor output, Tensor weight, Tensor hessian,
   double absolute, double membrane, double bending, double lame_shear, double lame_div,
   ArrayRef<double> voxel_size, BoundVectorRef bound)
@@ -1952,7 +1952,7 @@ NI_HOST Tensor regulariser_grid_impl(
 // ~~~ CPU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Two arguments (input, weight)
-NI_HOST Tensor regulariser_grid_impl(
+FF_HOST Tensor regulariser_grid_impl(
   const Tensor& input, Tensor output, Tensor weight, Tensor hessian,
   double absolute, double membrane, double bending, double lame_shear, double lame_div,
   ArrayRef<double> voxel_size, BoundVectorRef bound)
@@ -1981,7 +1981,7 @@ NI_HOST Tensor regulariser_grid_impl(
 
 namespace notimplemented {
 
-NI_HOST Tensor regulariser_grid_impl(
+FF_HOST Tensor regulariser_grid_impl(
   const Tensor& input, Tensor output, Tensor weight, Tensor hessian,
   double absolute, double membrane, double bending, double lame_shear, double lame_div,
   ArrayRef<double> voxel_size, BoundVectorRef bound)
@@ -1991,4 +1991,4 @@ NI_HOST Tensor regulariser_grid_impl(
 
 } // namespace notimplemented
 
-} // namespace ni
+} // namespace ff

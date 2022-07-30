@@ -11,7 +11,7 @@
 #include "src/fmg.h"
 #include "src/multires.h"
 
-using namespace ni;
+using namespace ff;
 namespace pya = pybind11;
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -20,22 +20,22 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     "Boundary conditions describe how to deal with indices that fall \n"
     "outside of the lattice or field-of-view.\n"
     "\n"
-    "NiTorch implements boundary conditions that match those of common \n"
+    "FastFields implements boundary conditions that match those of common \n"
     "discrete transforms, such as the Fourier, Sine and Cosine \n"
     "transforms. There is a one-to-one correspondence between some of \n"
     "these boundary conditions and those used in scipy's ndimage module. \n"
     "Both conventions are implemented as aliases and can be used \n"
     "arbitrarily.\n"
     "\n"
-    "|  nitorch  |      scipy       |              torch              |\n"
-    "| --------- | ---------------- | ------------------------------- |\n"
-    "| replicate | nearest          | border                          |\n"
-    "| dct1      | mirror           | reflection, align_corners=False |\n"
-    "| dct2      | reflect          | reflection, align_corners=True  |\n"
-    "| fft       | wrap             |                                 |\n"
-    "| zero      | constant, cval=0 | zero                            |\n"
-    "| dst1      |                  |                                 |\n"
-    "| dst2      |                  |                                 |\n"
+    "| fastfields |      scipy       |              torch              |\n"
+    "| ---------- | ---------------- | ------------------------------- |\n"
+    "| replicate  | nearest          | border                          |\n"
+    "| dct1       | mirror           | reflection, align_corners=False |\n"
+    "| dct2       | reflect          | reflection, align_corners=True  |\n"
+    "| fft        | wrap             |                                 |\n"
+    "| zero       | constant, cval=0 | zero                            |\n"
+    "| dst1       |                  |                                 |\n"
+    "| dst2       |                  |                                 |\n"
     "\n"
     "References\n"
     "----------\n"
@@ -79,33 +79,33 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     .value("last",      GridAlignType::Last)
     .export_values();
 
-  m.def("grid_pull",           &ni::grid_pull,           "GridPull");
-  m.def("grid_pull_backward",  &ni::grid_pull_backward,  "GridPull backward");
-  m.def("grid_push",           &ni::grid_push,           "GridPush");
-  m.def("grid_push_backward",  &ni::grid_push_backward,  "GridPush backward");
-  m.def("grid_count",          &ni::grid_count,          "GridCount");
-  m.def("grid_count_backward", &ni::grid_count_backward, "GridCount backward");
-  m.def("grid_grad",           &ni::grid_grad,           "GridGrad");
-  m.def("grid_grad_backward",  &ni::grid_grad_backward,  "GridGrad backward");
+  m.def("grid_pull",           &ff::grid_pull,           "GridPull");
+  m.def("grid_pull_backward",  &ff::grid_pull_backward,  "GridPull backward");
+  m.def("grid_push",           &ff::grid_push,           "GridPush");
+  m.def("grid_push_backward",  &ff::grid_push_backward,  "GridPush backward");
+  m.def("grid_count",          &ff::grid_count,          "GridCount");
+  m.def("grid_count_backward", &ff::grid_count_backward, "GridCount backward");
+  m.def("grid_grad",           &ff::grid_grad,           "GridGrad");
+  m.def("grid_grad_backward",  &ff::grid_grad_backward,  "GridGrad backward");
 
-  m.def("regulariser",               &ni::regulariser,                "Field regulariser");
-  m.def("regulariser_backward",      &ni::regulariser_backward,       "Field regulariser backward");
-  m.def("regulariser_grid",          &ni::regulariser_grid,           "Grid regulariser");
-  m.def("regulariser_grid_backward", &ni::regulariser_grid_backward,  "Grid regulariser backward");
-  m.def("relax",                     &ni::relax,                      "Field relax");
-  m.def("relax_grid",                &ni::relax_grid,                 "Grid relax");
-  m.def("precond",                   &ni::precond,                    "Field preconditioner");
-  m.def("precond_grid",              &ni::precond_grid,               "Grid preconditioner");
-  m.def("resize",                    &ni::resize,                     "resize");
-  m.def("resize_backward",           &ni::resize_backward,            "resize backward");
-  m.def("prolongation",              &ni::prolongation,               "prolongation");
-  m.def("prolongation_backward",     &ni::prolongation_backward,      "prolongation backward");
-  m.def("restriction",               &ni::restriction,                "restriction");
-  m.def("restriction_backward",      &ni::restriction_backward,       "restriction backward");
-  m.def("fmg",                       &ni::fmg,                        "Field Full MultiGrid");
-  m.def("fmg_grid",                  &ni::fmg_grid,                   "Grid Full MultiGrid");
-  m.def("pcg",                       &ni::pcg,                        "Field Preconditioned Conjugate Gradient");
-  m.def("pcg_grid",                  &ni::pcg_grid,                   "Grid Preconditioned Conjugate Gradient");
-  m.def("fmg_prolongation",          &ni::fmg_prolongation,           "FMG prolongation");
-  m.def("fmg_restriction",           &ni::fmg_restriction,            "FMG restriction");
+  m.def("regulariser",               &ff::regulariser,                "Field regulariser");
+  m.def("regulariser_backward",      &ff::regulariser_backward,       "Field regulariser backward");
+  m.def("regulariser_grid",          &ff::regulariser_grid,           "Grid regulariser");
+  m.def("regulariser_grid_backward", &ff::regulariser_grid_backward,  "Grid regulariser backward");
+  m.def("relax",                     &ff::relax,                      "Field relax");
+  m.def("relax_grid",                &ff::relax_grid,                 "Grid relax");
+  m.def("precond",                   &ff::precond,                    "Field preconditioner");
+  m.def("precond_grid",              &ff::precond_grid,               "Grid preconditioner");
+  m.def("resize",                    &ff::resize,                     "resize");
+  m.def("resize_backward",           &ff::resize_backward,            "resize backward");
+  m.def("prolongation",              &ff::prolongation,               "prolongation");
+  m.def("prolongation_backward",     &ff::prolongation_backward,      "prolongation backward");
+  m.def("restriction",               &ff::restriction,                "restriction");
+  m.def("restriction_backward",      &ff::restriction_backward,       "restriction backward");
+  m.def("fmg",                       &ff::fmg,                        "Field Full MultiGrid");
+  m.def("fmg_grid",                  &ff::fmg_grid,                   "Grid Full MultiGrid");
+  m.def("pcg",                       &ff::pcg,                        "Field Preconditioned Conjugate Gradient");
+  m.def("pcg_grid",                  &ff::pcg_grid,                   "Grid Preconditioned Conjugate Gradient");
+  m.def("fmg_prolongation",          &ff::fmg_prolongation,           "FMG prolongation");
+  m.def("fmg_restriction",           &ff::fmg_restriction,            "FMG restriction");
 }

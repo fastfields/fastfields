@@ -3,7 +3,7 @@
 #include <vector>
 #include <utility>
 
-namespace ni {
+namespace ff {
 
 at::Tensor relax(
   const at::Tensor& hessian, const at::Tensor& gradient,
@@ -11,4 +11,4 @@ at::Tensor relax(
   const std::vector<double> &  absolute, const std::vector<double> &  membrane, const std::vector<double> &  bending,
   const std::vector<double> & voxel_size, const std::vector<BoundType> & bound, int64_t nb_iter);
 
-}
+} // namespace ff

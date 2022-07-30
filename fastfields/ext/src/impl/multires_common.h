@@ -4,7 +4,7 @@
 #include "../bounds.h"
 
 
-#define NI_MULTIRES_DECLARE(space) \
+#define FF_MULTIRES_DECLARE(space) \
   namespace space { \
     at::Tensor multires_impl( \
       at::Tensor source, at::Tensor target, \
@@ -13,8 +13,8 @@
   }
 
 
-namespace ni {
-NI_MULTIRES_DECLARE(cpu)
-NI_MULTIRES_DECLARE(cuda)
-NI_MULTIRES_DECLARE(notimplemented)
-} // namespace ni
+namespace ff {
+FF_MULTIRES_DECLARE(cpu)
+FF_MULTIRES_DECLARE(cuda)
+FF_MULTIRES_DECLARE(notimplemented)
+} // namespace ff

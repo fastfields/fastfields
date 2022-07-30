@@ -26,8 +26,8 @@
 // maximum number of channels
 // > not used in mode isotropic nearest/linear
 // We override the (small) default
-#undef  NI_MAX_NUM_CHANNELS
-#define NI_MAX_NUM_CHANNELS 1024
+#undef  FF_MAX_NUM_CHANNELS
+#define FF_MAX_NUM_CHANNELS 1024
 
 #define VEC_UNFOLD(ONAME, INAME, DEFAULT)             \
   ONAME##0(INAME.size() > 0 ? INAME[0] : DEFAULT),  \
@@ -42,13 +42,13 @@ using at::TensorOptions;
 using c10::IntArrayRef;
 using c10::ArrayRef;
 
-namespace ni {
-NI_NAMESPACE_DEVICE { // cpu / cuda / ...
+namespace ff {
+FF_NAMESPACE_DEVICE { // cpu / cuda / ...
 
 namespace { // anonymous namespace > everything inside has internal linkage
 
-const auto L = ni::InterpolationType::Linear;
-const auto Q = ni::InterpolationType::Quadratic;
+const auto L = InterpolationType::Linear;
+const auto Q = InterpolationType::Quadratic;
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                        INDEXING UTILS
@@ -59,7 +59,7 @@ public:
 
   // ~~~ CONSTRUCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  NI_HOST
+  FF_HOST
   MultiResAllocator(int dim, BoundVectorRef bound,
                     ArrayRef<double> scale,
                     bool do_adjoint):
@@ -72,7 +72,7 @@ public:
   // ~~~ FUNCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-  NI_HOST void ioset
+  FF_HOST void ioset
   (const Tensor& input, const Tensor& output)
   {
     init_all();
@@ -89,9 +89,9 @@ public:
 private:
 
   // ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  NI_HOST void init_all();
-  NI_HOST void init_input(const Tensor& input);
-  NI_HOST void init_output(const Tensor& output);
+  FF_HOST void init_all();
+  FF_HOST void init_input(const Tensor& input);
+  FF_HOST void init_output(const Tensor& output);
 
   // ~~~ OPTIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   int               dim;            // dimensionality (2 or 3)
@@ -129,11 +129,11 @@ private:
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//                          INITIALISATION
+//                          IFFTIALISATION
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-NI_HOST
+FF_HOST
 void MultiResAllocator::init_all()
 {
   N = C = 1L;
@@ -143,7 +143,7 @@ void MultiResAllocator::init_all()
   inp_32b_ok = out_32b_ok = true;
 }
 
-NI_HOST
+FF_HOST
 void MultiResAllocator::init_input(const Tensor& input)
 {
   N       = input.size(0);
@@ -160,7 +160,7 @@ void MultiResAllocator::init_input(const Tensor& input)
   inp_32b_ok = tensorCanUse32BitIndexMath(input);
 }
 
-NI_HOST
+FF_HOST
 void MultiResAllocator::init_output(const Tensor& input)
 {
   out_X   = input.size(2);
@@ -200,7 +200,7 @@ public:
     COPY_FROM_INFO(N),
     COPY_FROM_INFO(C),
 
-#define INIT_ALLOC_INFO_5D(NAME) \
+#define IFFT_ALLOC_INFO_5D(NAME) \
     NAME##_X(static_cast<offset_t>(info.NAME##_X)),   \
     NAME##_Y(static_cast<offset_t>(info.NAME##_Y)),   \
     NAME##_Z(static_cast<offset_t>(info.NAME##_Z)),   \
@@ -211,8 +211,8 @@ public:
     NAME##_sZ(static_cast<offset_t>(info.NAME##_sZ)), \
     NAME##_ptr(static_cast<scalar_t*>(info.NAME##_ptr))
 
-    INIT_ALLOC_INFO_5D(inp),
-    INIT_ALLOC_INFO_5D(out)
+    IFFT_ALLOC_INFO_5D(inp),
+    IFFT_ALLOC_INFO_5D(out)
   {
 #ifndef __CUDACC__
       set_resize();
@@ -220,7 +220,7 @@ public:
   }
 
 #ifndef __CUDACC__
-  NI_HOST NI_INLINE void set_resize() 
+  FF_HOST FF_INLINE void set_resize() 
   {
 #   define ADJ 4
     uint8_t mode = dim + ADJ * do_adjoint;
@@ -248,14 +248,14 @@ public:
 #ifdef __CUDACC__
   // Loop over voxels that belong to one CUDA block
   // This function is called by the CUDA kernel
-  NI_DEVICE void loop(int threadIdx, int blockIdx, 
+  FF_DEVICE void loop(int threadIdx, int blockIdx, 
                       int blockDim, int gridDim) const;
 #else
   // Loop over all voxels
   void loop() const;
 #endif
 
-  NI_HOST NI_DEVICE int64_t voxcount() const { 
+  FF_HOST FF_DEVICE int64_t voxcount() const { 
     return N * out_X * out_Y * out_Z;
   }
 
@@ -263,11 +263,11 @@ private:
 
   // ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  NI_DEVICE NI_INLINE void resize(
+  FF_DEVICE FF_INLINE void resize(
     offset_t w, offset_t h, offset_t d, offset_t n) const;
 
 #define DECLARE_RESIZE(name) \
-  NI_DEVICE void name( \
+  FF_DEVICE void name( \
     offset_t w, offset_t h, offset_t d, offset_t n) const;
 
   DECLARE_RESIZE(resize1d)
@@ -313,7 +313,7 @@ private:
 //                             LOOP
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void MultiResImpl<scalar_t,offset_t,reduce_t>::resize(
     offset_t x, offset_t y, offset_t z, offset_t n) const {
 #ifdef __CUDACC__
@@ -343,7 +343,7 @@ void MultiResImpl<scalar_t,offset_t,reduce_t>::resize(
 
 #ifdef __CUDACC__
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void MultiResImpl<scalar_t,offset_t,reduce_t>::loop(
   int threadIdx, int blockIdx, int blockDim, int gridDim) const {
 
@@ -374,7 +374,7 @@ void MultiResImpl<scalar_t,offset_t,reduce_t>::loop(
 //
 // TODO: check that the default grain size is optimal. We do quite a lot
 //       of compute per voxel, so a smaller value might be better suited.
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_HOST
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_HOST
 void MultiResImpl<scalar_t,offset_t,reduce_t>::loop() const
 {
   if (!has_atomic_add<scalar_t>::value && (do_adjoint))
@@ -427,7 +427,7 @@ void MultiResImpl<scalar_t,offset_t,reduce_t>::loop() const
 //                     QUADRATIC PROLONGATION 3D
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void MultiResImpl<scalar_t,offset_t,reduce_t>::resize3d(
   offset_t w, offset_t h, offset_t d, offset_t n) const
 {
@@ -499,7 +499,7 @@ void MultiResImpl<scalar_t,offset_t,reduce_t>::resize3d(
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void MultiResImpl<scalar_t,offset_t,reduce_t>::resize2d(offset_t w, offset_t h, offset_t d, offset_t n) const
 {
   reduce_t x = (w + 0.5) * scale0 - 0.5;
@@ -550,7 +550,7 @@ void MultiResImpl<scalar_t,offset_t,reduce_t>::resize2d(offset_t w, offset_t h, 
 }
 
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void MultiResImpl<scalar_t,offset_t,reduce_t>::resize1d(offset_t w, offset_t h, offset_t d, offset_t n) const
 {
   reduce_t x = (w + 0.5) * scale0 - 0.5;
@@ -583,7 +583,7 @@ void MultiResImpl<scalar_t,offset_t,reduce_t>::resize1d(offset_t w, offset_t h, 
 //                     LINEAR RESTRICTION 3D
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void MultiResImpl<scalar_t,offset_t,reduce_t>::restrict3d(
   offset_t w, offset_t h, offset_t d, offset_t n) const
 {
@@ -668,7 +668,7 @@ void MultiResImpl<scalar_t,offset_t,reduce_t>::restrict3d(
   }
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void MultiResImpl<scalar_t,offset_t,reduce_t>::restrict2d(offset_t w, offset_t h, offset_t d, offset_t n) const 
 {
   reduce_t x = (w + 0.5) * scale0 - 0.5;
@@ -726,7 +726,7 @@ void MultiResImpl<scalar_t,offset_t,reduce_t>::restrict2d(offset_t w, offset_t h
   }
 }
 
-template <typename scalar_t, typename offset_t, typename reduce_t> NI_DEVICE
+template <typename scalar_t, typename offset_t, typename reduce_t> FF_DEVICE
 void MultiResImpl<scalar_t,offset_t,reduce_t>::restrict1d(offset_t w, offset_t h, offset_t d, offset_t n) const 
 {
   reduce_t x = (w + 0.5) * scale0 - 0.5;
@@ -778,7 +778,7 @@ __global__ void resize_kernel(MultiResImpl<scalar_t,offset_t,reduce_t> * f) {
 //                    FUNCTIONAL FORM WITH DISPATCH
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-NI_HOST NI_INLINE void
+FF_HOST FF_INLINE void
 check_same_nonspatial(Tensor input, Tensor output)
 {
   bool same_nonspatial = (input.dim()   == output.dim())    &&
@@ -797,7 +797,7 @@ check_same_nonspatial(Tensor input, Tensor output)
   }
 }
 
-NI_HOST NI_INLINE Tensor
+FF_HOST FF_INLINE Tensor
 prepare_tensor(Tensor input, Tensor output, ArrayRef<double> factor, bool do_adjoint)
 {
   bool output_defined = (output.defined() && output.numel() > 0);
@@ -838,7 +838,7 @@ prepare_tensor(Tensor input, Tensor output, ArrayRef<double> factor, bool do_adj
   return output;
 }
 
-NI_HOST NI_INLINE std::vector<double>
+FF_HOST FF_INLINE std::vector<double>
 prepare_scales(Tensor input, Tensor output, bool do_adjoint)
 {
   int64_t dim = output.dim() - 2;
@@ -860,7 +860,7 @@ prepare_scales(Tensor input, Tensor output, bool do_adjoint)
 
 // ~~~ CUDA ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  
-NI_HOST
+FF_HOST
 Tensor multires_impl(
   Tensor input, Tensor output, ArrayRef<double> factor,
   BoundVectorRef bound, bool do_adjoint)
@@ -906,7 +906,7 @@ Tensor multires_impl(
 
 // ~~~ CPU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-NI_HOST
+FF_HOST
 Tensor multires_impl(
   Tensor input, Tensor output, ArrayRef<double> factor,
   BoundVectorRef bound, bool do_adjoint)
@@ -934,7 +934,7 @@ Tensor multires_impl(
 
 namespace notimplemented {
 
-NI_HOST
+FF_HOST
 Tensor multires_impl(
   Tensor input, Tensor output, ArrayRef<double> factor,
   BoundVectorRef bound, bool do_adjoint)
@@ -944,4 +944,4 @@ Tensor multires_impl(
 
 } // namespace notimplemented
 
-} // namespace ni
+} // namespace ff

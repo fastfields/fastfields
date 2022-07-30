@@ -3,7 +3,7 @@
 #include <vector>
 #include <utility>
 
-namespace ni {
+namespace ff {
 
 at::Tensor relax_grid(
   const at::Tensor& hessian, const at::Tensor& gradient,
@@ -12,4 +12,4 @@ at::Tensor relax_grid(
   const std::vector<double> & voxel_size, const std::vector<BoundType> & bound, 
   int64_t nb_iter);
 
-}
+} // namespace ff

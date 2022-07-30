@@ -6,7 +6,7 @@
 #include "../grid_align.h"
 
 
-#define NI_RESIZE_DECLARE(space) \
+#define FF_RESIZE_DECLARE(space) \
   namespace space { \
     at::Tensor resize_impl( \
       at::Tensor source, at::Tensor target, \
@@ -16,8 +16,8 @@
   }
 
 
-namespace ni {
-NI_RESIZE_DECLARE(cpu)
-NI_RESIZE_DECLARE(cuda)
-NI_RESIZE_DECLARE(notimplemented)
-} // namespace ni
+namespace ff {
+FF_RESIZE_DECLARE(cpu)
+FF_RESIZE_DECLARE(cuda)
+FF_RESIZE_DECLARE(notimplemented)
+} // namespace ff

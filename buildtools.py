@@ -91,7 +91,7 @@ def cuda_version(home=None):
     if not home:
         home = cuda_home()
     nvcc = os.path.join(home, 'bin', 'nvcc')
-    if not nvcc:
+    if not (nvcc and os.path.exists(nvcc)):
         return None
     with open(os.devnull, 'w') as devnull:
         version = subprocess.check_output([nvcc, '--version'], stderr=devnull).decode()

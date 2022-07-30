@@ -8,6 +8,8 @@ higher level packages (such as [`nitorch`](https://github.com/balbasty/nitorch))
 
 ## Installation
 
+/!\ Currently, `fastfields` is only available on Linux and MacOS.
+
 PyTorch extensions are linked against `libtorch`, the C++/CUDA library on which 
 Pytorch is built. Because the ABI (Application Binary Interface) of `libtorch` 
 is not stable, extensions depend strictly on the version of `libtorch` that was
@@ -522,3 +524,28 @@ output : (N, *shape, D) tensor
 
 """
 ```
+
+
+## Valid combinations of Python / PyTorch / CUDA
+
+We only list combinations for which fastfields is also compiled 
+(e.g., pytorch 1.4 is available on Python 2.7, but we do not list it because 
+fastfields is not available on Python 2).
+
+Note that fastfields requires PyTorch >= 1.4.
+
+
+| **PyTorch:**| 1.4.0 | 1.5.0 | 1.5.1 | 1.6.0 | 1.7.0 | 1.7.1 | 1.8.0 | 1.8.1 | 1.9.0 | 1.9.1 | 1.10.0 | 1.10.1 | 1.10.2 | 1.11.0 | 1.12.0 |
+| **Python:** | 3.5-8 | 3.5-8 | 3.6-8 | 3.6-8 | 3.6-8 | 3.6-9 | 3.6-9 | 3.6-9 | 3.6-9 | 3.6-9 | 3.6-9  | 3.6-9  | 3.6-9  | 3.7-10 | 3.7-10 |
+|-------------|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:------:|:------:|:------:|:------:|:------:|
+| cpu         |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓    |   ✓    |   ✓    |   ✓    |   ✓    |
+| 9.2         |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |       |       |       |       |        |        |        |        |        |
+| 10.0        |   ✓   |       |       |       |       |       |       |       |       |       |        |        |        |        |        |
+| 10.1        |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |       |       |        |        |        |        |        |
+| 10.2        |       |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓    |   ✓    |   ✓    |   ✓    |   ✓    |
+| 11.0        |       |       |       |       |   ✓   |   ✓   |       |       |       |       |        |        |        |        |        |
+| 11.1        |       |       |       |       |       |       |   ✓   |   ✓   |   ✓   |   ✓   |   ✓    |   ✓    |   ✓    |        |        |
+| 11.3        |       |       |       |       |       |       |       |       |       |       |   ✓    |   ✓    |   ✓    |   ✓    |   ✓    |
+| 11.5        |       |       |       |       |       |       |       |       |       |       |        |        |        |   ✓    |        |
+| 11.6        |       |       |       |       |       |       |       |       |       |       |        |        |        |        |   ✓    |
+

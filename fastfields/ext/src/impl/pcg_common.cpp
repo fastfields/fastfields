@@ -13,8 +13,8 @@ using c10::ArrayRef;
 using at::Tensor;
 using std::vector;
 
-namespace ni {
-NI_NAMESPACE_DEVICE {
+namespace ff {
+FF_NAMESPACE_DEVICE {
 
 namespace {
 
@@ -63,7 +63,7 @@ namespace {
         if (tol) {
           obj = alpha * (alpha * pAp + 2 * dotprod(r, z));
           obj = at::sum(obj);
-          //NI_TRACE("PCG: %d/%d, obj = %f, tol = %f\n", 
+          //FF_TRACE("PCG: %d/%d, obj = %f, tol = %f\n", 
           //         n, nb_iter, obj.item<double>() / numel, tol);
           if (obj.item<double>() < tol * numel)
             break;
@@ -79,7 +79,7 @@ namespace {
       }
 
       if (tol)
-        NI_TRACE("PCG: %d/%d, obj = %f, tol = %f\n", 
+        FF_TRACE("PCG: %d/%d, obj = %f, tol = %f\n", 
                  n, nb_iter, obj.item<double>() / numel, tol);
  
   }
@@ -197,4 +197,4 @@ namespace notimplemented {
   }
 }
 
-} // namespace ni
+} // namespace ff

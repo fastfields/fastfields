@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 
-namespace ni {
+namespace ff {
 
 enum class BoundType : int64_t{
   Replicate,    // Replicate last inbound value = clip coordinates
@@ -18,4 +18,4 @@ enum class BoundType : int64_t{
 
 using BoundVectorRef = c10::ArrayRef<BoundType>;
 
-} // namespace ni
+} // namespace ff

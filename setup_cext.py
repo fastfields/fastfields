@@ -445,7 +445,7 @@ def find_omp_darwin():
                 flag = '-fopenmp=libgomp'
         return [flag], [flag], [], None
 
-    # Else, opnemp is no different than any other dependency
+    # Else, openmp is no different than any other dependency
 
     # First, check if omp/iomp5 has been installed (e.g., using homebrew)
     lib_name, lib_dir = find_lib([torch_omp_lib(), 'iomp5', 'omp'])

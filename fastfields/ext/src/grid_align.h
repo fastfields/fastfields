@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 
-namespace ni {
+namespace ff {
 
 enum class GridAlignType : int64_t{
   Edge,    		// Align outer edges of the corner voxels

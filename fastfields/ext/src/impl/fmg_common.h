@@ -4,7 +4,7 @@
 #include "../bounds.h"
 
 
-#define NI_FMG_DECLARE(space) \
+#define FF_FMG_DECLARE(space) \
   namespace space { \
     at::Tensor fmg_impl(const at::Tensor & hessian, \
                 const at::Tensor & gradient, \
@@ -37,8 +37,8 @@
   }
 
 
-namespace ni {
-NI_FMG_DECLARE(cpu)
-NI_FMG_DECLARE(cuda)
-NI_FMG_DECLARE(notimplemented)
-} // namespace ni
+namespace ff {
+FF_FMG_DECLARE(cpu)
+FF_FMG_DECLARE(cuda)
+FF_FMG_DECLARE(notimplemented)
+} // namespace ff

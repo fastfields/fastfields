@@ -3,7 +3,7 @@
 #include <vector>
 #include <utility>
 
-namespace ni {
+namespace ff {
 
 at::Tensor regulariser_grid(
   const at::Tensor& input, const at::Tensor& output, const at::Tensor& weight, const at::Tensor& hessian,
@@ -16,4 +16,4 @@ at::Tensor regulariser_grid_backward(
   const std::vector<double> & voxel_size, const std::vector<BoundType> & bound,
   bool do_input, bool do_weight);
 
-}
+} // namespace ff

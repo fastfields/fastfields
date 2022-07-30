@@ -2,10 +2,10 @@
 #include "common.h"
 #include "../defines.h"
 
-namespace ni {
+namespace ff {
 
 template <typename Fn, typename offset_t>
-static NI_INLINE NI_DEVICE void for_unroll(offset_t L, Fn fn) 
+static FF_INLINE FF_DEVICE void for_unroll(offset_t L, Fn fn) 
 {
   switch (L) {
     case 0:
@@ -50,7 +50,7 @@ static NI_INLINE NI_DEVICE void for_unroll(offset_t L, Fn fn)
 // Returns a value such that: index <= 2 ** log2_ceil(index)
 // Adapted from https://stackoverflow.com/questions/994593
 template <typename T>
-static NI_HOST  
+static FF_HOST  
 T log2_ceil(T index)
 {
   if (index == 0)
@@ -66,7 +66,7 @@ T log2_ceil(T index)
 
 // https://stackoverflow.com/questions/101439
 template <typename BaseType, typename ExpType>
-static NI_HOST  
+static FF_HOST  
 BaseType pow_int(BaseType base, ExpType exp)
 {
     BaseType result = 1;
@@ -111,4 +111,4 @@ struct build_indices<min, min> {
     typedef indices<min> type;
 };
 
-}
+} // namespace ff
