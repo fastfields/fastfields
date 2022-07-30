@@ -1,4 +1,4 @@
-# fastfields
+# FastFields
 
 `fastfields` is a PyTorch extension written in C++/CUDA specialized for 
 dense scalar or vector fields. This package contains a limited set of tools
@@ -6,7 +6,7 @@ that are implemented in C++/CUDA, and is aimed to serve as a core dependency of
 higher level packages (such as [`nitorch`](https://github.com/balbasty/nitorch)).
 
 
-## Installation
+## Easy install
 
 /!\ Currently, `fastfields` is only available on Linux and MacOS.
 
@@ -23,11 +23,48 @@ compiled versions of `fastfields` on
 To ensure compatibility between `fastfields` and `torch`, we advise installing 
 them together with `pip`:
 ```shell
-pip install torch==1.7.1+cu101 fastfields==0.1.0+torch1.7.1cu101 \
+pip install torch==1.7.1+cu101 fastfields==0.1.0+torch1.7.1.cu101 \
     -f https://download.pytorch.org/whl/torch_stable.html \
     -f https://pypi.fury.io/balbasty/fastfields
 ```
 
+## Install/Build from source
+
+To build `fastfields` from source, you'll need the target version of PyTorch 
+installed:
+```shell
+pip install torch==1.7.1+cu101 -f https://download.pytorch.org/whl/torch_stable.html
+# or 
+conda install -c pytorch pytorch=1.7.1 cudatoolkit=10.1
+```
+plus `gcc` (on linux) or `clang` (on macos) and -- if CUDA support is 
+required -- `nvcc` and the CUDA toolkit. The version of the CUDA toolkit 
+should be the same as the version that was used to compile PyTorch 
+(see [PyTorch's documentation](https://pytorch.org/)). We advise exposing 
+the path to the correct cuda toolkit using _e.g._ `export CUDA_HOME=/path/to/cuda-10.1`
+
+To install `fastfields` with `setuptools`, simply run
+```shell
+git clone git@github.com:balbasty/fastfields.git
+cd fastfields
+./setup.py install
+```
+
+To install with `pip`, we advise pre-installing the target PyTorch and disabling the 
+isolation build:
+```shell
+pip install --no-build-isolation git+https://github.com/balbasty/fastfields
+```
+
+`setuptools` can also be used to package a platform-specific distribution 
+(or _wheel_) that can then be installed using pip:
+```shell
+pip install wheel
+git clone git@github.com:balbasty/fastfields.git
+cd fastfields
+./setup.py bdist_wheel
+pip install dist/*.whl
+```
 
 ## Sampling spline-encoded fields (and its adjoint)
 
@@ -536,8 +573,8 @@ Note that fastfields requires PyTorch >= 1.4.
 
 
 | **PyTorch:**| 1.4.0 | 1.5.0 | 1.5.1 | 1.6.0 | 1.7.0 | 1.7.1 | 1.8.0 | 1.8.1 | 1.9.0 | 1.9.1 | 1.10.0 | 1.10.1 | 1.10.2 | 1.11.0 | 1.12.0 |
-| **Python:** | 3.5-8 | 3.5-8 | 3.6-8 | 3.6-8 | 3.6-8 | 3.6-9 | 3.6-9 | 3.6-9 | 3.6-9 | 3.6-9 | 3.6-9  | 3.6-9  | 3.6-9  | 3.7-10 | 3.7-10 |
 |-------------|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:------:|:------:|:------:|:------:|:------:|
+| **Python:** | 3.5-8 | 3.5-8 | 3.6-8 | 3.6-8 | 3.6-8 | 3.6-9 | 3.6-9 | 3.6-9 | 3.6-9 | 3.6-9 | 3.6-9  | 3.6-9  | 3.6-9  | 3.7-10 | 3.7-10 |
 | cpu         |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓    |   ✓    |   ✓    |   ✓    |   ✓    |
 | 9.2         |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |   ✓   |       |       |       |       |        |        |        |        |        |
 | 10.0        |   ✓   |       |       |       |       |       |       |       |       |       |        |        |        |        |        |
