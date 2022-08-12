@@ -46,16 +46,17 @@ namespace Cholesky {
   //
   // @param[in]     C:  (u)int
   // @param[inout]  a:  CxC matrix
+  // @param         s:  stride
   //
   // https://en.wikipedia.org/wiki/Cholesky_decomposition
   template <typename reduce_t, typename offset_t> FF_INLINE FF_DEVICE static
-  void decompose(offset_t C, reduce_t a[])
+  void decompose(offset_t C, reduce_t a[], offset_t s=1)
   {
     reduce_t sm, sm0;
 
     sm0  = 1e-40;
   #if 0
-    for(offset_t c = 0; c < C; ++c) sm0 += a[c*C+c];
+    for(offset_t c = 0; c < C; ++c) sm0 += a[(c*C+c)*s];
     sm0 *= 1e-7;
     sm0 *= sm0;
   #endif
@@ -64,40 +65,41 @@ namespace Cholesky {
     {
       for (offset_t b = c; b < C; ++b)
       {
-        sm = a[c*C+b];
+        sm = a[(c*C+b)*s];
         for(offset_t d = c-1; d >= 0; --d)
-          sm -= a[c*C+d] * a[b*C+d];
+          sm -= a[(c*C+d)*s] * a[(b*C+d)*s];
         if (c == b) {
-          a[c*C+c] = std::sqrt(MAX(sm, sm0));
+          a[(c*C+c)*s] = std::sqrt(MAX(sm, sm0));
         } else
-          a[b*C+c] = sm / a[c*C+c];
+          a[(b*C+c)*s] = sm / a[(c*C+c)*s];
       }
     }
     return;
   }
 
   // Cholesky solver (inplace)
-  // @param[in]    C: (u)int
-  // @param[in]    a: CxC matrix
-  // @param[in]    p: C vector
-  // @param[inout] x: C vector
+  // @param[in]    C:  (u)int
+  // @param[in]    a:  CxC matrix
+  // @param        sa: matrix stride
+  // @param[inout] x:  C vector
+  // @param        sx: vector stride
   template <typename reduce_t, typename offset_t> FF_INLINE FF_DEVICE static
-  void solve(offset_t C, const reduce_t a[], reduce_t x[])
+  void solve(offset_t C, const reduce_t a[], offset_t sa, reduce_t x[], offset_t sx)
   {
     reduce_t sm;
     for (offset_t c = 0; c < C; ++c)
     {
-      sm = x[c];
+      sm = x[c*sx];
       for (offset_t cc = c-1; cc >= 0; --cc)
-        sm -= a[c*C+cc] * x[cc];
-      x[c] = sm / a[c*C+c];
+        sm -= a[(c*C+cc)*sa] * x[cc*sx];
+      x[c] = sm / a[(c*C+c)*sa];
     }
     for(offset_t c = C-1; c >= 0; --c)
     {
-      sm = x[c];
+      sm = x[c*sx];
       for(offset_t cc = c+1; cc < C; ++cc)
-        sm -= a[cc*C+c] * x[cc];
-      x[c] = sm / a[c*C+c];
+        sm -= a[(cc*C+c)*sa] * x[cc*sx];
+      x[c*sx] = sm / a[(c*C+c)*sa];
     }
   }
   
@@ -111,45 +113,79 @@ namespace Cholesky {
 template <typename Child>
 struct HessianCommon 
 {
-  template <typename scalar_t, typename offset_t, typename reduce_t> 
-  static FF_INLINE FF_DEVICE 
-  void set(int32_t C, scalar_t * out, offset_t stride, const reduce_t * inp)
+  /// Copy values into the flattened hessian
+  /// @param o      pointer to output array
+  /// @param so     output array stride
+  /// @param i      pointer to input array
+  /// @param si     input array stride
+  template <typename scalar_t, typename offset_t, typename reduce_t>
+  static FF_INLINE FF_DEVICE
+  void set(int32_t C, scalar_t * o, offset_t so, const reduce_t * i, offset_t si=1)
   {
-    for (int32_t c = 0; c < C; ++c, out += stride)
-     *out = inp[c];
+    for (int32_t c = 0; c < C; ++c, o += so)
+      *o = i[c*si];
   }
 
+  /// Add values into the flattened hessian
+  /// @param o      pointer to output array
+  /// @param so     output array stride
+  /// @param i      pointer to input array
+  /// @param si     input array stride
   template <typename scalar_t, typename offset_t, typename reduce_t> 
   static FF_INLINE FF_DEVICE 
-  void add(int32_t C, scalar_t * out, offset_t stride, const reduce_t * inp)
+  void add(int32_t C, scalar_t * o, offset_t so, const reduce_t * i, offset_t si=1)
   {
-    for (int32_t c = 0; c < C; ++c, out += stride)
-     *out += inp[c];
+    for (int32_t c = 0; c < C; ++c, o += so)
+      *o += i[c*si];
   }
 
+  /// Solve the linear system: x = (H + diag(w))\v
+  /// @param C      number of channels
+  /// @param x      pointer to output array
+  /// @param sx     output array stride
+  /// @param h      pointer to hessian
+  /// @param sh     hessian stride
+  /// @param v      pointer to value at which to solve
+  /// @param sv     value stride
+  /// @param m      pointer to temporary buffer that stores the full matrix
+  /// @param sm     buffer stride
+  /// @param w      pointer to regulariser weights
+  /// @param sw     weights stride
   template <typename scalar_t, typename offset_t, typename reduce_t> 
   static FF_DEVICE 
   void invert(int32_t C, 
               scalar_t * x, offset_t sx, const scalar_t * h, offset_t sh,
-              reduce_t * v, const reduce_t * w)
+              reduce_t * v, offset_t sv, reduce_t * m, offset_t sm,
+              const reduce_t * w, offset_t sw = 0)
   {
-    reduce_t m[Child::max_size];
-    Child::get(C, h, sh, m);
-    Child::invert_(C, m, v, w);
-    set(C, x, sx, v);
+    Child::get(C, h, sh, m, sm);
+    Child::invert_(C, m, sm, v, sv, w, sw);
+    set(C, x, sx, v, sv);
   }
 
+  /// Solve the linear system and increment x += (H + diag(w))\v
+  /// @param C      number of channels
+  /// @param x      pointer to output array
+  /// @param sx     output array stride
+  /// @param h      pointer to hessian
+  /// @param sh     hessian stride
+  /// @param v      pointer to value at which to solve
+  /// @param sv     value stride
+  /// @param m      pointer to temporary buffer that stores the full matrix
+  /// @param sm     buffer stride
+  /// @param w      pointer to regulariser weights
+  /// @param sw     weights stride
   template <typename scalar_t, typename offset_t, typename reduce_t> 
   static FF_DEVICE 
   void addinvert(int32_t C, 
                  scalar_t * x, offset_t sx, const scalar_t * h, offset_t sh,
-                 reduce_t * v, const reduce_t * w)
+                 reduce_t * v, offset_t sv, reduce_t * m, offset_t m,
+                 const reduce_t * w)
   {
-    reduce_t m[Child::max_size];
-    Child::get(C, h, sh, m);
-    Child::submatvec_(C, x, sx, m, v);
-    Child::invert_(C, m, v, w);
-    add(C, x, sx, v);
+    Child::get(C, h, sh, m, sm);
+    Child::submatvec_(C, x, sx, m, sm, v, sv);
+    Child::invert_(C, m, sm, v, sv, w, sw);
+    add(C, x, sx, v, sv);
   }
 };
 
@@ -169,28 +205,33 @@ template <int32_t C> using HessianCommonDiag = HessianCommon<HessianUtilsDiag<C>
 template <int32_t C> using HessianCommonEst  = HessianCommon<HessianUtilsEst<C> >;
 template <int32_t C> using HessianCommonSym  = HessianCommon<HessianUtilsSym<C> >;
 
-
 template <int32_t MaxC>
 struct HessianUtils<HessianType::None, MaxC>: HessianCommonNone<MaxC>
-{ 
+{
   static const int32_t max_length = MaxC;
-  static const int32_t max_size   = 0; 
+  static const int32_t max_size   = 0;
+
+  /// How much working memory we must allocate
+  static FF_INLINE FF_DEVICE int32_t mat_size(int32_t size) { return 0; }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
   static FF_INLINE FF_DEVICE void 
-  get(int32_t C, const scalar_t * inp, offset_t stride, reduce_t * out)
+  get(int32_t C, const scalar_t * i, offset_t s, reduce_t * o, offset_t so)
   {}
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
   static FF_INLINE FF_DEVICE void 
-  submatvec_(int32_t C, const scalar_t * inp, offset_t stride, const reduce_t * h, reduce_t * out)
+  submatvec_(int32_t C, const scalar_t * i, offset_t s,
+             const reduce_t * h, offset_t, sh, reduce_t * o, offset_t so)
   {}
 
   template <typename reduce_t> 
   static FF_INLINE FF_DEVICE void 
-  invert_(int32_t C, reduce_t * h, reduce_t * v, const reduce_t * w) {
+  invert_(int32_t C,
+          reduce_t * h, offset_t sh, reduce_t * v, offset_t sv,
+          reduce_t * m, offset_t sm, const reduce_t * w, offset_t sw) {
     for (int32_t c = 0; c < C; ++c)
-      v[c] /= w[c];
+      v[c*sv] /= w[c*sw];
   }
 
   // specialize parent functions to avoid defining zero-sized arrays
@@ -199,12 +240,12 @@ struct HessianUtils<HessianType::None, MaxC>: HessianCommonNone<MaxC>
   static FF_DEVICE 
   void invert(int32_t C, 
               scalar_t * x, offset_t sx, const scalar_t * h, offset_t sh,
-              reduce_t * v, const reduce_t * w)
+              reduce_t * v, offset_t sv, reduce_t * m, offset_t sm,
+              const reduce_t * w, offset_t sw)
   {
-    reduce_t * m = static_cast<reduce_t*>(0);
-    get(C, h, sh, m);
-    invert_(C, m, v, w);
-    HessianCommonNone<MaxC>::set(C, x, sx, v);
+    get(C, h, sh, m, sm);
+    invert_(C, m, sm, v, sv, w, sw);
+    HessianCommonNone<MaxC>::set(C, x, sx, v, sv);
   }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
@@ -214,17 +255,19 @@ struct HessianUtils<HessianType::None, MaxC>: HessianCommonNone<MaxC>
                  reduce_t * v, const reduce_t * w)
   {
     reduce_t * m = static_cast<reduce_t*>(0);
-    get(C, h, sh, m);
-    invert_(C, m, v, w);
-    HessianCommonNone<MaxC>::add(C, x, sx, v);
+    get(C, h, sh, m, sm);
+    invert_(C, m, sm, v, sv, w, sw);
+    HessianCommonNone<MaxC>::add(C, x, sx, v, sv);
   }
 };
 
 template <int32_t MaxC>
 struct HessianUtils<HessianType::Eye, MaxC>: HessianCommonEye<MaxC>
-{ 
+{
   static const int32_t max_length = MaxC;
-  static const int32_t max_size   = 1; 
+  static const int32_t max_size   = 1;
+
+  static FF_INLINE FF_DEVICE int32_t mat_size(int32_t size) { return 1; }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
   static FF_INLINE FF_DEVICE void 
@@ -253,9 +296,11 @@ struct HessianUtils<HessianType::Eye, MaxC>: HessianCommonEye<MaxC>
 
 template <int32_t MaxC>
 struct HessianUtils<HessianType::Diag, MaxC>: HessianCommonDiag<MaxC>
-{ 
+{
   static const int32_t max_length = MaxC;
-  static const int32_t max_size   = MaxC; 
+  static const int32_t max_size   = MaxC;
+
+  static FF_INLINE FF_DEVICE int32_t mat_size(int32_t size) { return size; }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
   static FF_INLINE FF_DEVICE void 
@@ -283,9 +328,11 @@ struct HessianUtils<HessianType::Diag, MaxC>: HessianCommonDiag<MaxC>
 
 template <int32_t MaxC>
 struct HessianUtils<HessianType::ESTATICS, MaxC>: HessianCommonEst<MaxC>
-{ 
+{
   static const int32_t max_length = MaxC;
   static const int32_t max_size   = 2*MaxC-1;
+
+  static FF_INLINE FF_DEVICE int32_t mat_size(int32_t size) { return 2*size-1; }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
   static FF_INLINE FF_DEVICE void 
@@ -332,9 +379,11 @@ struct HessianUtils<HessianType::ESTATICS, MaxC>: HessianCommonEst<MaxC>
 
 template <int32_t MaxC>
 struct HessianUtils<HessianType::Sym, MaxC>: HessianCommonSym<MaxC>
-{ 
+{
   static const int32_t max_length = MaxC;
   static const int32_t max_size   = MaxC*MaxC; //< How much we allocate on the stack!
+
+  static FF_INLINE FF_DEVICE int32_t mat_size(int32_t size) { return size*size; }
 
   template <typename scalar_t, typename offset_t, typename reduce_t> 
   static FF_INLINE FF_DEVICE void 
@@ -370,6 +419,7 @@ struct HessianUtils<HessianType::Sym, MaxC>: HessianCommonSym<MaxC>
     Cholesky::solve(C, h, v);   // solve linear system inplace
   }
 };
+
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                            Dispatcher

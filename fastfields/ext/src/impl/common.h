@@ -26,8 +26,12 @@
 #  include <ATen/cuda/CUDAApplyUtils.cuh>
 #  include <THC/THCAtomics.cuh>
 // --- DEFINES ---------------------------------------------------------
-#  define FF_INLINE __forceinline__
-#  define FF_NOINLINE __noinline__
+#  ifndef FF_INLINE
+#    define FF_INLINE __forceinline__
+#  endif
+#  ifndef FF_NOINLINE
+#    define FF_NOINLINE __noinline__
+#  endif
 #  define FF_DEVICE __device__
 #  define FF_HOST   __host__
 #  define FF_DEVICE_NAME cuda
@@ -75,13 +79,16 @@ T * alloc_and_copy_to_device(const T * obj, Stream stream)
 // === CPU =============================================================
 #else
 // --- DEFINES ---------------------------------------------------------
-#  define FF_INLINE inline
+#  ifndef FF_INLINE
+#    define FF_INLINE inline
+#  endif
 #  define FF_NOINLINE
 #  define FF_DEVICE
 #  define FF_HOST
 #  define FF_DEVICE_NAME cpu
 #  define FF_NAMESPACE_DEVICE namespace cpu
 // --- ATOMIC ADD ------------------------------------------------------
+namespace ff {
 #  define FF_ATOMIC_ADD ff::cpuAtomicAdd
 #  if AT_PARALLEL_NATIVE
 #    include <atomic>
@@ -103,7 +110,6 @@ public:
 #  elif AT_PARALLEL_NATIVE_TBB
 #    include <tbb/atomic.h>
 #  endif
-namespace ff {
   template <typename scalar_t>
   struct has_atomic_add
   {

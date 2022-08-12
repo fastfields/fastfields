@@ -2,6 +2,8 @@
 #include "../defines.h"            // useful macros
 #include "bounds_common.h"         // boundary conditions + enum
 #include "allocator.h"             // base class handling offset sizes
+#include "impl.h"                  // base class for algo implementation
+#include "vector.h"                // simple array movable to device
 #include "hessian.h"               // utility for handling Hessian matrices
 #include "utils.h"                 // utility for dispatching
 #include <ATen/ATen.h>             // tensors
@@ -53,21 +55,26 @@ namespace { // anonymous namespace > everything inside has internal linkage
 /*                                ALLOCATOR                                   */
 /*                                                                            */
 /* ========================================================================== */
-class RelaxAllocator: public Allocator {
+class RelaxAllocator: public Allocator, Moveable<true> {
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
   FF_HOST
-  RelaxAllocator(int dim, ArrayRef<double> absolute, 
-                     ArrayRef<double> membrane, ArrayRef<double> bending,
-                     ArrayRef<double> voxel_size, BoundVectorRef bound):
+  RelaxAllocator(int dim,
+                 ArrayRef<double> absolute,
+                 ArrayRef<double> membrane,
+                 ArrayRef<double> bending,
+                 ArrayRef<double> voxel_size,
+                 BoundVectorRef bound):
     dim(dim),
     VEC_UNFOLD(bound, bound,      BoundType::Replicate),
     VEC_UNFOLD(vx,    voxel_size, 1.),
     absolute(absolute),
     membrane(membrane),
-    bending(bending)
+    bending(bending),
+    num_threads(1),
+    buffer((void*)0)
   {
     vx0 = 1. / (vx0*vx0);
     vx1 = 1. / (vx1*vx1);
@@ -78,8 +85,8 @@ public:
 
   /* ~~~ FUNCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-  FF_HOST void ioset
-  (const Tensor& hess, const Tensor& grad, const Tensor& solution, const Tensor& weight)
+  FF_HOST void ioset(const Tensor& hess, const Tensor& grad,
+                     const Tensor& solution, const Tensor& weight)
   {
     init_all();
     init_gradient(grad);
@@ -233,7 +240,6 @@ class RelaxImpl {
 
   using Self     = RelaxImpl;
   using RelaxFn  = void (Self::*)(offset_t, offset_t, offset_t, offset_t) const;
-  static const int32_t MaxC  = hessian_t::max_length;
 
 public:
 
@@ -241,6 +247,7 @@ public:
   RelaxImpl(const RelaxAllocator & info):
     dim(info.dim),
     bound0(info.bound0), bound1(info.bound1), bound2(info.bound2),
+    absolute(info.C), membrane(info.C), bending(info.C), w000(info.C),
     N(static_cast<offset_t>(info.N)),
     C(static_cast<offset_t>(info.C)),
     CC(static_cast<offset_t>(info.CC)),
@@ -259,9 +266,12 @@ public:
     IFFT_ALLOC_INFO_5D(grd),
     IFFT_ALLOC_INFO_5D(hes),
     IFFT_ALLOC_INFO_5D(sol),
-    IFFT_ALLOC_INFO_5D(wgt)
+    IFFT_ALLOC_INFO_5D(wgt),
+    buffer(static_cast<reduce_t*>(info.buffer)),
+    num_threads(info.num_threads)
   {
-    if (C > MaxC) throw std::logic_error("C > MaxC. This should not happen.");
+    if (MaxC && (C > MaxC))
+      throw std::logic_error("C > MaxC. This should not happen.");
 
     set_factors(info.absolute, info.membrane, info.bending);
     set_kernel(info.vx0, info.vx1, info.vx2);
@@ -348,6 +358,9 @@ public:
 #ifndef __CUDACC__
   FF_HOST void set_relax() 
   {
+    has_absolute = any(absolute, C);
+    has_membrane = any(membrane, C);
+    has_bending  = any(bending, C);
 
     if (wgt_ptr)
     {
@@ -408,6 +421,15 @@ public:
   }
 #endif
 
+
+  template <typename Stream>
+  FF_HOST void ref_to_device(Stream stream) {
+    absolute.ref_to_device(stream);
+    membrane.ref_to_device(stream);
+    bending.ref_to_device(stream);
+    w000.ref_to_device(stream);
+  }
+
   /* ~~~ FUNCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 #ifdef __CUDACC__
@@ -453,22 +475,48 @@ public:
       Zf = 1 + (Z - fz - 1) / Fz;
     }
   }
- 
+
+  FF_HOST void alloc_buffer()
+  {
+#ifdef __CUDACC__
+    num_threads = std::static_cast<int64_t>(
+        CUDA_NUM_THREADS * GET_BLOCKS(voxcountfold()));
+    cudaMalloc(static_cast<void **>&buffer, num_threads * sizeof(T) * 2 * C);
+    buffer_stride = C;
+#else
+    num_threads = std::static_cast<int64_t>(at::get_num_threads());
+    buffer = new T[num_threads * 2 * C];
+    buffer_stride = 1;
+#endif
+  }
+
+  FF_HOST void free_buffer()
+  {
+    if (buffer)
+#ifdef __CUDACC__
+      cudaFree(buffer);
+#else
+      ::operator delete(buffer)
+#endif
+    buffer = (void *)0;
+  }
 
 private:
 
   /* ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-#define DEFINE_RELAX(SUFFIX) \
-  FF_DEVICE void relax##SUFFIX( \
-    offset_t x, offset_t y, offset_t z, offset_t n) const;
-#define DEFINE_RELAX_DIM(DIM)        \
-  DEFINE_RELAX(DIM##d_absolute)      \
-  DEFINE_RELAX(DIM##d_membrane)      \
-  DEFINE_RELAX(DIM##d_bending)       \
-  DEFINE_RELAX(DIM##d_rls_absolute)  \
-  DEFINE_RELAX(DIM##d_rls_membrane)  \
-  FF_DEVICE void solve##DIM##d(      \
-    offset_t x, offset_t y, offset_t z, offset_t n) const;
+#define DEFINE_RELAX(SUFFIX)                                \
+  FF_DEVICE void relax##SUFFIX(                             \
+    offset_t x, offset_t y, offset_t z, offset_t n,         \
+    reduce_t * val, reduce_t * wval = 0) const;
+#define DEFINE_RELAX_DIM(DIM)                               \
+  DEFINE_RELAX(DIM##d_absolute)                             \
+  DEFINE_RELAX(DIM##d_membrane)                             \
+  DEFINE_RELAX(DIM##d_bending)                              \
+  DEFINE_RELAX(DIM##d_rls_absolute)                         \
+  DEFINE_RELAX(DIM##d_rls_membrane)                         \
+  FF_DEVICE void solve##DIM##d(                             \
+    offset_t x, offset_t y, offset_t z, offset_t n,         \
+    reduce_t * val, reduce_t * wval = 0) const;
 
   DEFINE_RELAX()
   DEFINE_RELAX_DIM(1)
@@ -478,21 +526,25 @@ private:
   /* ~~~ FOLD NAVIGATORS  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
   // This is super hacky!!!
   // I make sure that [fx fy fz Xf Yf Zf redblack] are the first fields in 
-  // the object so tht I can easily access them from the adress of the 
-  // englobing object. This is so I can mutate these fields when we change fold
+  // the object so that I can easily access them from the address of the
+  // object. This is so I can mutate these fields when we change fold
   // without having to move the whole object again from host to device.
 
-  offset_t fx; // Index of the fold
+  offset_t fx;          // Index of the fold
   offset_t fy;
   offset_t fz;
-  offset_t Xf; // Size of the fold
+  offset_t Xf;          // Size of the fold
   offset_t Yf;
   offset_t Zf;
-  offset_t redblack;  // Index of the fold for checkerboard scheme
+  offset_t redblack;    // Index of the fold for checkerboard scheme
   offset_t bandwidth;
-  offset_t Fx; // Fold window
+  offset_t Fx;          // Fold window
   offset_t Fy;
   offset_t Fz;
+
+  int64_t num_threads;      // Maximum number of threads running in parallel
+  reduce_t * buffer;        // Global buffer for val/wval
+  offset_t buffer_stride    // Stride to move into the buffer (cpu: 1, cuda: num_threads)
 
   /* ~~~ OPTIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
   offset_t          dim;
@@ -500,19 +552,15 @@ private:
   BoundType         bound0;          // boundary condition  // x|W
   BoundType         bound1;          // boundary condition  // y|H
   BoundType         bound2;          // boundary condition  // z|D
-  reduce_t          absolute[MaxC];  // penalty on absolute values
-  reduce_t          membrane[MaxC];  // penalty on first derivatives
-  reduce_t          bending[MaxC];   // penalty on second derivatives
+  Vector<reduce_t>  absolute;        // penalty on absolute values
+  Vector<reduce_t>  membrane;        // penalty on first derivatives
+  Vector<reduce_t>  bending;         // penalty on second derivatives
 
 #ifndef __CUDACC__
   RelaxFn           relax_;          // Pointer to relax function
 #endif
 
-  bool has_absolute;
-  bool has_membrane;
-  bool has_bending;
-
-  reduce_t w000[MaxC];
+  Vector<reduce_t> w000;
   reduce_t m100;
   reduce_t m010;
   reduce_t m001;
@@ -529,11 +577,11 @@ private:
   /* ~~~ NAVIGATORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 #define DECLARE_STRIDE_INFO_5D(NAME)   \
-  offset_t NAME##_sN;               \
-  offset_t NAME##_sC;               \
-  offset_t NAME##_sX;               \
-  offset_t NAME##_sY;               \
-  offset_t NAME##_sZ;               \
+  offset_t NAME##_sN;                  \
+  offset_t NAME##_sC;                  \
+  offset_t NAME##_sX;                  \
+  offset_t NAME##_sY;                  \
+  offset_t NAME##_sZ;                  \
   scalar_t * NAME##_ptr;
 
   offset_t N;
@@ -555,8 +603,11 @@ private:
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax(
-    offset_t x, offset_t y, offset_t z, offset_t n) const 
+    offset_t x, offset_t y, offset_t z, offset_t n, int32_t thread_id) const
 {
+  reduce_t * val = &buffer[thread_id];
+  reduce_t * wval = &val[num_threads * C];
+
 #ifdef __CUDACC__
 #   define ABSOLUTE 4
 #   define MEMBRANE 8
@@ -564,46 +615,46 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax(
 #   define RLS      16
   switch (mode) {
     case 1 + MEMBRANE + RLS:
-      return relax1d_rls_membrane(x, y, z, n);
+      return relax1d_rls_membrane(x, y, z, n, val, wval);
     case 2 + MEMBRANE + RLS:
-      return relax2d_rls_membrane(x, y, z, n);
+      return relax2d_rls_membrane(x, y, z, n, val, wval);
     case 3 + MEMBRANE + RLS:
-      return relax3d_rls_membrane(x, y, z, n);
+      return relax3d_rls_membrane(x, y, z, n, val, wval);
     case 1 + ABSOLUTE + RLS:
-      return relax1d_rls_absolute(x, y, z, n);
+      return relax1d_rls_absolute(x, y, z, n, val, wval);
     case 2 + ABSOLUTE + RLS:
-      return relax2d_rls_absolute(x, y, z, n);
+      return relax2d_rls_absolute(x, y, z, n, val, wval);
     case 3 + ABSOLUTE + RLS:
-      return relax3d_rls_absolute(x, y, z, n);
+      return relax3d_rls_absolute(x, y, z, n, val, wval);
     case 1 + BENDING:
-      return relax1d_bending(x, y, z, n);
+      return relax1d_bending(x, y, z, n, val);
     case 2 + BENDING:
-      return relax2d_bending(x, y, z, n);
+      return relax2d_bending(x, y, z, n, val);
     case 3 + BENDING:
-      return relax3d_bending(x, y, z, n);
+      return relax3d_bending(x, y, z, n, val);
     case 1 + MEMBRANE:
-      return relax1d_membrane(x, y, z, n);
+      return relax1d_membrane(x, y, z, n, val);
     case 2 + MEMBRANE:
-      return relax2d_membrane(x, y, z, n);
+      return relax2d_membrane(x, y, z, n, val);
     case 3 + MEMBRANE:
-      return relax3d_membrane(x, y, z, n);
+      return relax3d_membrane(x, y, z, n, val);
     case 1 + ABSOLUTE:
-      return relax1d_absolute(x, y, z, n);
+      return relax1d_absolute(x, y, z, n, val);
     case 2 + ABSOLUTE:
-      return relax2d_absolute(x, y, z, n);
+      return relax2d_absolute(x, y, z, n, val);
     case 3 + ABSOLUTE:
-      return relax3d_absolute(x, y, z, n);
+      return relax3d_absolute(x, y, z, n, val);
     case 1: case 1 + RLS:
-      return solve1d(x, y, z, n);
+      return solve1d(x, y, z, n, val);
     case 2: case 2 + RLS:
-      return solve2d(x, y, z, n);
+      return solve2d(x, y, z, n, val);
     case 3: case 3 + RLS:
-      return solve3d(x, y, z, n);
+      return solve3d(x, y, z, n, val);
     default:
-      return solve3d(x, y, z, n);
+      return solve3d(x, y, z, n, val);
   }
 #else
-  CALL_MEMBER_FN(*this, relax_)(x, y, z, n);
+  CALL_MEMBER_FN(*this, relax_)(x, y, z, n, val, wval);
 #endif 
 }
 
@@ -624,18 +675,18 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop_band(
   int threadIdx, int blockIdx, int blockDim, int gridDim) const {
 
   int64_t index = blockIdx * blockDim + threadIdx;
-  int64_t nthreads = N * Xf * Yf * Zf;
   offset_t YZf   = Yf * Zf;
   offset_t XYZf  = Xf * YZf;
+  offset_t XYZNf = N  * XYZf;
   offset_t n, x, y, z;
-  for (offset_t i=index; index < nthreads; index += blockDim*gridDim, i=index)
+  for (offset_t i=index; index < XYZNf; index += blockDim*gridDim, i=index)
   {
     // Convert index: linear to sub
     n  = (i/XYZf);
     x  = ((i/YZf) % Xf) * Fx + fx;
     y  = ((i/Zf)  % Yf) * Fy + fy;
     z  = (i       % Zf) * Fz + fz;
-    relax(x, y, z, n);
+    relax(x, y, z, n, index);
   }
 }
 
@@ -644,11 +695,11 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop_redblack(
   int threadIdx, int blockIdx, int blockDim, int gridDim) const {
 
   int64_t index = blockIdx * blockDim + threadIdx;
-  int64_t nthreads = N * X * Y * Z;
   offset_t YZ   = Y * Z;
   offset_t XYZ  = X * YZ;
+  offset_t XYZN = N * XYZ;
   offset_t n, x, y, z;
-  for (offset_t i=index; index < nthreads; index += blockDim*gridDim, i=index)
+  for (offset_t i=index; index < XYZN; index += blockDim*gridDim, i=index)
   {
     // Convert index: linear to sub
     n  = (i/XYZ);
@@ -656,7 +707,7 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop_redblack(
     y  = ((i/Z)  % Y);
     z  = (i      % Z);
     if ((x+y+z) % 2 == redblack)
-      relax(x, y, z, n);
+      relax(x, y, z, n, index);
   }
 }
 
@@ -690,7 +741,7 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop_redblack()
         y  = (i/Z)  % Y;
         z  = i % Z;
         if ((x+y+z) % 2 == redblack)
-          relax(x, y, z, n);
+          relax(x, y, z, n, at::get_thread_num());
       }
     });
   }
@@ -713,7 +764,7 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop_band()
         x  = ((i/YZf) % Xf) * Fx + fx;
         y  = ((i/Zf)  % Yf) * Fy + fy;
         z  = (i       % Zf) * Fz + fz;
-        relax(x, y, z, n);
+        relax(x, y, z, n, at::get_thread_num());
       }
     });
   }
@@ -792,9 +843,8 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop_band()
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax3d_bending(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val, reduce_t * wval) const
 {
-  reduce_t val[MaxC];
   GET_SOL_POINTER
   {
     GET_COORD1
@@ -824,7 +874,7 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax3d_bending(
       reduce_t w010 = mm * m010 + bb * b010;
       reduce_t w001 = mm * m001 + bb * b001;
 
-      val[c] = (*grd) - (
+      val[c*buffer_stride] = (*grd) - (
             aa * center
           +(w100*(get(sol, x0,    sx0)     + get(sol, x1,    sx1))
           + w010*(get(sol, y0,    sy0)     + get(sol, y1,    sy1))
@@ -851,9 +901,8 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax3d_bending(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax3d_membrane(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val) const
 {
-  reduce_t val[MaxC];
   GET_SOL_POINTER
   {
     GET_COORD1
@@ -889,10 +938,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax3d_membrane(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax3d_absolute(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val) const
 {
   GET_SOL_POINTER
-  reduce_t val[FF_MAX_NUM_CHANNELS];
   {
     GET_GRD_POINTER
     for (offset_t c = 0; c < C; ++c, sol += sol_sC, grd += grd_sC)
@@ -941,10 +989,9 @@ diag(L) = [ |m10| |m00| |m10| ] * w
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax3d_rls_membrane(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val, reduce_t * wval) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC], wval[MaxC];
   {
     GET_COORD1
     GET_SIGN1
@@ -999,10 +1046,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax3d_rls_membrane(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax3d_rls_absolute(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val, reduce_t * wval) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC], wval[MaxC];
   {
     GET_GRD_POINTER
     GET_WGT_POINTER
@@ -1068,10 +1114,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax3d_rls_absolute(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax2d_bending(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC];
   {
     GET_COORD1
     GET_COORD2
@@ -1120,10 +1165,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax2d_bending(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax2d_membrane(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC];
   {
     GET_COORD1
     GET_SIGN1 
@@ -1158,10 +1202,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax2d_membrane(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax2d_absolute(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC];
   {
     GET_GRD_POINTER
     for (offset_t c = 0; c < C; ++c, sol += sol_sC, grd += grd_sC)
@@ -1177,10 +1220,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax2d_absolute(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax2d_rls_membrane(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val, reduce_t * wval) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC], wval[MaxC];
   {
     GET_COORD1
     GET_SIGN1
@@ -1231,10 +1273,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax2d_rls_membrane(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax2d_rls_absolute(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val, reduce_t * wval) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC], wval[MaxC];
   {
     GET_GRD_POINTER
     GET_WGT_POINTER
@@ -1287,10 +1328,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax2d_rls_absolute(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax1d_bending(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC];
   {
     GET_COORD1
     GET_COORD2
@@ -1334,10 +1374,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax1d_bending(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax1d_membrane(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC];
   {
     GET_COORD1
     GET_SIGN1 
@@ -1371,10 +1410,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax1d_membrane(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax1d_absolute(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC];
   {
     GET_GRD_POINTER
     for (offset_t c = 0; c < C; ++c, sol += sol_sC, grd += grd_sC)
@@ -1390,10 +1428,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax1d_absolute(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax1d_rls_membrane(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val, reduce_t * wval) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC], wval[MaxC];
   {
     GET_COORD1
     GET_SIGN1
@@ -1440,10 +1477,9 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax1d_rls_membrane(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax1d_rls_absolute(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val, reduce_t * wval) const
 {
   GET_SOL_POINTER
-  reduce_t val[MaxC], wval[MaxC];
   {
     GET_GRD_POINTER
     GET_WGT_POINTER
@@ -1467,9 +1503,8 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::relax1d_rls_absolute(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::solve1d(
-  offset_t x, offset_t y, offset_t z, offset_t n) const 
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val) const
 {
-  reduce_t val[MaxC];
   {
     const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + z*grd_sZ + n*grd_sN);
     for (offset_t c = 0; c < C; ++c,  grd += grd_sC) 
@@ -1483,9 +1518,8 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::solve1d(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::solve2d(
-  offset_t x, offset_t y, offset_t z, offset_t n) const 
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val) const
 {
-  reduce_t val[MaxC];
   {
     const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + n*grd_sN);
     for (offset_t c = 0; c < C; ++c,  grd += grd_sC) 
@@ -1499,9 +1533,8 @@ void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::solve2d(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void RelaxImpl<scalar_t,offset_t,reduce_t,hessian_t>::solve3d(
-  offset_t x, offset_t y, offset_t z, offset_t n) const 
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * val) const
 {
-  reduce_t val[MaxC];
   {
     const scalar_t *grd = grd_ptr + (x*grd_sX + n*grd_sN);
     for (offset_t c = 0; c < C; ++c,  grd += grd_sC) 
@@ -1656,7 +1689,7 @@ struct DoAlgo<0> {
         {
           using Impl = RelaxImpl<scalar_t, int32_t, double, utils_t>;
           Impl   algo(alloc);
-          Impl * palgo = alloc_and_copy_to_device(&algo, stream);
+          Impl * palgo = algo.to_device(stream);
           for (int32_t i=0; i < nb_iter; ++i)
             for (int32_t fold = 0; fold < algo.foldcount(); ++fold) {
                 algo.set_fold(fold);
@@ -1671,7 +1704,7 @@ struct DoAlgo<0> {
         {
           using Impl = RelaxImpl<scalar_t, int64_t, double, utils_t>;
           Impl   algo(alloc);
-          Impl * palgo = alloc_and_copy_to_device(&algo, stream);
+          Impl * palgo = algo.to_device(stream);
           for (int64_t i=0; i < nb_iter; ++i)
             for (int64_t fold = 0; fold < algo.foldcount(); ++fold) {
                 algo.set_fold(fold);
@@ -1719,7 +1752,7 @@ struct DoAlgo<1> {
         {
           using Impl = RelaxImpl<scalar_t, int32_t, double, utils_t>;
           Impl   algo(alloc);
-          Impl * palgo = alloc_and_copy_to_device(&algo, stream);
+          Impl * palgo = algo.to_device(stream);
           for (int32_t i=0; i < nb_iter; ++i)
             for (int32_t fold = 0; fold < algo.foldcount(); ++fold) {
                 algo.set_fold(fold);
@@ -1734,7 +1767,7 @@ struct DoAlgo<1> {
         {
           using Impl = RelaxImpl<scalar_t, int64_t, double, utils_t>;
           Impl   algo(alloc);
-          Impl * palgo = alloc_and_copy_to_device(&algo, stream);
+          Impl * palgo = algo.to_device(stream);
           for (int64_t i=0; i < nb_iter; ++i)
             for (int64_t fold = 0; fold < algo.foldcount(); ++fold) {
                 algo.set_fold(fold);
