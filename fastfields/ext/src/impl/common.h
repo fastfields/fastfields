@@ -88,10 +88,10 @@ T * alloc_and_copy_to_device(const T * obj, Stream stream)
 #  define FF_DEVICE_NAME cpu
 #  define FF_NAMESPACE_DEVICE namespace cpu
 // --- ATOMIC ADD ------------------------------------------------------
-namespace ff {
 #  define FF_ATOMIC_ADD ff::cpuAtomicAdd
 #  if AT_PARALLEL_NATIVE
 #    include <atomic>
+namespace ff {
 template <typename T>
 class has_fetch_add
 {
@@ -107,9 +107,11 @@ class has_fetch_add
 public:
     enum { value = sizeof(test<T>(0)) == sizeof(char) };
 };
+} // namespace ff
 #  elif AT_PARALLEL_NATIVE_TBB
 #    include <tbb/atomic.h>
 #  endif
+namespace ff {
   template <typename scalar_t>
   struct has_atomic_add
   {

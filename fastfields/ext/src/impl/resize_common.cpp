@@ -1,5 +1,5 @@
 /*
-WARFFNG
+WARNING
 
 The "restrict" functions are not very robust.
 I'd like to reimplement restrict similarly to what I did in "multires",
@@ -12,7 +12,7 @@ some thinking to work with arbitrary scaling factors.
 #include "../grid_align.h"         // enum type for align mode
 #include "bounds_common.h"         // boundary conditions + enum
 #include "interpolation_common.h"  // interpolation weights + enum
-#include "allocator.h"             // base class handling offset sizes
+#include "navigator.h"             // base class handling offset sizes
 #include <ATen/ATen.h>             // tensors
 #include <tuple>                   // needed by prepare_tensors
 
@@ -61,13 +61,13 @@ namespace { // anonymous namespace > everything inside has internal linkage
 //                        INDEXING UTILS
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-class ResizeAllocator: public Allocator {
+class ResizeNavigator: public Navigator {
 public:
 
   // ~~~ CONSTRUCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   FF_HOST
-  ResizeAllocator(int dim, BoundVectorRef bound,
+  ResizeNavigator(int dim, BoundVectorRef bound,
                     InterpolationVectorRef interpolation,
                     ArrayRef<double> shift,
                     ArrayRef<double> scale,
@@ -143,7 +143,7 @@ private:
   DECLARE_ALLOC_INFO_5D(src)
   DECLARE_ALLOC_INFO_5D(tgt)
 
-  // Allow ResizeImpl's constructor to access ResizeAllocator's
+  // Allow ResizeImpl's constructor to access ResizeNavigator's
   // private members.
   template <typename scalar_t, typename offset_t>
   friend class ResizeImpl;
@@ -155,7 +155,7 @@ private:
 
 
 FF_HOST
-void ResizeAllocator::init_all()
+void ResizeNavigator::init_all()
 {
   N = C = 1L;
   src_X = src_Y = src_Z = 1L;
@@ -165,7 +165,7 @@ void ResizeAllocator::init_all()
 }
 
 FF_HOST
-void ResizeAllocator::init_source(const Tensor& input)
+void ResizeNavigator::init_source(const Tensor& input)
 {
   N       = input.size(0);
   C       = input.size(1);
@@ -182,7 +182,7 @@ void ResizeAllocator::init_source(const Tensor& input)
 }
 
 FF_HOST
-void ResizeAllocator::init_target(const Tensor& input)
+void ResizeNavigator::init_target(const Tensor& input)
 {
   tgt_X   = input.size(2);
   tgt_Y   = dim < 2 ? 1L : input.size(3);
@@ -208,7 +208,7 @@ class ResizeImpl {
 public:
 
   // ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  ResizeImpl(const ResizeAllocator & info):
+  ResizeImpl(const ResizeNavigator & info):
 
 #define COPY_FROM_INFO(name) name(info.name)
 #define COPY_FROM_INFO3(name) \
@@ -1619,7 +1619,7 @@ Tensor resize_impl(
   ArrayRef<double> shifts(std::get<0>(affines));
   ArrayRef<double> scales(std::get<1>(affines));
 
-  ResizeAllocator info(source.dim()-2, bound, interpolation, shifts, scales, do_adjoint);
+  ResizeNavigator info(source.dim()-2, bound, interpolation, shifts, scales, do_adjoint);
   info.ioset(source, target);
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -1676,7 +1676,7 @@ Tensor resize_impl(
   ArrayRef<double> shifts(std::get<0>(affines));
   ArrayRef<double> scales(std::get<1>(affines));
 
-  ResizeAllocator info(source.dim()-2, bound, interpolation, shifts, scales, do_adjoint);
+  ResizeNavigator info(source.dim()-2, bound, interpolation, shifts, scales, do_adjoint);
   info.ioset(source, target);
 
   AT_DISPATCH_FLOATING_TYPES(source.scalar_type(), "resize_impl", [&] {

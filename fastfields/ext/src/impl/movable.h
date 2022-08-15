@@ -1,4 +1,4 @@
-#include "../common.h"
+#include "common.h"
 
 namespace ff {
 
@@ -16,7 +16,12 @@ namespace ff {
     }
 #else
     template <typename Stream>
-    FF_HOST Moveable * to_device(Stream stream) const {
+    FF_HOST const Moveable * to_device(Stream stream) const {
+        return this;
+    }
+
+    template <typename Stream>
+    FF_HOST Moveable * to_device(Stream stream) {
         return this;
     }
 #endif
@@ -44,7 +49,12 @@ namespace ff {
     }
 #else
     template <typename Stream>
-    FF_HOST Moveable * to_device(Stream stream) const {
+    FF_HOST const Moveable * to_device(Stream stream) const {
+        return this;
+    }
+
+    template <typename Stream>
+    FF_HOST Moveable * to_device(Stream stream) {
         return this;
     }
 #endif

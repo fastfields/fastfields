@@ -1,6 +1,5 @@
 #include "movable.h"
-#include "../common.h"
-#include <vector>
+#include "common.h"
 
 namespace ff {
 
@@ -13,7 +12,7 @@ namespace ff {
   /// Dynamic array that can be moved to CUDA devices
   /// It explicitly copies data on construction.
   template <typename T>
-  class Vector: public Movable<true> {
+  class Vector: public Moveable<true> {
   public:
     using iterator = T*;
     using const_iterator = const T*;
@@ -30,7 +29,7 @@ namespace ff {
     Vector(size_t size, const T & value):
       _data(size ? new T[size] : static_cast<T*>(nullptr))
     {
-      for (i=0; i < size; ++i)
+      for (size_t i=0; i < size; ++i)
         _data[i] = value;
     }
 
@@ -39,34 +38,27 @@ namespace ff {
     Vector(const U * data, size_t size):
       _data(size ? new T[size] : static_cast<T*>(nullptr))
     {
-      for (i=0; i < size; ++i)
+      for (size_t i=0; i < size; ++i)
         _data[i] = static_cast<T>(data[i]);
     }
 
     /// Copy from a buffer (given as a range)
     template <typename U>
     Vector(const U * begin, const U * end):
-      _data(begin == end ? static_cast<T*>(nullptr) : new T[end - other])
+      _data(begin == end ? static_cast<T*>(nullptr) : new T[end - begin])
     {
-      for (size_t i = 0, auto x = begin; x < end; ++x, ++i)
+      auto x = begin;
+      for (size_t i = 0; x < end; ++x, ++i)
         _data[i] = static_cast<T>(*x);
     }
 
     /// Copy from a C array.
-    template <typename U, size_t size>
-    Vector(const U (&data)[size]):
-      _data(N ? new T[size] : static_cast<T*>(nullptr))
+    template <typename U, size_t SIZE>
+    Vector(const U (&data)[SIZE]):
+      _data(SIZE ? new T[SIZE] : static_cast<T*>(nullptr))
     {
-      for (size_t i = 0, i < size; ++x, ++i)
-        _data[i] = static_cast<T>(*x);
-    }
-
-    /// Fallback: assume iterable
-    template <typename Iterable>
-    Vector(const Iterable & other):
-      _data(other.size() ? static_cast<T*>(nullptr) : new T[other.size()])
-    {
-      for (size_t i=0, auto x=other.begin(); x<other.end(); ++x, ++i)
+      auto x = data;
+      for (size_t i = 0; i < SIZE; ++x, ++i)
         _data[i] = static_cast<T>(*x);
     }
 
@@ -110,7 +102,11 @@ namespace ff {
     FF_INLINE constexpr reverse_iterator rend() const {
     return reverse_iterator(begin());
     }
-    
+
+    FF_INLINE constexpr T* data() {
+    return _data;
+    }
+
     FF_INLINE constexpr const T* data() const {
     return _data;
     }
@@ -124,41 +120,43 @@ namespace ff {
   /// allows iterators and additional helpers to be defined.
   template <typename T>
   class SizedVector: public Vector<T> {
+    using Base = Vector<T>;
   public:
+    using iterator = typename Vector<T>::iterator;
+    using const_iterator = typename Vector<T>::const_iterator;
+    using size_type = typename Vector<T>::size_type;
+    using value_type = typename Vector<T>::value_type;
+    using reverse_iterator = typename Vector<T>::reverse_iterator;
   
     /// Allocate a given size
-    SizedVector(size_t size=0): Vector(size), _size(size) {}
+    SizedVector(size_t size=0): Base(size), _size(size) {}
 
     /// Allocate and fill
-    SizedVector(size_t size, const T & value): Vector(size, value), _size(size) {}
+    SizedVector(size_t size, const T & value): Base(size, value), _size(size) {}
 
     /// Copy from a buffer (provided as address + size)
-    SizedVector(const T * data, size_t size): Vector(size, value), _size(size) {}
+    SizedVector(const T * data, size_t size): Base(data, size), _size(size) {}
 
     /// Copy from a buffer (given as a range)
-    SizedVector(const T * begin, const T * end): Vector(begin, end), _size(end-begin) {}
+    SizedVector(const T * begin, const T * end): Base(begin, end), _size(end-begin) {}
 
     /// Copy from a C array.
-    template <size_t size>
-    SizedVector(const T (&data)[size]): Vector(data), _size(size) {}
-
-    /// Fallback: assume iterable
-    template <typename Iterable>
-    SizedVector(const Iterable & other): Vector(other), _size(other.size()) {}
+    template <size_t SIZE>
+    SizedVector(const T (&data)[SIZE]): Base(data), _size(SIZE) {}
 
     FF_INLINE constexpr size_t empty() const { return _size == 0; }
     FF_INLINE constexpr size_t size() const { return _size; }
 
     FF_INLINE constexpr iterator end() {
-    return _data + _size;
+    return this->_data + _size;
     }
     
     FF_INLINE constexpr iterator end() const {
-    return _data + _size;
+    return this->_data + _size;
     }
     
     FF_INLINE constexpr const_iterator cend() const {
-    return _data + _size;
+    return this->_data + _size;
     }
 
   protected:
@@ -201,14 +199,9 @@ namespace ff {
      {}
 
     /// Copy from a C array.
-    template <typename U, size_t size>
-    VectorRef(U (&data)[size]):
-      _data(N ? data : static_cast<T*>(nullptr)), _size(size) {}
-
-    /// From a vector
-    template <typename T>
-    VectorRef(std::vector<T> & other):
-      _data(other.data()), _size(other.size()) {}
+    template <typename U, size_t SIZE>
+    VectorRef(U (&data)[SIZE]):
+      _data(SIZE ? data : static_cast<T*>(nullptr)), _size(SIZE) {}
 
     FF_INLINE constexpr T* data() { return _data; }
     FF_INLINE constexpr const T* data() const { return _data; }
@@ -298,11 +291,6 @@ namespace ff {
     template <typename U, size_t size>
     ConstVectorRef(const U (&data)[size]):
       _data(N ? data : static_cast<T*>(nullptr)), _size(size) {}
-
-    /// From a vector
-    template <typename T>
-    ConstVectorRef(const std::vector<T> & other):
-      _data(other.data()), _size(other.size()) {}
 
     FF_INLINE constexpr const T* data() const { return _data; }
 
@@ -468,10 +456,6 @@ public:
     template <typename U, size_t size>
     StridedVectorRef(U (&data)[size], size_t stride=1):
       VectorRef(data), _stride(stride) {}
-
-    /// From a vector
-    template <typename T>
-    StridedVectorRef(std::vector<T> & other): VectorRef(other), _stride(1) {}
 
     FF_INLINE constexpr size_t stride() const { return _stride; }
 

@@ -1,7 +1,7 @@
 #include "common.h"                // write C++/CUDA compatible code
 #include "../defines.h"            // useful macros
 #include "bounds_common.h"         // boundary conditions + enum
-#include "allocator.h"             // base class handling offset sizes
+#include "navigator.h"             // base class handling offset sizes
 // #include "utils.h"                 // unrolled for loop.h"
 #include <ATen/ATen.h>             // tensors
 
@@ -45,13 +45,13 @@ namespace { // anonymous namespace > everything inside has internal linkage
 /*                                ALLOCATOR                                   */
 /*                                                                            */
 /* ========================================================================== */
-class RegulariserAllocator: public Allocator {
+class RegulariserNavigator: public Navigator {
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
   FF_HOST
-  RegulariserAllocator(int dim, ArrayRef<double> absolute, 
+  RegulariserNavigator(int dim, ArrayRef<double> absolute, 
                        ArrayRef<double> membrane, ArrayRef<double> bending,
                        ArrayRef<double> voxel_size, BoundVectorRef bound):
     dim(dim),
@@ -129,7 +129,7 @@ private:
   DECLARE_ALLOC_INFO_5D(out)
   DECLARE_ALLOC_INFO_5D(hes)
 
-  // Allow RegulariserImpl's constructor to access RegulariserAllocator's
+  // Allow RegulariserImpl's constructor to access RegulariserNavigator's
   // private members.
   template <typename scalar_t, typename offset_t, typename reduce_t>
   friend class RegulariserImpl;
@@ -137,7 +137,7 @@ private:
 
 
 FF_HOST
-void RegulariserAllocator::init_all()
+void RegulariserNavigator::init_all()
 {
   N = C = CC = X = Y = Z = 1L;
   inp_sN  = inp_sC   = inp_sX   = inp_sY  = inp_sZ   = 0L;
@@ -149,7 +149,7 @@ void RegulariserAllocator::init_all()
 }
 
 FF_HOST
-void RegulariserAllocator::init_input(const Tensor& input)
+void RegulariserNavigator::init_input(const Tensor& input)
 {
   N       = input.size(0);
   C       = input.size(1);
@@ -166,7 +166,7 @@ void RegulariserAllocator::init_input(const Tensor& input)
 }
 
 FF_HOST
-void RegulariserAllocator::init_weight(const Tensor& weight)
+void RegulariserNavigator::init_weight(const Tensor& weight)
 {
   if (!weight.defined() || weight.numel() == 0)
     return;
@@ -180,7 +180,7 @@ void RegulariserAllocator::init_weight(const Tensor& weight)
 }
 
 FF_HOST
-void RegulariserAllocator::init_output(const Tensor& output)
+void RegulariserNavigator::init_output(const Tensor& output)
 {
   out_sN   = output.stride(0);
   out_sC   = output.stride(1);
@@ -192,7 +192,7 @@ void RegulariserAllocator::init_output(const Tensor& output)
 }
 
 FF_HOST
-void RegulariserAllocator::init_hessian(const Tensor& hessian)
+void RegulariserNavigator::init_hessian(const Tensor& hessian)
 {
   if (!hessian.defined() || hessian.numel() == 0)
     return;
@@ -230,7 +230,7 @@ class RegulariserImpl {
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-  RegulariserImpl(const RegulariserAllocator & info):
+  RegulariserImpl(const RegulariserNavigator & info):
     dim(info.dim),
     bound0(info.bound0), bound1(info.bound1), bound2(info.bound2),
     N(static_cast<offset_t>(info.N)),
@@ -1367,7 +1367,7 @@ FF_HOST Tensor regulariser_impl(
   weight       = std::get<1>(tensors);
   hessian      = std::get<2>(tensors);
 
-  RegulariserAllocator info(input.dim()-2, absolute, membrane, bending, voxel_size, bound);
+  RegulariserNavigator info(input.dim()-2, absolute, membrane, bending, voxel_size, bound);
   info.ioset(input, output, weight, hessian);
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -1417,7 +1417,7 @@ FF_HOST Tensor regulariser_impl(
   weight       = std::get<1>(tensors);
   hessian      = std::get<2>(tensors);
 
-  RegulariserAllocator info(input.dim()-2, absolute, membrane, bending, voxel_size, bound);
+  RegulariserNavigator info(input.dim()-2, absolute, membrane, bending, voxel_size, bound);
   info.ioset(input, output, weight, hessian);
 
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "regulariser_impl", [&] {

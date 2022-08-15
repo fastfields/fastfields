@@ -25,6 +25,7 @@
 #include "common.h"
 #include "bounds_common.h"
 #include "interpolation_common.h"
+#include "navigator.h"
 #include <ATen/ATen.h>
 #include <tuple>
 #include <limits>
@@ -80,7 +81,7 @@ namespace { // anonymous namespace > everything inside has internal linkage
 // (On CPU, we always use 64 bit offsets because it doesn't make a huge
 // difference. It would be different if we had a vectorized
 // implementation as in PyTorch).
-class PushPullAllocator {
+class PushPullNavigator: Navigator {
 public:
 
   static constexpr int64_t max_int32 = std::numeric_limits<int32_t>::max();
@@ -88,7 +89,7 @@ public:
   // ~~~ CONSTRUCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   FF_HOST
-  PushPullAllocator(int dim, BoundVectorRef bound,
+  PushPullNavigator(int dim, BoundVectorRef bound,
                     InterpolationVectorRef interpolation,
                     int extrapolate, bool do_pull, bool do_push,
                     bool do_count, bool do_grad, bool do_sgrad):
@@ -123,7 +124,7 @@ public:
   //       as they are not used anymore.
 
   FF_HOST
-  PushPullAllocator(int dim, BoundType bound, InterpolationVectorRef interpolation,
+  PushPullNavigator(int dim, BoundType bound, InterpolationVectorRef interpolation,
                     int extrapolate, bool do_pull, bool do_push,
                     bool do_count, bool do_grad, bool do_sgrad):
     dim(dim),
@@ -151,7 +152,7 @@ public:
   }
 
   FF_HOST
-  PushPullAllocator(int dim, BoundVectorRef bound, InterpolationType interpolation,
+  PushPullNavigator(int dim, BoundVectorRef bound, InterpolationType interpolation,
                     int extrapolate, bool do_pull, bool do_push,
                     bool do_count, bool do_grad, bool do_sgrad):
      dim(dim),
@@ -176,7 +177,7 @@ public:
   }
 
   FF_HOST
-  PushPullAllocator(int dim, BoundType bound, InterpolationType interpolation,
+  PushPullNavigator(int dim, BoundType bound, InterpolationType interpolation,
                     int extrapolate, bool do_pull, bool do_push,
                     bool do_count, bool do_grad, bool do_sgrad):
     dim(dim),
@@ -269,39 +270,6 @@ public:
 
 private:
 
-  // Copied from aten/src/ATen/native/IndexingUtils.cpp in PyTorch 1.6.
-  // It is used to decide to which pointer type we should dispatch to.
-  // Basically, we need to make sure that the "furthest" element we need
-  // to reach is less than max_elem away.
-  static bool tensorCanUse32BitIndexMath(
-    const Tensor &t, int64_t max_elem=max_int32)
-  {
-    int64_t elements = t.numel();
-    if (elements >= max_elem) {
-      return false;
-    }
-    if (elements == 0) {
-      return max_elem > 0;
-    }
-
-    int64_t offset = 0;
-    int64_t linearId = elements - 1;
-
-    // NOTE: Assumes all strides are positive, which is true for now
-    for (int i = t.dim() - 1; i >= 0; --i) {
-      int64_t curDimIndex = linearId % t.size(i);
-      int64_t curDimOffset = curDimIndex * t.stride(i);
-      offset += curDimOffset;
-      linearId /= t.size(i);
-    }
-
-    if (offset >= max_elem) {
-      return false;
-    }
-
-    return true;
-  }
-
   // ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   FF_HOST void init_all();
   FF_HOST void init_source(const Tensor& source);
@@ -378,7 +346,7 @@ private:
   bool grad_32b_ok;
   void *grad_ptr;
 
-  // Allow PushPullImpl's constructor to access PushPullAllocator's
+  // Allow PushPullImpl's constructor to access PushPullNavigator's
   // private members.
   template <typename scalar_t, typename offset_t>
   friend class PushPullImpl;
@@ -389,7 +357,7 @@ private:
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 FF_HOST
-void PushPullAllocator::init_all()
+void PushPullNavigator::init_all()
 {
   src_opt = grid_opt = trgt_opt = TensorOptions();
   N = C   = 1L;
@@ -406,7 +374,7 @@ void PushPullAllocator::init_all()
 }
 
 FF_HOST
-void PushPullAllocator::init_source(const Tensor& source)
+void PushPullNavigator::init_source(const Tensor& source)
 {
   N       = source.size(0);
   C       = source.size(1);
@@ -424,7 +392,7 @@ void PushPullAllocator::init_source(const Tensor& source)
 }
 
 FF_HOST
-void PushPullAllocator::init_source(IntArrayRef source_size)
+void PushPullNavigator::init_source(IntArrayRef source_size)
 {
   src_X = source_size[0];
   src_Y = dim < 2 ? 1L : source_size[1];
@@ -432,7 +400,7 @@ void PushPullAllocator::init_source(IntArrayRef source_size)
 }
 
 FF_HOST
-void PushPullAllocator::init_grid(const Tensor& grid)
+void PushPullNavigator::init_grid(const Tensor& grid)
 {
   N        = grid.size(0);
   trgt_X   = grid.size(1);
@@ -449,7 +417,7 @@ void PushPullAllocator::init_grid(const Tensor& grid)
 }
 
 FF_HOST
-void PushPullAllocator::init_target(const Tensor& target)
+void PushPullNavigator::init_target(const Tensor& target)
 {
   N        = target.size(0);
   C        = target.size(1);
@@ -473,7 +441,7 @@ void PushPullAllocator::init_target(const Tensor& target)
 }
 
 FF_HOST
-void PushPullAllocator::init_output()
+void PushPullNavigator::init_output()
 {
   output.clear();
   if (do_pull) {
@@ -582,7 +550,7 @@ class PushPullImpl {
 public:
 
   // ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  PushPullImpl(const PushPullAllocator & info):
+  PushPullImpl(const PushPullNavigator & info):
     output(info.output),
     dim(info.dim),
     bound0(info.bound0), bound1(info.bound1), bound2(info.bound2),
@@ -2501,7 +2469,7 @@ std::deque<Tensor> pushpull(
   BoundType bound, InterpolationType interpolation, int extrapolate,
   bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad)
 {
-  PushPullAllocator info(grid.dim()-2, bound, interpolation, extrapolate,
+  PushPullNavigator info(grid.dim()-2, bound, interpolation, extrapolate,
                          do_pull, do_push, do_count, do_grad, do_sgrad);
   info.ioset(source, grid);
 
@@ -2533,7 +2501,7 @@ std::deque<Tensor> pushpull(
   BoundType bound, InterpolationType interpolation, int extrapolate,
   bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad)
 {
-  PushPullAllocator info(grid.dim()-2, bound, interpolation, extrapolate,
+  PushPullNavigator info(grid.dim()-2, bound, interpolation, extrapolate,
                          do_pull, do_push, do_count, do_grad, do_sgrad);
   info.ioset(source, grid, target);
 
@@ -2579,7 +2547,7 @@ std::deque<Tensor> pushpull(
   BoundType bound, InterpolationType interpolation, int extrapolate,
   bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad)
 {
-  PushPullAllocator info(grid.dim()-2, bound, interpolation, extrapolate,
+  PushPullNavigator info(grid.dim()-2, bound, interpolation, extrapolate,
                          do_pull, do_push, do_count, do_grad, do_sgrad);
   info.ioset(source, grid);
 
@@ -2600,7 +2568,7 @@ std::deque<Tensor> pushpull(
   BoundType bound, InterpolationType interpolation, int extrapolate,
   bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad)
 {
-  PushPullAllocator info(grid.dim()-2, bound, interpolation, extrapolate,
+  PushPullNavigator info(grid.dim()-2, bound, interpolation, extrapolate,
                          do_pull, do_push, do_count, do_grad, do_sgrad);
   info.ioset(source, grid, target);
 
