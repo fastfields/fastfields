@@ -47,7 +47,7 @@ def prepare_extensions():
         libraries=torch_libraries(),
         library_dirs=torch_library_dirs(),
         include_dirs=torch_include_dirs(),
-        extra_compile_args=common_flags() + torch_flags(),
+        extra_compile_args=common_flags() + torch_flags() + ['-g0'],
         extra_link_args=common_links_flags() + torch_link_flags(),
         language='c++',
     )
@@ -76,7 +76,7 @@ def prepare_extensions():
         libraries=torch_libraries() + lib,
         library_dirs=torch_library_dirs(),
         include_dirs=torch_include_dirs(),
-        extra_compile_args=common_flags() + torch_flags() + (['-DNI_WITH_CUDA'] if cuda_home else []),
+        extra_compile_args=common_flags() + torch_flags() + (['-DNI_WITH_CUDA'] if cuda_home else []) + ['-g0'],
         extra_link_args=common_links_flags(),
         runtime_library_dirs=[link_relative('.')],
         language='c++',
@@ -93,7 +93,7 @@ def prepare_extensions():
         libraries=torch_libraries(cuda_home) + lib,
         library_dirs=torch_library_dirs(cuda_home, cudnn_home) + python_library_dirs,
         include_dirs=torch_include_dirs(cuda_home, cudnn_home),
-        extra_compile_args=common_flags() + torch_flags() + torch_extension_flags('bind'),
+        extra_compile_args=common_flags() + torch_flags() + torch_extension_flags('bind') + ['-g0'],
         extra_link_args=common_links_flags(),
         runtime_library_dirs=[link_relative(os.path.join('..', 'lib'))]
     )
