@@ -1,7 +1,7 @@
 #include "common.h"                // write C++/CUDA compatible code
 #include "../defines.h"            // useful macros
 #include "bounds_common.h"         // boundary conditions + enum
-#include "allocator.h"             // base class handling offset sizes
+#include "navigator.h"             // base class handling offset sizes
 #include <ATen/ATen.h>             // tensors
 #include <cmath>                   // fma (fused multiply add)
 
@@ -48,13 +48,13 @@ namespace { // anonymous namespace > everything inside has internal linkage
 /*                                ALLOCATOR                                   */
 /*                                                                            */
 /* ========================================================================== */
-class RegulariserGridAllocator: public Allocator {
+class RegulariserGridNavigator: public Navigator {
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
   FF_HOST
-  RegulariserGridAllocator(int dim, 
+  RegulariserGridNavigator(int dim, 
                            double absolute, double membrane, double bending,
                            double lame_shear, double lame_div,
                            ArrayRef<double> voxel_size, BoundVectorRef bound):
@@ -137,7 +137,7 @@ private:
   DEFINE_ALLOC_INFO_5D(out)
   DEFINE_ALLOC_INFO_5D(hes)
 
-  // Allow RegulariserGridImpl's constructor to access RegulariserGridAllocator's
+  // Allow RegulariserGridImpl's constructor to access RegulariserGridNavigator's
   // private members.
   template <typename scalar_t, typename offset_t, typename reduce_t>
   friend class RegulariserGridImpl;
@@ -145,7 +145,7 @@ private:
 
 
 FF_HOST
-void RegulariserGridAllocator::init_all()
+void RegulariserGridNavigator::init_all()
 {
   N = C = CC = X = Y = Z = 1L;
   inp_sN  = inp_sC  = inp_sX  = inp_sY  = inp_sZ   = 0L;
@@ -157,7 +157,7 @@ void RegulariserGridAllocator::init_all()
 }
 
 FF_HOST
-void RegulariserGridAllocator::init_input(const Tensor& input)
+void RegulariserGridNavigator::init_input(const Tensor& input)
 {
   N       = input.size(0);
   C       = input.size(1);
@@ -174,7 +174,7 @@ void RegulariserGridAllocator::init_input(const Tensor& input)
 }
 
 FF_HOST
-void RegulariserGridAllocator::init_weight(const Tensor& weight)
+void RegulariserGridNavigator::init_weight(const Tensor& weight)
 {
   if (!weight.defined() || weight.numel() == 0)
     return;
@@ -188,7 +188,7 @@ void RegulariserGridAllocator::init_weight(const Tensor& weight)
 }
 
 FF_HOST
-void RegulariserGridAllocator::init_output(const Tensor& output)
+void RegulariserGridNavigator::init_output(const Tensor& output)
 {
   out_sN   = output.stride(0);
   out_sC   = output.stride(1);
@@ -200,7 +200,7 @@ void RegulariserGridAllocator::init_output(const Tensor& output)
 }
 
 FF_HOST
-void RegulariserGridAllocator::init_hessian(const Tensor& hessian)
+void RegulariserGridNavigator::init_hessian(const Tensor& hessian)
 {
   if (!hessian.defined() || hessian.numel() == 0)
     return;
@@ -229,7 +229,7 @@ class RegulariserGridImpl {
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-  RegulariserGridImpl(const RegulariserGridAllocator & info):
+  RegulariserGridImpl(const RegulariserGridNavigator & info):
     dim(info.dim),
     bound0(info.bound0), bound1(info.bound1), bound2(info.bound2),
     vx0(info.vx0), vx1(info.vx1), vx2(info.vx2),
@@ -1915,7 +1915,7 @@ FF_HOST Tensor regulariser_grid_impl(
   weight       = std::get<1>(tensors);
   hessian      = std::get<2>(tensors);
 
-  RegulariserGridAllocator info(input.dim()-2, absolute, membrane, bending,
+  RegulariserGridNavigator info(input.dim()-2, absolute, membrane, bending,
                             lame_shear, lame_div, voxel_size, bound);
   info.ioset(input, output, weight, hessian);
 
@@ -1962,7 +1962,7 @@ FF_HOST Tensor regulariser_grid_impl(
   weight       = std::get<1>(tensors);
   hessian      = std::get<2>(tensors);
 
-  RegulariserGridAllocator info(input.dim()-2, absolute, membrane, bending,
+  RegulariserGridNavigator info(input.dim()-2, absolute, membrane, bending,
                             lame_shear, lame_div, voxel_size, bound);
   info.ioset(input, output, weight, hessian);
 
