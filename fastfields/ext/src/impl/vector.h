@@ -1,3 +1,4 @@
+#pragma once
 #include "movable.h"
 #include "common.h"
 
@@ -9,10 +10,13 @@ namespace ff {
    *
   *********************************************************************/
 
+  template <typename T> class Vector;
+  template <typename T> class SizedVector;
+
   /// Dynamic array that can be moved to CUDA devices
   /// It explicitly copies data on construction.
   template <typename T>
-  class Vector: public Moveable<true> {
+  class Vector: public virtual Moveable<Vector<T>, true> {
   public:
     using iterator = T*;
     using const_iterator = const T*;
@@ -119,7 +123,7 @@ namespace ff {
   /// Like Vector, but explicitly store the vector size, which 
   /// allows iterators and additional helpers to be defined.
   template <typename T>
-  class SizedVector: public Vector<T> {
+  class SizedVector: public Vector<T>, public virtual Moveable<SizedVector<T>, true> {
     using Base = Vector<T>;
   public:
     using iterator = typename Vector<T>::iterator;

@@ -2,6 +2,7 @@
 #include "../defines.h"            // useful macros
 #include "bounds_common.h"         // boundary conditions + enum
 #include "navigator.h"             // base class handling offset sizes
+#include "movable.h"               // base class for moving stuff to device
 #include "vector.h"                // simple array movable to device
 #include "hessian.h"               // utility for handling Hessian matrices
 #include "utils.h"                 // utility for dispatching
@@ -233,7 +234,7 @@ FF_HOST FF_INLINE bool any(const iterable_t & v, offset_t C) {
 }
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t>
-class PrecondImpl {
+class PrecondImpl: public Moveable<PrecondImpl<scalar_t, offset_t, reduce_t, hessian_t>, true> {
 
   using Self       = PrecondImpl;
   using PrecondFn  = void (Self::*)(offset_t, offset_t, offset_t, offset_t, reduce_t *) const;
@@ -352,6 +353,14 @@ public:
   }
 #endif
 
+  template <typename Stream>
+  FF_HOST void ref_to_device(Stream stream) {
+    absolute.ref_to_device(stream);
+    membrane.ref_to_device(stream);
+    bending.ref_to_device(stream);
+    w000.ref_to_device(stream);
+  }
+
   /* ~~~ FUNCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 #ifdef __CUDACC__
@@ -375,8 +384,10 @@ public:
     if (wgt_ptr) worksize += C;                  // store `wval`
 #ifdef __CUDACC__
     num_threads = static_cast<int64_t>(
-        CUDA_NUM_THREADS * GET_BLOCKS(voxcountfold()));
-    cudaMalloc(static_cast<void **>&buffer, num_threads * sizeof(reduce_t) * worksize);
+        CUDA_NUM_THREADS * GET_BLOCKS(voxcount()));
+    void * buf = static_cast<void *>(buffer);
+    cudaMalloc(&buf, num_threads * sizeof(reduce_t) * worksize);
+    buffer = static_cast<reduce_t *>(buf);
     buffer_stride = num_threads;
 #else
     num_threads = static_cast<int64_t>(at::get_num_threads());
@@ -981,20 +992,26 @@ prepare_tensors(const Tensor & gradient,
           auto stream = at::cuda::getCurrentCUDAStream();
           if (alloc.canUse32BitIndexMath())
           {
-              PrecondImpl<scalar_t, int32_t, double, utils_t> algo(alloc);
-              auto palgo = alloc_and_copy_to_device(&algo, stream);
+              using Impl = PrecondImpl<scalar_t, int32_t, double, utils_t>;
+              Impl algo(alloc);
+              algo.alloc_buffer();
+              auto palgo = algo.to_device(stream);
               precond_kernel
                   <<<GET_BLOCKS(algo.voxcount()), CUDA_NUM_THREADS, 0, stream>>>
                   (palgo);
+              algo.free_buffer();
               cudaFree(palgo);
           }
           else
           {
-            PrecondImpl<scalar_t, int64_t, double, utils_t> algo(alloc);
-            auto palgo = alloc_and_copy_to_device(&algo, stream);
+            using Impl = PrecondImpl<scalar_t, int64_t, double, utils_t>;
+            Impl algo(alloc);
+            algo.alloc_buffer();
+            auto palgo = algo.to_device(stream);
             precond_kernel
                 <<<GET_BLOCKS(algo.voxcount()), CUDA_NUM_THREADS, 0, stream>>>
                 (palgo);
+            algo.free_buffer();
             cudaFree(palgo);
           }
           /*

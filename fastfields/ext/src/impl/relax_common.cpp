@@ -2,6 +2,7 @@
 #include "../defines.h"            // useful macros
 #include "bounds_common.h"         // boundary conditions + enum
 #include "navigator.h"             // base class handling offset sizes
+#include "movable.h"               // base class for moving stuff to device
 #include "vector.h"                // simple array movable to device
 #include "hessian.h"               // utility for handling Hessian matrices
 #include "utils.h"                 // utility for dispatching
@@ -54,7 +55,7 @@ namespace { // anonymous namespace > everything inside has internal linkage
 /*                                Navigator                                   */
 /*                                                                            */
 /* ========================================================================== */
-class RelaxNavigator: public Navigator, Moveable<true> {
+class RelaxNavigator: public Navigator {
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -234,7 +235,7 @@ FF_HOST FF_INLINE bool any(const iterable_t & v, offset_t C) {
 }
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t>
-class RelaxImpl {
+class RelaxImpl: public Moveable<RelaxImpl<scalar_t, offset_t, reduce_t, hessian_t>, true> {
 
   using Self     = RelaxImpl;
   using RelaxFn  = void (Self::*)(offset_t, offset_t, offset_t, offset_t, reduce_t *) const;
@@ -479,7 +480,9 @@ public:
 #ifdef __CUDACC__
     num_threads = static_cast<int64_t>(
         CUDA_NUM_THREADS * GET_BLOCKS(voxcountfold()));
-    cudaMalloc(static_cast<void **>&buffer, num_threads * sizeof(reduce_t) * worksize);
+    void * buf = static_cast<void *>(buffer);
+    cudaMalloc(&buf, num_threads * sizeof(reduce_t) * worksize);
+    buffer = static_cast<reduce_t *>(buf);
     buffer_stride = num_threads;
 #else
     num_threads = static_cast<int64_t>(at::get_num_threads());
@@ -1680,7 +1683,7 @@ void dispatch(const A & alloc, const H & hessian_type,
       {
         using Impl = RelaxImpl<scalar_t, int32_t, double, utils_t>;
         Impl   algo(alloc);
-        algo.alloc_buffer()
+        algo.alloc_buffer();
         Impl * palgo = algo.to_device(stream);
         for (int32_t i=0; i < nb_iter; ++i)
           for (int32_t fold = 0; fold < algo.foldcount(); ++fold) {
@@ -1690,13 +1693,14 @@ void dispatch(const A & alloc, const H & hessian_type,
                 <<<GET_BLOCKS(algo.voxcountfold()), CUDA_NUM_THREADS, 0, stream>>>
                 (palgo);
           }
-        algo.clear_buffer()
+        algo.free_buffer();
         cudaFree(palgo);
       }
       else
       {
         using Impl = RelaxImpl<scalar_t, int64_t, double, utils_t>;
         Impl   algo(alloc);
+        algo.alloc_buffer();
         Impl * palgo = algo.to_device(stream);
         for (int64_t i=0; i < nb_iter; ++i)
           for (int64_t fold = 0; fold < algo.foldcount(); ++fold) {
@@ -1706,6 +1710,7 @@ void dispatch(const A & alloc, const H & hessian_type,
                 <<<GET_BLOCKS(algo.voxcountfold()), CUDA_NUM_THREADS, 0, stream>>>
                 (palgo);
           }
+        algo.free_buffer();
         cudaFree(palgo);
       }
       /*
