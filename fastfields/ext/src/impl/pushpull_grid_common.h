@@ -84,6 +84,8 @@ namespace { // anonymous namespace > everything inside has internal linkage
 class PushPullNavigator: Navigator {
 public:
 
+  static constexpr int64_t max_int32 = std::numeric_limits<int32_t>::max();
+
   // ~~~ CONSTRUCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   FF_HOST
@@ -107,6 +109,84 @@ public:
                    interpolation.size() > 1 ? interpolation[1] :
                    interpolation.size() > 0 ? interpolation[0]
                                             : InterpolationType::Linear),
+    extrapolate(extrapolate),
+    do_pull(do_pull),
+    do_push(do_push),
+    do_count(do_count),
+    do_grad(do_grad),
+    do_sgrad(do_sgrad)
+  {
+    iso = interpolation0 == interpolation1 &&
+          interpolation0 == interpolation2;
+  }
+
+  // TODO: remove constructors that take non-vector Bound/Interpolation
+  //       as they are not used anymore.
+
+  FF_HOST
+  PushPullNavigator(int dim, BoundType bound, InterpolationVectorRef interpolation,
+                    int extrapolate, bool do_pull, bool do_push,
+                    bool do_count, bool do_grad, bool do_sgrad):
+    dim(dim),
+    bound0(bound),
+    bound1(bound),
+    bound2(bound),
+    interpolation0(interpolation.size() > 0 ? interpolation[0]
+                                            : InterpolationType::Linear),
+    interpolation1(interpolation.size() > 1 ? interpolation[1] :
+                   interpolation.size() > 0 ? interpolation[0]
+                                            : InterpolationType::Linear),
+    interpolation2(interpolation.size() > 2 ? interpolation[2] :
+                   interpolation.size() > 1 ? interpolation[1] :
+                   interpolation.size() > 0 ? interpolation[0]
+                                            : InterpolationType::Linear),
+    extrapolate(extrapolate),
+    do_pull(do_pull),
+    do_push(do_push),
+    do_count(do_count),
+    do_grad(do_grad),
+    do_sgrad(do_sgrad)
+  {
+    iso = interpolation0 == interpolation1 &&
+          interpolation0 == interpolation2;
+  }
+
+  FF_HOST
+  PushPullNavigator(int dim, BoundVectorRef bound, InterpolationType interpolation,
+                    int extrapolate, bool do_pull, bool do_push,
+                    bool do_count, bool do_grad, bool do_sgrad):
+     dim(dim),
+     bound0(bound.size() > 0 ? bound[0] : BoundType::Replicate),
+     bound1(bound.size() > 1 ? bound[1] :
+            bound.size() > 0 ? bound[0] : BoundType::Replicate),
+     bound2(bound.size() > 2 ? bound[2] :
+            bound.size() > 1 ? bound[1] :
+            bound.size() > 0 ? bound[0] : BoundType::Replicate),
+    interpolation0(interpolation),
+    interpolation1(interpolation),
+    interpolation2(interpolation),
+    extrapolate(extrapolate),
+    do_pull(do_pull),
+    do_push(do_push),
+    do_count(do_count),
+    do_grad(do_grad),
+    do_sgrad(do_sgrad)
+  {
+    iso = interpolation0 == interpolation1 &&
+          interpolation0 == interpolation2;
+  }
+
+  FF_HOST
+  PushPullNavigator(int dim, BoundType bound, InterpolationType interpolation,
+                    int extrapolate, bool do_pull, bool do_push,
+                    bool do_count, bool do_grad, bool do_sgrad):
+    dim(dim),
+    bound0(bound),
+    bound1(bound),
+    bound2(bound),
+    interpolation0(interpolation),
+    interpolation1(interpolation),
+    interpolation2(interpolation),
     extrapolate(extrapolate),
     do_pull(do_pull),
     do_push(do_push),
@@ -179,7 +259,7 @@ public:
   }
 
   // We just check that all tensors that we own are compatible with 32b math
-  bool canUse32BitIndexMath() const
+  bool canUse32BitIndexMath(int64_t max_elem=max_int32) const
   {
     return src_32b_ok  &&
            trgt_32b_ok &&
@@ -2359,16 +2439,22 @@ __global__ void pushpull_kernel(PushPullImpl<scalar_t,offset_t> f) {
 //                    FUNCTIONAL FORM WITH DISPATCH
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#define PUSHPULL_INSTANTIATE1(SourceType0) \
+#define PUSHPULL_INSTANTIATE3(BoundType0, InterpolationType0, SourceType0) \
   template std::deque<Tensor> pushpull( \
     const SourceType0 &, const Tensor&, const Tensor&, \
-    BoundVectorRef, InterpolationVectorRef, int, bool, bool, bool, bool, bool); \
+    BoundType0, InterpolationType0, int, bool, bool, bool, bool, bool); \
   template std::deque<Tensor> pushpull( \
     const SourceType0&, const Tensor&, \
-    BoundVectorRef, InterpolationVectorRef, int, bool, bool, bool, bool, bool)
+    BoundType0, InterpolationType0, int, bool, bool, bool, bool, bool)
+#define PUSHPULL_INSTANTIATE2(BoundType0, InterpolationType0) \
+  PUSHPULL_INSTANTIATE3(BoundType0, InterpolationType0, IntArrayRef); \
+  PUSHPULL_INSTANTIATE3(BoundType0, InterpolationType0, Tensor)
+#define PUSHPULL_INSTANTIATE1(BoundType0) \
+  PUSHPULL_INSTANTIATE2(BoundType0, InterpolationType); \
+  PUSHPULL_INSTANTIATE2(BoundType0, InterpolationVectorRef)
 #define PUSHPULL_INSTANTIATE \
-  PUSHPULL_INSTANTIATE1(IntArrayRef); \
-  PUSHPULL_INSTANTIATE1(Tensor)
+  PUSHPULL_INSTANTIATE1(BoundType); \
+  PUSHPULL_INSTANTIATE1(BoundVectorRef)
 
 #ifdef __CUDACC__
 
@@ -2376,11 +2462,11 @@ __global__ void pushpull_kernel(PushPullImpl<scalar_t,offset_t> f) {
 
 // Two arguments (source, grid)
 // > `bound` and `interpolation` can be single arguments or vectors.
-template <typename SourceType> 
+template <typename BoundType, typename InterpolationType, typename SourceType> 
 FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType& source, const Tensor& grid, 
-  BoundVectorRef bound, InterpolationVectorRef interpolation, int extrapolate,
+  BoundType bound, InterpolationType interpolation, int extrapolate,
   bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad)
 {
   PushPullNavigator info(grid.dim()-2, bound, interpolation, extrapolate,
@@ -2408,11 +2494,11 @@ std::deque<Tensor> pushpull(
 // Three arguments (source, grid, target)
 // > `bound` and `interpolation` can be single arguments or vectors.
 // > `source` can be a tensor or a vector of dimensions.
-template <typename SourceType> 
+template <typename BoundType, typename InterpolationType, typename SourceType> 
 FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType & source, const Tensor& grid, const Tensor& target, 
-  BoundVectorRef bound, InterpolationVectorRef interpolation, int extrapolate,
+  BoundType bound, InterpolationType interpolation, int extrapolate,
   bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad)
 {
   PushPullNavigator info(grid.dim()-2, bound, interpolation, extrapolate,
@@ -2453,11 +2539,12 @@ std::deque<Tensor> pushpull(
 // ~~~ CPU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Two arguments (source, grid)
-template <typename SourceType>
+// > `bound` and `interpolation` can be single arguments or vectors.
+template <typename BoundType, typename InterpolationType, typename SourceType>
 FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType& source, const Tensor& grid, 
-  BoundVectorRef bound, InterpolationVectorRef interpolation, int extrapolate,
+  BoundType bound, InterpolationType interpolation, int extrapolate,
   bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad)
 {
   PushPullNavigator info(grid.dim()-2, bound, interpolation, extrapolate,
@@ -2472,12 +2559,13 @@ std::deque<Tensor> pushpull(
 }
 
 // Three arguments (source, grid, target)
+// > `bound` and `interpolation` can be single arguments or vectors.
 // > `source` can be a tensor or a vector of dimensions.
-template <typename SourceType>
+template <typename BoundType, typename InterpolationType, typename SourceType>
 FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType & source, const Tensor& grid, const Tensor& target, 
-  BoundVectorRef bound, InterpolationVectorRef interpolation, int extrapolate,
+  BoundType bound, InterpolationType interpolation, int extrapolate,
   bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad)
 {
   PushPullNavigator info(grid.dim()-2, bound, interpolation, extrapolate,
@@ -2501,21 +2589,21 @@ PUSHPULL_INSTANTIATE;
 
 namespace notimplemented {
 
-template <typename SourceType>
+template <typename BoundType, typename InterpolationType, typename SourceType>
 FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType& source, const Tensor& grid, 
-  BoundVectorRef bound, InterpolationVectorRef interpolation, int extrapolate,
+  BoundType bound, InterpolationType interpolation, int extrapolate,
   bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad)
 {
   throw std::logic_error("Function not implemented for this device.");
 }
 
-template <typename SourceType>
+template <typename BoundType, typename InterpolationType, typename SourceType>
 FF_HOST
 std::deque<Tensor> pushpull(
   const SourceType & source, const Tensor& grid, const Tensor& target, 
-  BoundVectorRef bound, InterpolationVectorRef interpolation, int extrapolate,
+  BoundType bound, InterpolationType interpolation, int extrapolate,
   bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad)
 {
   throw std::logic_error("Function not implemented for this device.");

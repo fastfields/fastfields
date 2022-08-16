@@ -2,8 +2,6 @@
 #include "../defines.h"            // useful macros
 #include "bounds_common.h"         // boundary conditions + enum
 #include "navigator.h"             // base class handling offset sizes
-#include "movable.h"               // base class for moving stuff to device
-#include "vector.h"                // simple array movable to device
 #include "hessian.h"               // utility for handling Hessian matrices
 #include "utils.h"                 // utility for dispatching
 #include <ATen/ATen.h>             // tensors
@@ -224,17 +222,17 @@ void PrecondNavigator::init_weight(const Tensor& weight)
 /*                                                                            */
 /* ========================================================================== */
 
-template <typename iterable_t, typename offset_t>
-FF_HOST FF_INLINE bool any(const iterable_t & v, offset_t C) {
-  auto x = v.cbegin();
+template <typename scalar_t, typename offset_t>
+FF_HOST FF_INLINE bool any(const scalar_t * x, offset_t C) {
   for (offset_t c = 0; c < C; ++c, ++x) {
     if (*x) return true;
   }
   return false;
 }
 
+
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t>
-class PrecondImpl: public Moveable<PrecondImpl<scalar_t, offset_t, reduce_t, hessian_t>, true> {
+class PrecondImpl {
 
   using Self       = PrecondImpl;
   using PrecondFn  = void (Self::*)(offset_t, offset_t, offset_t, offset_t, reduce_t *) const;
@@ -245,7 +243,10 @@ public:
   PrecondImpl(const PrecondNavigator & info):
     num_threads(0), buffer(nullptr), dim(info.dim),
     bound0(info.bound0), bound1(info.bound1), bound2(info.bound2),
-    absolute(info.C), membrane(info.C), bending(info.C), w000(info.C),
+    absolute(new reduce_t[info.C]), 
+    membrane(new reduce_t[info.C]), 
+    bending(new reduce_t[info.C]), 
+    w000(new reduce_t[info.C]),
     N(static_cast<offset_t>(info.N)),
     C(static_cast<offset_t>(info.C)),
     CC(static_cast<offset_t>(info.CC)),
@@ -253,7 +254,7 @@ public:
     Y(static_cast<offset_t>(info.Y)),
     Z(static_cast<offset_t>(info.Z)),
 
-#define IFFT_ALLOC_INFO_5D(NAME) \
+#define INIT_ALLOC_INFO_5D(NAME) \
     NAME##_sN(static_cast<offset_t>(info.NAME##_sN)), \
     NAME##_sC(static_cast<offset_t>(info.NAME##_sC)), \
     NAME##_sX(static_cast<offset_t>(info.NAME##_sX)), \
@@ -261,10 +262,10 @@ public:
     NAME##_sZ(static_cast<offset_t>(info.NAME##_sZ)), \
     NAME##_ptr(static_cast<scalar_t*>(info.NAME##_ptr))
 
-    IFFT_ALLOC_INFO_5D(grd),
-    IFFT_ALLOC_INFO_5D(hes),
-    IFFT_ALLOC_INFO_5D(sol),
-    IFFT_ALLOC_INFO_5D(wgt)
+    INIT_ALLOC_INFO_5D(grd),
+    INIT_ALLOC_INFO_5D(hes),
+    INIT_ALLOC_INFO_5D(sol),
+    INIT_ALLOC_INFO_5D(wgt)
   {
     set_factors(info.absolute, info.membrane, info.bending);
     set_kernel(info.vx0, info.vx1, info.vx2);
@@ -355,11 +356,27 @@ public:
 
   template <typename Stream>
   FF_HOST void ref_to_device(Stream stream) {
-    absolute.ref_to_device(stream);
-    membrane.ref_to_device(stream);
-    bending.ref_to_device(stream);
-    w000.ref_to_device(stream);
+    absolute = alloc_and_copy_to_device_and_free(absolute, stream);
+    membrane = alloc_and_copy_to_device_and_free(membrane, stream);
+    bending  = alloc_and_copy_to_device_and_free(bending, stream);
+    w000  = alloc_and_copy_to_device_and_free(w000, stream);
   }
+
+  FF_HOST FF_INLINE void free() {
+    delete absolute; 
+    delete membrane; 
+    delete bending; 
+    delete w000; 
+  }
+
+#if __CUDACC__
+  FF_HOST FF_INLINE void free_device() {
+    cudaFree(absolute);
+    cudaFree(membrane); 
+    cudaFree(bending);
+    cudaFree(w000);
+  }
+#endif
 
   /* ~~~ FUNCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -437,15 +454,15 @@ private:
   BoundType         bound0;            // boundary condition  // x|W
   BoundType         bound1;            // boundary condition  // y|H
   BoundType         bound2;            // boundary condition  // z|D
-  Vector<reduce_t>  absolute;          // penalty on absolute values
-  Vector<reduce_t>  membrane;          // penalty on first derivatives
-  Vector<reduce_t>  bending;           // penalty on second derivatives
+  reduce_t *        absolute;          // penalty on absolute values
+  reduce_t *        membrane;          // penalty on first derivatives
+  reduce_t *        bending;           // penalty on second derivatives
 
 #ifndef __CUDACC__
   PrecondFn         precond_;          // Pointer to Precond function
 #endif
 
-  Vector<reduce_t> w000;
+  reduce_t *       w000;
   reduce_t m100;
   reduce_t m010;
   reduce_t m001;
@@ -640,7 +657,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d(
 
   val -= C * buffer_stride;
   hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
-                    work, buffer_stride, w000.data(), static_cast<offset_t>(1));
+                    work, buffer_stride, w000, static_cast<offset_t>(1));
 }
 
 
@@ -655,7 +672,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d_rls_membrane(
     GET_COORD1
     GET_SIGN1
     GET_WARP1
-    const reduce_t *a = absolute.data(), *m = membrane.data();
+    const reduce_t *a = absolute, *m = membrane;
     const scalar_t *wgt = wgt_ptr + (x*wgt_sX + y*wgt_sY + z*wgt_sZ + n*wgt_sN);
     const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + z*grd_sZ + n*grd_sN);
 
@@ -760,7 +777,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d(
         scalar_t *sol = sol_ptr + (x*sol_sX + y*sol_sY + z*sol_sZ + n*sol_sN);
 
   hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
-                    work, buffer_stride, w000.data(), static_cast<offset_t>(1));
+                    work, buffer_stride, w000, static_cast<offset_t>(1));
 }
 
 
@@ -775,7 +792,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d_rls_membrane(
     GET_COORD1
     GET_SIGN1
     GET_WARP1
-    const reduce_t *a = absolute.data(), *m = membrane.data();
+    const reduce_t *a = absolute, *m = membrane;
     const scalar_t *wgt = wgt_ptr + (x*wgt_sX + y*wgt_sY + n*wgt_sN);
     const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + n*grd_sN);
 
@@ -864,7 +881,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond1d(
         scalar_t *sol = sol_ptr + (x*sol_sX + n*sol_sN);
 
   hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
-                    work, buffer_stride, w000.data(), static_cast<offset_t>(1));
+                    work, buffer_stride, w000, static_cast<offset_t>(1));
 }
 
 
@@ -879,7 +896,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond1d_rls_membrane(
     GET_COORD1
     GET_SIGN1
     GET_WARP1
-    const reduce_t *a = absolute.data(), *m = membrane.data();
+    const reduce_t *a = absolute, *m = membrane;
     const scalar_t *wgt = wgt_ptr + (x*wgt_sX + n*wgt_sN);
     const scalar_t *grd = grd_ptr + (x*grd_sX + n*grd_sN);
 
@@ -994,24 +1011,28 @@ prepare_tensors(const Tensor & gradient,
           {
               using Impl = PrecondImpl<scalar_t, int32_t, double, utils_t>;
               Impl algo(alloc);
+              algo.ref_to_device(stream);
               algo.alloc_buffer();
-              auto palgo = algo.to_device(stream);
+              auto palgo = alloc_and_copy_to_device(&algo, stream);
               precond_kernel
                   <<<GET_BLOCKS(algo.voxcount()), CUDA_NUM_THREADS, 0, stream>>>
                   (palgo);
               algo.free_buffer();
+              algo.free_device();
               cudaFree(palgo);
           }
           else
           {
             using Impl = PrecondImpl<scalar_t, int64_t, double, utils_t>;
             Impl algo(alloc);
+            algo.ref_to_device(stream);
             algo.alloc_buffer();
-            auto palgo = algo.to_device(stream);
+            auto palgo = alloc_and_copy_to_device(&algo, stream);
             precond_kernel
                 <<<GET_BLOCKS(algo.voxcount()), CUDA_NUM_THREADS, 0, stream>>>
                 (palgo);
             algo.free_buffer();
+            algo.free_device();
             cudaFree(palgo);
           }
           /*
@@ -1025,7 +1046,10 @@ prepare_tensors(const Tensor & gradient,
           cudaDeviceSetLimit(cudaLimitStackSize, 0);
 #else
           PrecondImpl<scalar_t, int64_t, double, utils_t> algo(alloc);
+          algo.alloc_buffer();
           algo.loop();
+          algo.free_buffer();
+          algo.free();
 #endif
         });
       });

@@ -75,6 +75,16 @@ T * alloc_and_copy_to_device(const T * obj, Stream stream)
   copy_to_device(obj, pointer_device, stream);
   return pointer_device;
 }
+template <typename T, typename Stream>
+static FF_HOST FF_INLINE 
+T * alloc_and_copy_to_device_and_free(T * obj, Stream stream)
+{
+  //! assumes obj was allocated using `new T[N];` !//
+  T * pointer_device = alloc_on_device(obj);
+  copy_to_device(obj, pointer_device, stream);
+  delete obj;
+  return pointer_device;
+}
 } // namespace ff
 // === CPU =============================================================
 #else

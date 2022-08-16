@@ -14,7 +14,7 @@
 #include <ATen/ATen.h>
 namespace ff {
 
-enum class InterpolationType : int64_t
+enum class InterpolationType : uint8_t
     {Nearest, Linear, Quadratic, Cubic, 
      FourthOrder, FifthOrder, SixthOrder, SeventhOrder};
 using InterpolationVectorRef = c10::ArrayRef<InterpolationType>;

@@ -10,14 +10,39 @@ namespace ff {
    *
   *********************************************************************/
 
-  template <typename T> class Vector;
-  template <typename T> class SizedVector;
+  class HostAllocator {
+  public:
+    template <typename T> static FF_INLINE T * alloc(size_t N) { return new T[N]; }
+    template <typename T> static FF_INLINE void free(T * ptr) { delete ptr; }
+  };
+
+#if __CUDACC__
+  class DeviceAllocator {
+  public:
+    template <typename T>
+    static FF_INLINE T * alloc(size_t N) { 
+      T * ptr;
+      cudaMalloc((void **)&ptr, N * sizeof(T));
+      return ptr;
+    }
+    template <typename T>
+    static FF_INLINE void free(T * ptr) { cudaFree(ptr); }
+  };
+#endif
+
+
+  template <typename T, typename A = HostAllocator > class Vector;
+  template <typename T, typename A = HostAllocator > class SizedVector;
 
   /// Dynamic array that can be moved to CUDA devices
   /// It explicitly copies data on construction.
-  template <typename T>
-  class Vector: public virtual Moveable<Vector<T>, true> {
+  template <typename T, typename A>
+  class Vector: public virtual Moveable<Vector<T, A>, true> {
+  protected:
+    static FF_INLINE T * alloc(size_t N) { return A::template alloc<T>(N); }
+    static FF_INLINE void free(T * ptr) { return A::free(ptr); }
   public:
+    using allocator = A;
     using iterator = T*;
     using const_iterator = const T*;
     using size_type = size_t;
@@ -26,12 +51,12 @@ namespace ff {
 
     /// Allocate a given size
     Vector(size_t size=0):
-      _data(size ? new T[size] : static_cast<T*>(nullptr))
+      _data(size ? alloc(size) : nullptr)
     {}
 
     /// Allocate and fill
     Vector(size_t size, const T & value):
-      _data(size ? new T[size] : static_cast<T*>(nullptr))
+      _data(size ? alloc(size) : nullptr)
     {
       for (size_t i=0; i < size; ++i)
         _data[i] = value;
@@ -40,7 +65,7 @@ namespace ff {
     /// Copy from a buffer (provided as address + size)
     template <typename U>
     Vector(const U * data, size_t size):
-      _data(size ? new T[size] : static_cast<T*>(nullptr))
+      _data(size ? alloc(size) : nullptr)
     {
       for (size_t i=0; i < size; ++i)
         _data[i] = static_cast<T>(data[i]);
@@ -49,7 +74,7 @@ namespace ff {
     /// Copy from a buffer (given as a range)
     template <typename U>
     Vector(const U * begin, const U * end):
-      _data(begin == end ? static_cast<T*>(nullptr) : new T[end - begin])
+      _data(begin == end ? nullptr : alloc(end - begin))
     {
       auto x = begin;
       for (size_t i = 0; x < end; ++x, ++i)
@@ -59,7 +84,7 @@ namespace ff {
     /// Copy from a C array.
     template <typename U, size_t SIZE>
     Vector(const U (&data)[SIZE]):
-      _data(SIZE ? new T[SIZE] : static_cast<T*>(nullptr))
+      _data(SIZE ? alloc(SIZE) : nullptr)
     {
       auto x = data;
       for (size_t i = 0; i < SIZE; ++x, ++i)
@@ -68,15 +93,20 @@ namespace ff {
 
     virtual ~Vector()
     {
-      if (_data) delete _data;
+      if (_data) free(_data);
     }
 
 #ifdef __CUDACC__
     /// Allocate a copy on the device
     template <typename Stream>
     FF_HOST void ref_to_device(Stream stream) {
+        const T * old_data = _data;
         _data = alloc_and_copy_to_device(_data, stream);
+        delete old_data;
     }
+
+    /// Delete device data
+    void 
 #endif
 
     FF_INLINE constexpr T& operator[](size_t index) {
@@ -122,10 +152,11 @@ namespace ff {
 
   /// Like Vector, but explicitly store the vector size, which 
   /// allows iterators and additional helpers to be defined.
-  template <typename T>
-  class SizedVector: public Vector<T>, public virtual Moveable<SizedVector<T>, true> {
-    using Base = Vector<T>;
+  template <typename T, typename A>
+  class SizedVector: public Vector<T, A>, public virtual Moveable<SizedVector<T, A>, true> {
+    using Base = Vector<T,A>;
   public:
+    using allocator = typename Vector<T>::allocator;
     using iterator = typename Vector<T>::iterator;
     using const_iterator = typename Vector<T>::const_iterator;
     using size_type = typename Vector<T>::size_type;
