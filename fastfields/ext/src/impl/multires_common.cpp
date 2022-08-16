@@ -2,7 +2,7 @@
 #include "../defines.h"            // useful macros
 #include "bounds_common.h"         // boundary conditions + enum
 #include "interpolation_common.h"  // interpolation weights + enum
-#include "allocator.h"             // base class handling offset sizes
+#include "navigator.h"             // base class handling offset sizes
 #include <ATen/ATen.h>             // tensors
 #include <tuple>                   // needed by prepare_tensors
 
@@ -54,13 +54,13 @@ const auto Q = InterpolationType::Quadratic;
 //                        INDEXING UTILS
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-class MultiResAllocator: public Allocator {
+class MultiResNavigator: public Navigator {
 public:
 
   // ~~~ CONSTRUCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   FF_HOST
-  MultiResAllocator(int dim, BoundVectorRef bound,
+  MultiResNavigator(int dim, BoundVectorRef bound,
                     ArrayRef<double> scale,
                     bool do_adjoint):
     dim(dim),
@@ -122,7 +122,7 @@ private:
   DECLARE_ALLOC_INFO_5D(inp)
   DECLARE_ALLOC_INFO_5D(out)
 
-  // Allow MultiResImpl's constructor to access MultiResAllocator's
+  // Allow MultiResImpl's constructor to access MultiResNavigator's
   // private members.
   template <typename scalar_t, typename offset_t, typename reduce_t>
   friend class MultiResImpl;
@@ -134,7 +134,7 @@ private:
 
 
 FF_HOST
-void MultiResAllocator::init_all()
+void MultiResNavigator::init_all()
 {
   N = C = 1L;
   inp_X = inp_Y = inp_Z = 1L;
@@ -144,7 +144,7 @@ void MultiResAllocator::init_all()
 }
 
 FF_HOST
-void MultiResAllocator::init_input(const Tensor& input)
+void MultiResNavigator::init_input(const Tensor& input)
 {
   N       = input.size(0);
   C       = input.size(1);
@@ -161,7 +161,7 @@ void MultiResAllocator::init_input(const Tensor& input)
 }
 
 FF_HOST
-void MultiResAllocator::init_output(const Tensor& input)
+void MultiResNavigator::init_output(const Tensor& input)
 {
   out_X   = input.size(2);
   out_Y   = dim < 2 ? 1L : input.size(3);
@@ -187,7 +187,7 @@ class MultiResImpl {
 public:
 
   // ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  MultiResImpl(const MultiResAllocator & info):
+  MultiResImpl(const MultiResNavigator & info):
 
 #define COPY_FROM_INFO(name) name(info.name)
 #define COPY_FROM_INFO3(name) \
@@ -868,7 +868,7 @@ Tensor multires_impl(
   output = prepare_tensor(input, output, factor, do_adjoint);
   auto scales = prepare_scales(input, output, do_adjoint);
 
-  MultiResAllocator info(input.dim()-2, bound, scales, do_adjoint);
+  MultiResNavigator info(input.dim()-2, bound, scales, do_adjoint);
   info.ioset(input, output);
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -914,7 +914,7 @@ Tensor multires_impl(
   output = prepare_tensor(input, output, factor, do_adjoint);
   auto scales = prepare_scales(input, output, do_adjoint);
 
-  MultiResAllocator info(input.dim()-2, bound, scales, do_adjoint);
+  MultiResNavigator info(input.dim()-2, bound, scales, do_adjoint);
   info.ioset(input, output);
 
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "multires_impl", [&] {

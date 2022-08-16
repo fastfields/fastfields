@@ -1,7 +1,7 @@
 #include "common.h"                // write C++/CUDA compatible code
 #include "../defines.h"            // useful macros
 #include "bounds_common.h"         // boundary conditions + enum
-#include "allocator.h"             // base class handling offset sizes
+#include "navigator.h"             // base class handling offset sizes
 #include "hessian.h"               // utility for handling Hessian matrices
 #include "utils.h"                 // utility for dispatching
 #include <ATen/ATen.h>             // tensors
@@ -50,16 +50,16 @@ namespace { // anonymous namespace > everything inside has internal linkage
 
 /* ========================================================================== */
 /*                                                                            */
-/*                                ALLOCATOR                                   */
+/*                                Navigator                                   */
 /*                                                                            */
 /* ========================================================================== */
-class PrecondAllocator: public Allocator {
+class PrecondNavigator: public Navigator {
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
   FF_HOST
-  PrecondAllocator(int dim, ArrayRef<double> absolute, 
+  PrecondNavigator(int dim, ArrayRef<double> absolute, 
                    ArrayRef<double> membrane, ArrayRef<double> bending,
                    ArrayRef<double> voxel_size, BoundVectorRef bound):
     dim(dim),
@@ -139,7 +139,7 @@ private:
   DEFINE_ALLOC_INFO_5D(sol)
   DEFINE_ALLOC_INFO_5D(wgt)
 
-  // Allow PrecondImpl's constructor to access PrecondAllocator's
+  // Allow PrecondImpl's constructor to access PrecondNavigator's
   // private members.
   template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t>
   friend class PrecondImpl;
@@ -147,7 +147,7 @@ private:
 
 
 FF_HOST
-void PrecondAllocator::init_all()
+void PrecondNavigator::init_all()
 {
   N = C = CC = X = Y = Z = 1L;
   grd_sN  = grd_sC   = grd_sX   = grd_sY  = grd_sZ   = 0L;
@@ -159,7 +159,7 @@ void PrecondAllocator::init_all()
 }
 
 FF_HOST
-void PrecondAllocator::init_gradient(const Tensor& input)
+void PrecondNavigator::init_gradient(const Tensor& input)
 {
   N       = input.size(0);
   C       = input.size(1);
@@ -176,7 +176,7 @@ void PrecondAllocator::init_gradient(const Tensor& input)
 }
 
 FF_HOST
-void PrecondAllocator::init_hessian(const Tensor& input)
+void PrecondNavigator::init_hessian(const Tensor& input)
 {
   if (!input.defined() || input.numel() == 0)
     return;
@@ -191,7 +191,7 @@ void PrecondAllocator::init_hessian(const Tensor& input)
 }
 
 FF_HOST
-void PrecondAllocator::init_solution(const Tensor& input)
+void PrecondNavigator::init_solution(const Tensor& input)
 {
   sol_sN  = input.stride(0);
   sol_sC  = input.stride(1);
@@ -203,7 +203,7 @@ void PrecondAllocator::init_solution(const Tensor& input)
 }
 
 FF_HOST
-void PrecondAllocator::init_weight(const Tensor& weight)
+void PrecondNavigator::init_weight(const Tensor& weight)
 {
   if (!weight.defined() || weight.numel() == 0)
     return;
@@ -222,27 +222,31 @@ void PrecondAllocator::init_weight(const Tensor& weight)
 /*                                                                            */
 /* ========================================================================== */
 
-template <typename reduce_t, typename offset_t>
-FF_HOST FF_INLINE bool any(const reduce_t * v, offset_t C) {
-  for (offset_t c = 0; c < C; ++c, ++v) {
-    if (*v) return true;
+template <typename scalar_t, typename offset_t>
+FF_HOST FF_INLINE bool any(const scalar_t * x, offset_t C) {
+  for (offset_t c = 0; c < C; ++c, ++x) {
+    if (*x) return true;
   }
   return false;
 }
+
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t>
 class PrecondImpl {
 
   using Self       = PrecondImpl;
-  using PrecondFn  = void (Self::*)(offset_t, offset_t, offset_t, offset_t) const;
-  static const int32_t MaxC  = hessian_t::max_length;
+  using PrecondFn  = void (Self::*)(offset_t, offset_t, offset_t, offset_t, reduce_t *) const;
 
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-  PrecondImpl(const PrecondAllocator & info):
-    dim(info.dim),
+  PrecondImpl(const PrecondNavigator & info):
+    num_threads(0), buffer(nullptr), dim(info.dim),
     bound0(info.bound0), bound1(info.bound1), bound2(info.bound2),
+    absolute(new reduce_t[info.C]), 
+    membrane(new reduce_t[info.C]), 
+    bending(new reduce_t[info.C]), 
+    w000(new reduce_t[info.C]),
     N(static_cast<offset_t>(info.N)),
     C(static_cast<offset_t>(info.C)),
     CC(static_cast<offset_t>(info.CC)),
@@ -250,7 +254,7 @@ public:
     Y(static_cast<offset_t>(info.Y)),
     Z(static_cast<offset_t>(info.Z)),
 
-#define IFFT_ALLOC_INFO_5D(NAME) \
+#define INIT_ALLOC_INFO_5D(NAME) \
     NAME##_sN(static_cast<offset_t>(info.NAME##_sN)), \
     NAME##_sC(static_cast<offset_t>(info.NAME##_sC)), \
     NAME##_sX(static_cast<offset_t>(info.NAME##_sX)), \
@@ -258,13 +262,11 @@ public:
     NAME##_sZ(static_cast<offset_t>(info.NAME##_sZ)), \
     NAME##_ptr(static_cast<scalar_t*>(info.NAME##_ptr))
 
-    IFFT_ALLOC_INFO_5D(grd),
-    IFFT_ALLOC_INFO_5D(hes),
-    IFFT_ALLOC_INFO_5D(sol),
-    IFFT_ALLOC_INFO_5D(wgt)
+    INIT_ALLOC_INFO_5D(grd),
+    INIT_ALLOC_INFO_5D(hes),
+    INIT_ALLOC_INFO_5D(sol),
+    INIT_ALLOC_INFO_5D(wgt)
   {
-    if (C > MaxC) throw std::logic_error("C > MaxC. This should not happen.");
-
     set_factors(info.absolute, info.membrane, info.bending);
     set_kernel(info.vx0, info.vx1, info.vx2);
 #ifndef __CUDACC__
@@ -352,6 +354,30 @@ public:
   }
 #endif
 
+  template <typename Stream>
+  FF_HOST void ref_to_device(Stream stream) {
+    absolute = alloc_and_copy_to_device_and_free(absolute, stream);
+    membrane = alloc_and_copy_to_device_and_free(membrane, stream);
+    bending  = alloc_and_copy_to_device_and_free(bending, stream);
+    w000  = alloc_and_copy_to_device_and_free(w000, stream);
+  }
+
+  FF_HOST FF_INLINE void free() {
+    delete absolute; 
+    delete membrane; 
+    delete bending; 
+    delete w000; 
+  }
+
+#if __CUDACC__
+  FF_HOST FF_INLINE void free_device() {
+    cudaFree(absolute);
+    cudaFree(membrane); 
+    cudaFree(bending);
+    cudaFree(w000);
+  }
+#endif
+
   /* ~~~ FUNCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 #ifdef __CUDACC__
@@ -367,17 +393,46 @@ public:
   FF_HOST FF_DEVICE int64_t voxcount() const {
     return N * X * Y * Z;
   }
- 
+
+   FF_HOST void alloc_buffer()
+  {
+    int64_t worksize = hessian_t::work_size(C);  // invert hessian
+    worksize += C;                               // store `val`
+    if (wgt_ptr) worksize += C;                  // store `wval`
+#ifdef __CUDACC__
+    num_threads = static_cast<int64_t>(
+        CUDA_NUM_THREADS * GET_BLOCKS(voxcount()));
+    void * buf = static_cast<void *>(buffer);
+    cudaMalloc(&buf, num_threads * sizeof(reduce_t) * worksize);
+    buffer = static_cast<reduce_t *>(buf);
+    buffer_stride = num_threads;
+#else
+    num_threads = static_cast<int64_t>(at::get_num_threads());
+    buffer = new reduce_t[num_threads * worksize];
+    buffer_stride = 1;
+#endif
+  }
+
+  FF_HOST void free_buffer()
+  {
+    if (buffer)
+#ifdef __CUDACC__
+      cudaFree(buffer);
+#else
+      ::operator delete(buffer);
+#endif
+    buffer = nullptr;
+  }
 
 private:
 
   /* ~~~ COMPONENTS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
   FF_DEVICE void precond(
-    offset_t x, offset_t y, offset_t z, offset_t n) const;
+    offset_t x, offset_t y, offset_t z, offset_t n, int64_t thread_id) const;
 
 #define DEFINE_PRECOND(SUFFIX) \
   FF_DEVICE void precond##SUFFIX( \
-    offset_t x, offset_t y, offset_t z, offset_t n) const;
+    offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * buf) const;
 #define DEFINE_PRECOND_DIM(DIM)        \
   DEFINE_PRECOND(DIM##d)               \
   DEFINE_PRECOND(DIM##d_rls_absolute)  \
@@ -387,21 +442,27 @@ private:
   DEFINE_PRECOND_DIM(2)
   DEFINE_PRECOND_DIM(3)
 
+
+  /* ~~~ BUFFER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+  int64_t num_threads;      // Maximum number of threads running in parallel
+  reduce_t * buffer;        // Global buffer for val/wval
+  offset_t buffer_stride;   // Stride to move into the buffer (cpu: 1, cuda: num_threads)
+
   /* ~~~ OPTIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
   offset_t          dim;
   uint8_t           mode;
   BoundType         bound0;            // boundary condition  // x|W
   BoundType         bound1;            // boundary condition  // y|H
   BoundType         bound2;            // boundary condition  // z|D
-  reduce_t          absolute[MaxC];    // penalty on absolute values
-  reduce_t          membrane[MaxC];    // penalty on first derivatives
-  reduce_t          bending[MaxC];     // penalty on second derivatives
+  reduce_t *        absolute;          // penalty on absolute values
+  reduce_t *        membrane;          // penalty on first derivatives
+  reduce_t *        bending;           // penalty on second derivatives
 
 #ifndef __CUDACC__
   PrecondFn         precond_;          // Pointer to Precond function
 #endif
 
-  reduce_t w000[MaxC];
+  reduce_t *       w000;
   reduce_t m100;
   reduce_t m010;
   reduce_t m001;
@@ -444,10 +505,12 @@ private:
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond(
-    offset_t x, offset_t y, offset_t z, offset_t n) const 
+    offset_t x, offset_t y, offset_t z, offset_t n, int64_t thread_id) const
 {
+  reduce_t * buf = &buffer[thread_id];
+
 #ifndef __CUDACC__
-  CALL_MEMBER_FN(*this, precond_)(x, y, z, n);
+  CALL_MEMBER_FN(*this, precond_)(x, y, z, n, buf);
 #else
 #   define ABSOLUTE 4
 #   define MEMBRANE 8
@@ -455,25 +518,25 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond(
 #   define RLS      16
   switch (mode) {
     case 1 + MEMBRANE + RLS:
-      return precond1d_rls_membrane(x, y, z, n);
+      return precond1d_rls_membrane(x, y, z, n, buf);
     case 2 + MEMBRANE + RLS:
-      return precond2d_rls_membrane(x, y, z, n);
+      return precond2d_rls_membrane(x, y, z, n, buf);
     case 3 + MEMBRANE + RLS:
-      return precond3d_rls_membrane(x, y, z, n);
+      return precond3d_rls_membrane(x, y, z, n, buf);
     case 1 + ABSOLUTE + RLS:
-      return precond1d_rls_absolute(x, y, z, n);
+      return precond1d_rls_absolute(x, y, z, n, buf);
     case 2 + ABSOLUTE + RLS:
-      return precond2d_rls_absolute(x, y, z, n);
+      return precond2d_rls_absolute(x, y, z, n, buf);
     case 3 + ABSOLUTE + RLS:
-      return precond3d_rls_absolute(x, y, z, n);
+      return precond3d_rls_absolute(x, y, z, n, buf);
     default:
       switch (dim) {
         case 1:
-          return precond1d(x, y, z, n);
+          return precond1d(x, y, z, n, buf);
         case 2: 
-          return precond2d(x, y, z, n);
+          return precond2d(x, y, z, n, buf);
         default:
-          return precond3d(x, y, z, n);
+          return precond3d(x, y, z, n, buf);
       }
   }
 #endif 
@@ -485,7 +548,7 @@ template <typename scalar_t, typename offset_t, typename reduce_t, typename hess
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop(
   int threadIdx, int blockIdx, int blockDim, int gridDim) const {
 
-  offset_t index = static_cast<offset_t>(blockIdx * blockDim + threadIdx);
+  int64_t index = blockIdx * blockDim + threadIdx;
   offset_t YZ   = Y * Z;
   offset_t XYZ  = X * YZ;
   offset_t NXYZ = N * XYZ;
@@ -497,7 +560,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop(
       x  = (i/YZ) % X;
       y  = (i/Z)  % Y;
       z  =  i     % Z;
-      precond(x, y, z, n);
+      precond(x, y, z, n, index);
   }
 }
 
@@ -521,7 +584,7 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop() const
       x  = (i/YZ) % X;
       y  = (i/Z)  % Y;
       z  =  i     % Z;
-      precond(x, y, z, n);
+      precond(x, y, z, n, at::get_thread_num());
     }
   });
 }
@@ -579,27 +642,32 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::loop() const
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * buf) const
 {
-  reduce_t val[MaxC];
+  reduce_t * val = buf;
+  reduce_t * work = &val[num_threads * C];
   {
     const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + z*grd_sZ + n*grd_sN);
-    for (int32_t c = 0; c < C; ++c, grd += grd_sC)
-      val[c] = *grd;
+    for (int32_t c = 0; c < C; ++c, grd += grd_sC, val += buffer_stride)
+      *val = *grd;
   }
 
   const scalar_t *hes = hes_ptr + (x*hes_sX + y*hes_sY + z*hes_sZ + n*hes_sN);
         scalar_t *sol = sol_ptr + (x*sol_sX + y*sol_sY + z*sol_sZ + n*sol_sN);
 
-  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, w000);
+  val -= C * buffer_stride;
+  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
+                    work, buffer_stride, w000, static_cast<offset_t>(1));
 }
 
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d_rls_membrane(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * buf) const
 {
-  reduce_t val[MaxC], wval[MaxC];
+  reduce_t * val = buf;
+  reduce_t * wval = &val[num_threads * C];
+  reduce_t * work = &wval[num_threads * C];
   {
     GET_COORD1
     GET_SIGN1
@@ -608,7 +676,8 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d_rls_membrane(
     const scalar_t *wgt = wgt_ptr + (x*wgt_sX + y*wgt_sY + z*wgt_sZ + n*wgt_sN);
     const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + z*grd_sZ + n*grd_sN);
 
-    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC)
+    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC,
+         val += buffer_stride, wval += buffer_stride)
     {
       scalar_t wcenter = *wgt;
       reduce_t wm = m100 * (wcenter + bound::get(wgt, x0, sx0))
@@ -617,38 +686,47 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d_rls_membrane(
                   + m010 * (wcenter + bound::get(wgt, y1, sy1))
                   + m001 * (wcenter + bound::get(wgt, z0, sz0))
                   + m001 * (wcenter + bound::get(wgt, z1, sz1));
-      val[c] = *grd;
-      wval[c] = ( (*(a++)) * wcenter - 0.5 * (*(m++)) * wm );
+      *val = *grd;
+      *wval = ( (*(a++)) * wcenter - 0.5 * (*(m++)) * wm );
     }
   }
 
+  val -= C * buffer_stride;
+  wval -= C * buffer_stride;
   const scalar_t *hes = hes_ptr + (x*hes_sX + y*hes_sY + z*hes_sZ + n*hes_sN);
         scalar_t *sol = sol_ptr + (x*sol_sX + y*sol_sY + z*sol_sZ + n*sol_sN);
 
-  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, wval);
+  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
+                    work, buffer_stride, wval, buffer_stride);
 }
 
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d_rls_absolute(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * buf) const
 {
-   reduce_t val[MaxC], wval[MaxC];
+  reduce_t * val = buf;
+  reduce_t * wval = &val[num_threads * C];
+  reduce_t * work = &wval[num_threads * C];
   {
     const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + z*grd_sZ + n*grd_sN);
     const scalar_t *wgt = wgt_ptr + (x*wgt_sX + y*wgt_sY + z*wgt_sZ + n*wgt_sN);
 
-    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC) {
+    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC,
+         val += buffer_stride, wval += buffer_stride) {
       scalar_t wcenter = *wgt;
-      val[c]  = *grd;
-      wval[c] = absolute[c] * wcenter;
+      *val  = *grd;
+      *wval = absolute[c] * wcenter;
     }
   }
 
+  val -= C * buffer_stride;
+  wval -= C * buffer_stride;
   const scalar_t *hes = hes_ptr + (x*hes_sX + y*hes_sY + z*hes_sZ + n*hes_sN);
         scalar_t *sol = sol_ptr + (x*sol_sX + y*sol_sY + z*sol_sZ + n*sol_sN);
 
-  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, wval);
+  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
+                    work, buffer_stride, wval, buffer_stride);
 }
 
 
@@ -684,27 +762,32 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond3d_rls_absolute(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * buf) const
 {
-   reduce_t val[MaxC];
+  reduce_t * val = buf;
+  reduce_t * work = &val[num_threads * C];
   {
     const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + z*grd_sZ + n*grd_sN);
-    for (int32_t c = 0; c < C; ++c, grd += grd_sC)
-      val[c] = *grd;
+    for (int32_t c = 0; c < C; ++c, grd += grd_sC, val += buffer_stride)
+      *val = *grd;
   }
 
+  val -= C * buffer_stride;
   const scalar_t *hes = hes_ptr + (x*hes_sX + y*hes_sY + z*hes_sZ + n*hes_sN);
         scalar_t *sol = sol_ptr + (x*sol_sX + y*sol_sY + z*sol_sZ + n*sol_sN);
 
-  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, w000);
+  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
+                    work, buffer_stride, w000, static_cast<offset_t>(1));
 }
 
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d_rls_membrane(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * buf) const
 {
-   reduce_t val[MaxC], wval[MaxC];
+  reduce_t * val = buf;
+  reduce_t * wval = &val[num_threads * C];
+  reduce_t * work = &wval[num_threads * C];
   {
     GET_COORD1
     GET_SIGN1
@@ -713,45 +796,55 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d_rls_membrane(
     const scalar_t *wgt = wgt_ptr + (x*wgt_sX + y*wgt_sY + n*wgt_sN);
     const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + n*grd_sN);
 
-    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC)
+    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC,
+         val += buffer_stride, wval += buffer_stride)
     {
       scalar_t wcenter = *wgt;
       reduce_t wm = m100 * (wcenter + bound::get(wgt, x0, sx0))
                   + m100 * (wcenter + bound::get(wgt, x1, sx1))
                   + m010 * (wcenter + bound::get(wgt, y0, sy0))
                   + m010 * (wcenter + bound::get(wgt, y1, sy1));
-      val[c] = *grd;
-      wval[c] = ( (*(a++)) * wcenter - 0.5 * (*(m++)) * wm );
+      *val = *grd;
+      *wval = ( (*(a++)) * wcenter - 0.5 * (*(m++)) * wm );
     }
   }
 
+  val -= C * buffer_stride;
+  wval -= C * buffer_stride;
   const scalar_t *hes = hes_ptr + (x*hes_sX + y*hes_sY + n*hes_sN);
         scalar_t *sol = sol_ptr + (x*sol_sX + y*sol_sY + n*sol_sN);
 
-  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, wval);
+  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
+                    work, buffer_stride, wval, buffer_stride);
 }
 
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d_rls_absolute(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * buf) const
 {
-   reduce_t val[MaxC], wval[MaxC];
+  reduce_t * val = buf;
+  reduce_t * wval = &val[num_threads * C];
+  reduce_t * work = &wval[num_threads * C];
   {
     const scalar_t *grd = grd_ptr + (x*grd_sX + y*grd_sY + n*grd_sN);
     const scalar_t *wgt = wgt_ptr + (x*wgt_sX + y*wgt_sY + n*wgt_sN);
 
-    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC) {
+    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC,
+         val += buffer_stride, wval += buffer_stride) {
       scalar_t wcenter = *wgt;
-      val[c]  = *grd;
-      wval[c] = absolute[c] * wcenter;
+      *val  = *grd;
+      *wval = absolute[c] * wcenter;
     }
   }
 
+  val -= C * buffer_stride;
+  wval -= C * buffer_stride;
   const scalar_t *hes = hes_ptr + (x*hes_sX + y*hes_sY + n*hes_sN);
         scalar_t *sol = sol_ptr + (x*sol_sX + y*sol_sY + n*sol_sN);
 
-  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, wval);
+  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
+                    work, buffer_stride, wval, buffer_stride);
 }
 
 /* ========================================================================== */
@@ -773,27 +866,32 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond2d_rls_absolute(
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond1d(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * buf) const
 {
-   reduce_t val[MaxC];
+  reduce_t * val = buf;
+  reduce_t * work = &val[num_threads * C];
   {
     const scalar_t *grd = grd_ptr + (x*grd_sX + n*grd_sN);
-    for (int32_t c = 0; c < C; ++c, grd += grd_sC)
-      val[c] = *grd;
+    for (int32_t c = 0; c < C; ++c, grd += grd_sC, val += buffer_stride)
+      *val = *grd;
   }
 
+  val -= C * buffer_stride;
   const scalar_t *hes = hes_ptr + (x*hes_sX + n*hes_sN);
         scalar_t *sol = sol_ptr + (x*sol_sX + n*sol_sN);
 
-  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, w000);
+  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
+                    work, buffer_stride, w000, static_cast<offset_t>(1));
 }
 
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond1d_rls_membrane(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * buf) const
 {
-   reduce_t val[MaxC], wval[MaxC];
+  reduce_t * val = buf;
+  reduce_t * wval = &val[num_threads * C];
+  reduce_t * work = &wval[num_threads * C];
   {
     GET_COORD1
     GET_SIGN1
@@ -802,43 +900,53 @@ void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond1d_rls_membrane(
     const scalar_t *wgt = wgt_ptr + (x*wgt_sX + n*wgt_sN);
     const scalar_t *grd = grd_ptr + (x*grd_sX + n*grd_sN);
 
-    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC)
+    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC,
+         val += buffer_stride, wval += buffer_stride)
     {
       scalar_t wcenter = *wgt;
       reduce_t wm = m100 * (wcenter + bound::get(wgt, x0, sx0))
                   + m100 * (wcenter + bound::get(wgt, x1, sx1));
-      val[c] = *grd;
-      wval[c] = ( (*(a++)) * wcenter - 0.5 * (*(m++)) * wm );
+      *val = *grd;
+      *wval = ( (*(a++)) * wcenter - 0.5 * (*(m++)) * wm );
     }
   }
 
+  val -= C * buffer_stride;
+  wval -= C * buffer_stride;
   const scalar_t *hes = hes_ptr + (x*hes_sX + n*hes_sN);
         scalar_t *sol = sol_ptr + (x*sol_sX + n*sol_sN);
 
-  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, wval);
+  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
+                    work, buffer_stride, wval, buffer_stride);
 }
 
 
 template <typename scalar_t, typename offset_t, typename reduce_t, typename hessian_t> FF_DEVICE
 void PrecondImpl<scalar_t,offset_t,reduce_t,hessian_t>::precond1d_rls_absolute(
-  offset_t x, offset_t y, offset_t z, offset_t n) const
+  offset_t x, offset_t y, offset_t z, offset_t n, reduce_t * buf) const
 {
-   reduce_t val[MaxC], wval[MaxC];
+  reduce_t * val = buf;
+  reduce_t * wval = &val[num_threads * C];
+  reduce_t * work = &wval[num_threads * C];
   {
     const scalar_t *grd = grd_ptr + (x*grd_sX + n*grd_sN);
     const scalar_t *wgt = wgt_ptr + (x*wgt_sX + n*wgt_sN);
 
-    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC) {
+    for (int32_t c = 0; c < C; ++c, grd += grd_sC, wgt += wgt_sC,
+         val += buffer_stride, wval += buffer_stride) {
       scalar_t wcenter = *wgt;
-      val[c]  = *grd;
-      wval[c] = absolute[c] * wcenter;
+      *val  = *grd;
+      *wval = absolute[c] * wcenter;
     }
   }
 
+  val -= C * buffer_stride;
+  wval -= C * buffer_stride;
   const scalar_t *hes = hes_ptr + (x*hes_sX + n*hes_sN);
         scalar_t *sol = sol_ptr + (x*sol_sX + n*sol_sN);
 
-  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, wval);
+  hessian_t::invert(C, sol, sol_sC, hes, hes_sC, val, buffer_stride,
+                    work, buffer_stride, wval, buffer_stride);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -891,80 +999,61 @@ prepare_tensors(const Tensor & gradient,
 //                          DISPATCH HELPERS
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  template <int32_t LogMaxC>
-  struct DoAlgo {
-    static const int32_t MaxC = power_of_two<LogMaxC>::value;
-
-    template <typename A, typename H, typename S>
-    static FF_HOST void 
-    f(const A & alloc, const H & hessian_type, const S & scalar_type) 
+  template<typename A, typename H, typename S>
+  void dispatch(const A & alloc, const H & hessian_type, const S & scalar_type)
     {
       FF_DISPATCH_HESSIAN_TYPE(hessian_type, [&] {
         AT_DISPATCH_FLOATING_TYPES(scalar_type, "precond_impl", [&] {
-          using utils_t = HessianUtils<hessian_t, MaxC>;
+          using utils_t = HessianUtils<hessian_t>;
 #ifdef __CUDACC__
           auto stream = at::cuda::getCurrentCUDAStream();
           if (alloc.canUse32BitIndexMath())
           {
-              PrecondImpl<scalar_t, int32_t, double, utils_t> algo(alloc);
+              using Impl = PrecondImpl<scalar_t, int32_t, double, utils_t>;
+              Impl algo(alloc);
+              algo.ref_to_device(stream);
+              algo.alloc_buffer();
               auto palgo = alloc_and_copy_to_device(&algo, stream);
               precond_kernel
                   <<<GET_BLOCKS(algo.voxcount()), CUDA_NUM_THREADS, 0, stream>>>
                   (palgo);
+              algo.free_buffer();
+              algo.free_device();
               cudaFree(palgo);
           }
           else
           {
-            PrecondImpl<scalar_t, int64_t, double, utils_t> algo(alloc);
+            using Impl = PrecondImpl<scalar_t, int64_t, double, utils_t>;
+            Impl algo(alloc);
+            algo.ref_to_device(stream);
+            algo.alloc_buffer();
             auto palgo = alloc_and_copy_to_device(&algo, stream);
             precond_kernel
                 <<<GET_BLOCKS(algo.voxcount()), CUDA_NUM_THREADS, 0, stream>>>
                 (palgo);
+            algo.free_buffer();
+            algo.free_device();
             cudaFree(palgo);
           }
           /*
-          Our implementation uses more stack per thread than the available local 
-          memory. CUDA probably needs to use some of the global memory to 
+          Our implementation uses more stack per thread than the available local
+          memory. CUDA probably needs to use some of the global memory to
           compensate, but there is a bug and this memory is never freed.
-          The official solution is to call cudaDeviceSetLimit to reset the 
+          The official solution is to call cudaDeviceSetLimit to reset the
           stack size and free that memory:
           https://forums.developer.nvidia.com/t/61314/2
           */
           cudaDeviceSetLimit(cudaLimitStackSize, 0);
 #else
           PrecondImpl<scalar_t, int64_t, double, utils_t> algo(alloc);
+          algo.alloc_buffer();
           algo.loop();
+          algo.free_buffer();
+          algo.free();
 #endif
         });
       });
     }
-  };
-
-  template<typename A, typename H, typename S, int32_t... Indices>
-  void
-  dispatch(int32_t i, const A & a, const H & h, const S & s,
-           indices<0, Indices...>)
-  {
-      static void (*lookup[])(const A &, const H &, const S &) 
-        = { &DoAlgo<Indices>::template f<A,H,S>... };
-
-      int32_t logi = log2_ceil(i);
-      static const int32_t mx_channels = sizeof(lookup)/sizeof(void *);
-      if (logi >= mx_channels) {
-          const std::string msg = "Too many channels (" + 
-                                  std::to_string(pow_int(2, logi)) + "). "
-                                  "Maximum number of channels is " + 
-                                  std::to_string(pow_int(2, mx_channels)) + ".";
-          throw std::out_of_range(msg);
-      }
-      lookup[logi](a, h, s);
-  }
-
-  template<int N, typename A, typename H, typename S>
-  void dispatch(int i, const A & a, const H & h, const S & s)
-  {
-    dispatch(i, a, h, s, typename build_indices<0, N>::type()); 
-  }
 
 } // anonymous namespace
 
@@ -984,7 +1073,7 @@ FF_HOST Tensor precond_impl(
   solution = std::get<1>(tensors);
   weight   = std::get<2>(tensors);
 
-  PrecondAllocator info(gradient.dim()-2, absolute, membrane, bending,
+  PrecondNavigator info(gradient.dim()-2, absolute, membrane, bending,
                       voxel_size, bound);
   info.ioset(hessian, gradient, solution, weight);
 
@@ -993,7 +1082,7 @@ FF_HOST Tensor precond_impl(
   const auto & CC = (hessian.defined() && hessian.numel() > 0 ? hessian.size(1) : 0);
   const auto & H  = guess_hessian_type(C, CC);
 
-  dispatch<10>(C, info, H, T); // MAX CHANNELS = 512 = 2**9
+  dispatch(info, H, T); // MAX CHANNELS = 512 = 2**9
   return solution;
 }
 

@@ -4,7 +4,7 @@
 
 namespace ff {
 
-class Allocator {
+class Navigator {
 protected:
 
   static constexpr int64_t max_int32 = std::numeric_limits<int32_t>::max();

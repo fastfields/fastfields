@@ -1,7 +1,7 @@
 #include "common.h"                // write C++/CUDA compatible code
 #include "../defines.h"            // useful macros
 #include "bounds_common.h"         // boundary conditions + enum
-#include "allocator.h"             // base class handling offset sizes
+#include "navigator.h"             // base class handling offset sizes
 #include <ATen/ATen.h>             // tensors
 #include <cmath>                   // fma (fused multiply add)
 
@@ -48,13 +48,13 @@ namespace { // anonymous namespace > everything inside has internal linkage
 /*                                ALLOCATOR                                   */
 /*                                                                            */
 /* ========================================================================== */
-class PrecondGridAllocator: public Allocator {
+class PrecondGridNavigator: public Navigator {
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
   FF_HOST
-  PrecondGridAllocator(int dim, double absolute, double membrane, double bending,
+  PrecondGridNavigator(int dim, double absolute, double membrane, double bending,
                    double lame_shear, double lame_div,
                    ArrayRef<double> voxel_size, BoundVectorRef bound):
     dim(dim),
@@ -136,7 +136,7 @@ private:
   DEFINE_ALLOC_INFO_5D(sol)
   DEFINE_ALLOC_INFO_5D(wgt)
 
-  // Allow PrecondGridImpl's constructor to access PrecondGridAllocator's
+  // Allow PrecondGridImpl's constructor to access PrecondGridNavigator's
   // private members.
   template <typename scalar_t, typename offset_t, typename reduce_t>
   friend class PrecondGridImpl;
@@ -144,7 +144,7 @@ private:
 
 
 FF_HOST
-void PrecondGridAllocator::init_all()
+void PrecondGridNavigator::init_all()
 {
   N = C = CC = X = Y = Z = 1L;
   grd_sN  = grd_sC   = grd_sX   = grd_sY  = grd_sZ   = 0L;
@@ -156,7 +156,7 @@ void PrecondGridAllocator::init_all()
 }
 
 FF_HOST
-void PrecondGridAllocator::init_gradient(const Tensor& input)
+void PrecondGridNavigator::init_gradient(const Tensor& input)
 {
   N       = input.size(0);
   C       = input.size(1);
@@ -173,7 +173,7 @@ void PrecondGridAllocator::init_gradient(const Tensor& input)
 }
 
 FF_HOST
-void PrecondGridAllocator::init_hessian(const Tensor& input)
+void PrecondGridNavigator::init_hessian(const Tensor& input)
 {
   if (!input.defined() || input.numel() == 0)
     return;
@@ -188,7 +188,7 @@ void PrecondGridAllocator::init_hessian(const Tensor& input)
 }
 
 FF_HOST
-void PrecondGridAllocator::init_solution(const Tensor& input)
+void PrecondGridNavigator::init_solution(const Tensor& input)
 {
   sol_sN  = input.stride(0);
   sol_sC  = input.stride(1);
@@ -200,7 +200,7 @@ void PrecondGridAllocator::init_solution(const Tensor& input)
 }
 
 FF_HOST
-void PrecondGridAllocator::init_weight(const Tensor& weight)
+void PrecondGridNavigator::init_weight(const Tensor& weight)
 {
   if (!weight.defined() || weight.numel() == 0)
     return;
@@ -230,7 +230,7 @@ class PrecondGridImpl {
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-  PrecondGridImpl(const PrecondGridAllocator & info):
+  PrecondGridImpl(const PrecondGridNavigator & info):
     dim(info.dim),
     bound0(info.bound0), bound1(info.bound1), bound2(info.bound2),
     vx0(info.vx0), vx1(info.vx1), vx2(info.vx2),
@@ -1063,7 +1063,7 @@ FF_HOST Tensor precond_grid_impl(
   solution = std::get<1>(tensors);
   weight   = std::get<2>(tensors);
 
-  PrecondGridAllocator info(gradient.dim()-2, absolute, membrane, bending, lame_shear, lame_div,
+  PrecondGridNavigator info(gradient.dim()-2, absolute, membrane, bending, lame_shear, lame_div,
                       voxel_size, bound);
   info.ioset(hessian, gradient, solution, weight);
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -1116,7 +1116,7 @@ FF_HOST Tensor precond_grid_impl(
   solution = std::get<1>(tensors);
   weight   = std::get<2>(tensors);
 
-  PrecondGridAllocator info(gradient.dim()-2, absolute, membrane, bending, lame_shear, lame_div,
+  PrecondGridNavigator info(gradient.dim()-2, absolute, membrane, bending, lame_shear, lame_div,
                       voxel_size, bound);
   info.ioset(hessian, gradient, solution, weight);
 
