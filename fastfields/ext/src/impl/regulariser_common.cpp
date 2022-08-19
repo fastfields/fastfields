@@ -1,9 +1,10 @@
 #include "common.h"                // write C++/CUDA compatible code
 #include "../defines.h"            // useful macros
 #include "bounds_common.h"         // boundary conditions + enum
-#include "allocator.h"             // base class handling offset sizes
+#include "navigator.h"             // base class handling offset sizes
 // #include "utils.h"                 // unrolled for loop.h"
 #include <ATen/ATen.h>             // tensors
+#include <cstdio>
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // CPU/GPU -specific parameters
@@ -45,13 +46,13 @@ namespace { // anonymous namespace > everything inside has internal linkage
 /*                                ALLOCATOR                                   */
 /*                                                                            */
 /* ========================================================================== */
-class RegulariserAllocator: public Allocator {
+class RegulariserNavigator: public Navigator {
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
   FF_HOST
-  RegulariserAllocator(int dim, ArrayRef<double> absolute, 
+  RegulariserNavigator(int dim, ArrayRef<double> absolute, 
                        ArrayRef<double> membrane, ArrayRef<double> bending,
                        ArrayRef<double> voxel_size, BoundVectorRef bound):
     dim(dim),
@@ -129,7 +130,7 @@ private:
   DECLARE_ALLOC_INFO_5D(out)
   DECLARE_ALLOC_INFO_5D(hes)
 
-  // Allow RegulariserImpl's constructor to access RegulariserAllocator's
+  // Allow RegulariserImpl's constructor to access RegulariserNavigator's
   // private members.
   template <typename scalar_t, typename offset_t, typename reduce_t>
   friend class RegulariserImpl;
@@ -137,7 +138,7 @@ private:
 
 
 FF_HOST
-void RegulariserAllocator::init_all()
+void RegulariserNavigator::init_all()
 {
   N = C = CC = X = Y = Z = 1L;
   inp_sN  = inp_sC   = inp_sX   = inp_sY  = inp_sZ   = 0L;
@@ -149,7 +150,7 @@ void RegulariserAllocator::init_all()
 }
 
 FF_HOST
-void RegulariserAllocator::init_input(const Tensor& input)
+void RegulariserNavigator::init_input(const Tensor& input)
 {
   N       = input.size(0);
   C       = input.size(1);
@@ -166,7 +167,7 @@ void RegulariserAllocator::init_input(const Tensor& input)
 }
 
 FF_HOST
-void RegulariserAllocator::init_weight(const Tensor& weight)
+void RegulariserNavigator::init_weight(const Tensor& weight)
 {
   if (!weight.defined() || weight.numel() == 0)
     return;
@@ -180,7 +181,7 @@ void RegulariserAllocator::init_weight(const Tensor& weight)
 }
 
 FF_HOST
-void RegulariserAllocator::init_output(const Tensor& output)
+void RegulariserNavigator::init_output(const Tensor& output)
 {
   out_sN   = output.stride(0);
   out_sC   = output.stride(1);
@@ -192,7 +193,7 @@ void RegulariserAllocator::init_output(const Tensor& output)
 }
 
 FF_HOST
-void RegulariserAllocator::init_hessian(const Tensor& hessian)
+void RegulariserNavigator::init_hessian(const Tensor& hessian)
 {
   if (!hessian.defined() || hessian.numel() == 0)
     return;
@@ -212,10 +213,10 @@ void RegulariserAllocator::init_hessian(const Tensor& hessian)
 /*                                                                            */
 /* ========================================================================== */
 
-template <typename reduce_t, typename offset_t>
-FF_HOST FF_INLINE bool any(const reduce_t * v, offset_t C) {
-  for (offset_t c = 0; c < C; ++c, ++v) {
-    if (*v) return true;
+template <typename scalar_t, typename offset_t>
+FF_HOST FF_INLINE bool any(const scalar_t * x, offset_t C) {
+  for (offset_t c = 0; c < C; ++c, ++x) {
+    if (*x) return true;
   }
   return false;
 }
@@ -230,9 +231,12 @@ class RegulariserImpl {
 public:
 
   /* ~~~ CONSTRUCTOR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-  RegulariserImpl(const RegulariserAllocator & info):
+  RegulariserImpl(const RegulariserNavigator & info):
     dim(info.dim),
     bound0(info.bound0), bound1(info.bound1), bound2(info.bound2),
+    absolute(new reduce_t[info.C]), 
+    membrane(new reduce_t[info.C]), 
+    bending(new reduce_t[info.C]),
     N(static_cast<offset_t>(info.N)),
     C(static_cast<offset_t>(info.C)),
     CC(static_cast<offset_t>(info.CC)),
@@ -240,7 +244,7 @@ public:
     Y(static_cast<offset_t>(info.Y)),
     Z(static_cast<offset_t>(info.Z)),
     
-#define IFFT_ALLOC_INFO_5D(NAME) \
+#define INIT_ALLOC_INFO_5D(NAME) \
     NAME##_sN(static_cast<offset_t>(info.NAME##_sN)), \
     NAME##_sC(static_cast<offset_t>(info.NAME##_sC)), \
     NAME##_sX(static_cast<offset_t>(info.NAME##_sX)), \
@@ -248,10 +252,10 @@ public:
     NAME##_sZ(static_cast<offset_t>(info.NAME##_sZ)), \
     NAME##_ptr(static_cast<scalar_t*>(info.NAME##_ptr))
 
-    IFFT_ALLOC_INFO_5D(inp),
-    IFFT_ALLOC_INFO_5D(wgt),
-    IFFT_ALLOC_INFO_5D(out),
-    IFFT_ALLOC_INFO_5D(hes)
+    INIT_ALLOC_INFO_5D(inp),
+    INIT_ALLOC_INFO_5D(wgt),
+    INIT_ALLOC_INFO_5D(out),
+    INIT_ALLOC_INFO_5D(hes)
   {
     set_factors(info.absolute, info.membrane, info.bending);
     set_kernel(info.vx0, info.vx1, info.vx2);
@@ -273,9 +277,9 @@ public:
       bending[c]  = static_cast<reduce_t>(b.size() == 0 ? 0.   : 
                                           b.size() > c  ? b[c] : bending[c-1]);
     }
-    has_absolute = any(absolute, C);
-    has_membrane = any(membrane, C);
-    has_bending  = any(bending, C);
+    bool has_absolute = any(absolute, C),
+         has_membrane = any(membrane, C),
+         has_bending  = any(bending, C);
 
     mode = dim 
          + (has_bending ? 12 : has_membrane ? 8 : has_absolute ? 4 : 0)
@@ -302,6 +306,9 @@ public:
 #else
   FF_HOST FF_INLINE void set_vel2mom() 
   {
+    bool has_absolute = any(absolute, C),
+         has_membrane = any(membrane, C),
+         has_bending  = any(bending, C);
     if (wgt_ptr)
     {
       if (has_bending)
@@ -378,6 +385,27 @@ public:
   }
 #endif
 
+  template <typename Stream>
+  FF_HOST void ref_to_device(Stream stream) {
+    absolute = alloc_and_copy_to_device_and_free(absolute, stream);
+    membrane = alloc_and_copy_to_device_and_free(membrane, stream);
+    bending  = alloc_and_copy_to_device_and_free(bending, stream);
+  }
+
+  FF_HOST FF_INLINE void free() {
+    delete absolute; 
+    delete membrane; 
+    delete bending; 
+  }
+
+#if __CUDACC__
+  FF_HOST FF_INLINE void free_device() {
+    cudaFree(absolute);
+    cudaFree(membrane); 
+    cudaFree(bending);
+  }
+#endif
+
   /* ~~~ FUNCTORS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 #ifdef __CUDACC__
@@ -433,9 +461,9 @@ private:
   BoundType         bound0;         // boundary condition  // x|W
   BoundType         bound1;         // boundary condition  // y|H
   BoundType         bound2;         // boundary condition  // z|D
-  reduce_t          absolute[FF_MAX_NUM_CHANNELS]; // penalty on absolute values
-  reduce_t          membrane[FF_MAX_NUM_CHANNELS]; // penalty on first derivatives
-  reduce_t          bending[FF_MAX_NUM_CHANNELS];  // penalty on second derivatives
+  reduce_t *        absolute;       // penalty on absolute values
+  reduce_t *        membrane;       // penalty on first derivatives
+  reduce_t *        bending;        // penalty on second derivatives
 
 #ifndef __CUDACC__ // We cannot work with member function pointers in cuda
   Vel2MomFn         vel2mom;        // Pointer to vel2mom function
@@ -443,9 +471,6 @@ private:
 #endif
 
   uint8_t   mode;
-  bool      has_absolute;
-  bool      has_membrane;
-  bool      has_bending;
   reduce_t  m100;
   reduce_t  m010;
   reduce_t  m001;
@@ -740,7 +765,7 @@ void RegulariserImpl<scalar_t,offset_t,reduce_t>::zeros(offset_t x, offset_t y, 
 {
   GET_POINTERS
 
-  for (offset_t c = 0; c < C; out += out_sC)
+  for (offset_t c = 0; c < C; ++c, out += out_sC)
     *out = static_cast<scalar_t>(0);
 
   out -= C*out_sC;
@@ -1300,15 +1325,21 @@ void RegulariserImpl<scalar_t,offset_t,reduce_t>::vel2mom1d_rls_absolute(
 //                  CUDA KERNEL (MUST BE OUT OF CLASS)
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+// Note: I've moved the C-size vectors (absolute/membrane/bending) to global
+// memory, such that the Impl object is now less than 64KB and can be passed
+// directly to the kernel by copy (which will use constant memory and should 
+// provide faster access than global memory).
+
+
 #ifdef __CUDACC__
 
 // CUDA Kernel
 
 template <typename scalar_t, typename offset_t, typename reduce_t>
 C10_LAUNCH_BOUNDS_1(1024)
-__global__ void regulariser_kernel(const RegulariserImpl<scalar_t, offset_t, reduce_t> * f)
+__global__ void regulariser_kernel(RegulariserImpl<scalar_t, offset_t, reduce_t> f)
 {
-  f->loop(threadIdx.x, blockIdx.x, blockDim.x, gridDim.x);
+  f.loop(threadIdx.x, blockIdx.x, blockDim.x, gridDim.x);
 }
 
 #endif
@@ -1367,7 +1398,7 @@ FF_HOST Tensor regulariser_impl(
   weight       = std::get<1>(tensors);
   hessian      = std::get<2>(tensors);
 
-  RegulariserAllocator info(input.dim()-2, absolute, membrane, bending, voxel_size, bound);
+  RegulariserNavigator info(input.dim()-2, absolute, membrane, bending, voxel_size, bound);
   info.ioset(input, output, weight, hessian);
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -1375,20 +1406,20 @@ FF_HOST Tensor regulariser_impl(
     if (info.canUse32BitIndexMath())
     {
       RegulariserImpl<scalar_t, int32_t, double> algo(info);
-      auto palgo = alloc_and_copy_to_device(&algo, stream);
+      algo.ref_to_device(stream); // move `Vector`s (abs/mem/ben) to device
       regulariser_kernel
           <<<GET_BLOCKS(algo.voxcount()), CUDA_NUM_THREADS, 0, stream>>>
-          (palgo);
-      cudaFree(palgo);
+          (algo);
+      algo.free_device();
     }
     else
     {
       RegulariserImpl<scalar_t, int64_t, double> algo(info);
-      auto palgo = alloc_and_copy_to_device(&algo, stream);
+      algo.ref_to_device(stream);
       regulariser_kernel
           <<<GET_BLOCKS(algo.voxcount()), CUDA_NUM_THREADS, 0, stream>>>
-          (palgo);
-      cudaFree(palgo);
+          (algo);
+      algo.free_device();
     }
   });
   /*
@@ -1417,12 +1448,13 @@ FF_HOST Tensor regulariser_impl(
   weight       = std::get<1>(tensors);
   hessian      = std::get<2>(tensors);
 
-  RegulariserAllocator info(input.dim()-2, absolute, membrane, bending, voxel_size, bound);
+  RegulariserNavigator info(input.dim()-2, absolute, membrane, bending, voxel_size, bound);
   info.ioset(input, output, weight, hessian);
 
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "regulariser_impl", [&] {
     RegulariserImpl<scalar_t, int64_t, double> algo(info);
     algo.loop();
+    algo.free();
   });
   return output;
 }

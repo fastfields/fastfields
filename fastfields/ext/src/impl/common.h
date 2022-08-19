@@ -26,8 +26,12 @@
 #  include <ATen/cuda/CUDAApplyUtils.cuh>
 #  include <THC/THCAtomics.cuh>
 // --- DEFINES ---------------------------------------------------------
-#  define FF_INLINE __forceinline__
-#  define FF_NOINLINE __noinline__
+#  ifndef FF_INLINE
+#    define FF_INLINE __forceinline__
+#  endif
+#  ifndef FF_NOINLINE
+#    define FF_NOINLINE __noinline__
+#  endif
 #  define FF_DEVICE __device__
 #  define FF_HOST   __host__
 #  define FF_DEVICE_NAME cuda
@@ -71,11 +75,23 @@ T * alloc_and_copy_to_device(const T * obj, Stream stream)
   copy_to_device(obj, pointer_device, stream);
   return pointer_device;
 }
+template <typename T, typename Stream>
+static FF_HOST FF_INLINE 
+T * alloc_and_copy_to_device_and_free(T * obj, Stream stream)
+{
+  //! assumes obj was allocated using `new T[N];` !//
+  T * pointer_device = alloc_on_device(obj);
+  copy_to_device(obj, pointer_device, stream);
+  delete obj;
+  return pointer_device;
+}
 } // namespace ff
 // === CPU =============================================================
 #else
 // --- DEFINES ---------------------------------------------------------
-#  define FF_INLINE inline
+#  ifndef FF_INLINE
+#    define FF_INLINE inline
+#  endif
 #  define FF_NOINLINE
 #  define FF_DEVICE
 #  define FF_HOST
@@ -85,6 +101,7 @@ T * alloc_and_copy_to_device(const T * obj, Stream stream)
 #  define FF_ATOMIC_ADD ff::cpuAtomicAdd
 #  if AT_PARALLEL_NATIVE
 #    include <atomic>
+namespace ff {
 template <typename T>
 class has_fetch_add
 {
@@ -100,6 +117,7 @@ class has_fetch_add
 public:
     enum { value = sizeof(test<T>(0)) == sizeof(char) };
 };
+} // namespace ff
 #  elif AT_PARALLEL_NATIVE_TBB
 #    include <tbb/atomic.h>
 #  endif

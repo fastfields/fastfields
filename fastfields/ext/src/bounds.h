@@ -4,7 +4,7 @@
 
 namespace ff {
 
-enum class BoundType : int64_t{
+enum class BoundType : uint8_t {
   Replicate,    // Replicate last inbound value = clip coordinates
   DCT1,         // Symetric w.r.t. center of the last inbound voxel
   DCT2,         // Symetric w.r.t. edge of the last inbound voxel (=Neuman)

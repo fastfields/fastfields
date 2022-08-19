@@ -7,15 +7,15 @@
 
 #define FF_PUSHPULL_DECLARE(space) \
   namespace space { \
-    template <typename BoundType, typename InterpolationType, typename SourceType> \
+    template <typename SourceType> \
     std::deque<at::Tensor> pushpull( \
       const SourceType& source, const at::Tensor& grid, \
-      BoundType bound, InterpolationType interpolation, int extrapolate, \
+      BoundVectorRef bound, InterpolationVectorRef interpolation, int extrapolate, \
       bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad); \
-    template <typename BoundType, typename InterpolationType, typename SourceType> \
+    template <typename SourceType> \
     std::deque<at::Tensor> pushpull( \
       const SourceType & source, const at::Tensor& grid, const at::Tensor& target, \
-      BoundType bound, InterpolationType interpolation, int extrapolate, \
+      BoundVectorRef bound, InterpolationVectorRef interpolation, int extrapolate, \
       bool do_pull, bool do_push, bool do_count, bool do_grad, bool do_sgrad); \
   }
 
