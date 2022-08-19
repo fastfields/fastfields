@@ -1,0 +1,95 @@
+name: manual-build-wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: 'Operating system'
+        required: false
+        default: 'ubuntu-18.04'
+      python-version:
+        description: 'Version of python'
+        required: false
+        default: '3.8'
+      pytorch-version:
+        description: 'Version of pytorch'
+        required: false
+        default: 'latest'
+      cuda-version:
+        description: 'Version of cuda'
+        required: false
+        default: '10.2'
+      ff-version:
+        description: 'Target version'
+        required: false
+        default: ''
+      publish:
+        description: 'Publish to GemFury'
+        required: false
+        default: 'false'
+      upload-artifact:
+        description: 'Upload artifact'
+        required: false
+        default: 'false'
+
+jobs:
+  build_wheels:
+    name: Build wheel for os=${{ github.event.inputs.os }} 
+          python=${{ github.event.inputs.python-version }} 
+          torch=${{ github.event.inputs.pytorch-version }} 
+          cuda=${{ github.event.inputs.cuda-version }}
+    runs-on: ${{ github.event.inputs.os }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up conda with Python ${{ github.event.inputs.python-version }}
+        uses: s-weigand/setup-conda@v1
+        with:
+          python-version: ${{ github.event.inputs.python-version }}
+          conda-channels: pytorch
+
+      - name: Setup CUDA Toolkit ${{ github.event.inputs.cuda-version }}
+        if: github.event.inputs.cuda-version != 'cpu'
+        uses: Jimver/cuda-toolkit@v0.2.8
+        with:
+          cuda: ${{ github.event.inputs.cuda-version }}
+          linux-local-args: '["--toolkit"]'
+
+      - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} + CUDA ${{ github.event.inputs.cuda-version }}
+        if: github.event.inputs.cuda-version != 'cpu'
+        env:
+          PYTORCH: ${{ github.event.inputs.pytorch-version }}
+          CUDA: ${{ github.event.inputs.cuda-version }}
+        run: conda install -y "pytorch=$PYTORCH" "cudatoolkit=$CUDA"
+
+      - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} for CPU
+        if: github.event.inputs.cuda-version == 'cpu'
+        env:
+          PYTORCH: ${{ github.event.inputs.pytorch-version }}
+        run: conda install -y "pytorch=$PYTORCH" cpuonly
+
+      - name: Build wheel
+        env:
+          FF_CUDA_ARCH_LIST: all
+          FF_VERSION: ${{ github.event.inputs.ff-version }}
+        run: |
+          [ "$CUDA_VERSION" == "cpu" ] \
+            && export FF_USE_CUDA="0" \
+            || export FF_USE_CUDA="1" \
+          python setup.py bdist_wheel
+
+      - name: Upload artifact
+        if: github.event.inputs.upload-artifact == 'true'
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheel-ff${{github.event.inputs.ff-version}}-pytorch${{github.event.inputs.pytorch-version}}-cuda${{github.event.inputs.cuda-version}}-python${{github.event.inputs.python-version}}-${{github.event.inputs.os}}
+          path: dist/*.whl
+
+      - name: Publish wheels
+        if: github.event.inputs.publish == 'true'
+        env:
+          TOKEN: ${{ secrets.GEMFURY_PUSH_TOKEN }}
+        run: |
+          conda install -y twine
+          pipx run twine upload dist/* --repository-url "https://push.fury.io/balbasty/" -u "${TOKEN}" -p ""
