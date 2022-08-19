@@ -1,0 +1,207 @@
+name: manual-build-wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      fail-fast:
+        description: 'Fail fast mode'
+        required: false
+        default: 'false'
+      publish:
+        description: 'Publish to GemFury'
+        required: false
+        default: 'true'
+      upload-artifact:
+        description: 'Upload artifact'
+        required: false
+        default: 'false'
+      ff-version:
+        description: 'Target version'
+        required: false
+        default: ''
+
+jobs:
+  build_wheels:
+
+    strategy:
+      matrix:
+        os: [ubuntu-18.04, macos-latest]  # windows-latest
+        python-version: [3.6, 3.7, 3.8, 3.9]
+        dep: [
+          {pytorch-version: 1.4.0,  cuda-version: cpu},
+          {pytorch-version: 1.4.0,  cuda-version: 9.2},
+          {pytorch-version: 1.4.0,  cuda-version: 10.0},
+          {pytorch-version: 1.4.0,  cuda-version: 10.1},
+          {pytorch-version: 1.5.0,  cuda-version: cpu},
+          {pytorch-version: 1.5.0,  cuda-version: 9.2},
+          {pytorch-version: 1.5.0,  cuda-version: 10.1},
+          {pytorch-version: 1.5.0,  cuda-version: 10.2},
+          {pytorch-version: 1.5.1,  cuda-version: cpu},
+          {pytorch-version: 1.5.1,  cuda-version: 9.2},
+          {pytorch-version: 1.5.1,  cuda-version: 10.1},
+          {pytorch-version: 1.5.1,  cuda-version: 10.2},
+          {pytorch-version: 1.6.0,  cuda-version: cpu},
+          {pytorch-version: 1.6.0,  cuda-version: 9.2},
+          {pytorch-version: 1.6.0,  cuda-version: 10.1},
+          {pytorch-version: 1.6.0,  cuda-version: 10.2},
+          {pytorch-version: 1.7.0,  cuda-version: cpu},
+          {pytorch-version: 1.7.0,  cuda-version: 9.2},
+          {pytorch-version: 1.7.0,  cuda-version: 10.1},
+          {pytorch-version: 1.7.0,  cuda-version: 10.2},
+          {pytorch-version: 1.7.0,  cuda-version: 11.0},
+          {pytorch-version: 1.7.1,  cuda-version: cpu},
+          {pytorch-version: 1.7.1,  cuda-version: 9.2},
+          {pytorch-version: 1.7.1,  cuda-version: 10.1},
+          {pytorch-version: 1.7.1,  cuda-version: 10.2},
+          {pytorch-version: 1.7.1,  cuda-version: 11.0},
+          {pytorch-version: 1.8.0,  cuda-version: cpu},
+          {pytorch-version: 1.8.0,  cuda-version: 10.1},
+          {pytorch-version: 1.8.0,  cuda-version: 10.2},
+          {pytorch-version: 1.8.0,  cuda-version: 11.1},
+          {pytorch-version: 1.8.1,  cuda-version: cpu},
+          {pytorch-version: 1.8.1,  cuda-version: 10.1},
+          {pytorch-version: 1.8.1,  cuda-version: 10.2},
+          {pytorch-version: 1.8.1,  cuda-version: 11.1},
+          {pytorch-version: 1.9.0,  cuda-version: cpu},
+          {pytorch-version: 1.9.0,  cuda-version: 10.2},
+          {pytorch-version: 1.9.0,  cuda-version: 11.1},
+          {pytorch-version: 1.9.1,  cuda-version: cpu},
+          {pytorch-version: 1.9.1,  cuda-version: 10.2},
+          {pytorch-version: 1.9.1,  cuda-version: 11.1},
+          {pytorch-version: 1.10.0, cuda-version: cpu},
+          {pytorch-version: 1.10.0, cuda-version: 10.2},
+          {pytorch-version: 1.10.0, cuda-version: 11.1},
+          {pytorch-version: 1.10.0, cuda-version: 11.3},
+          {pytorch-version: 1.10.1, cuda-version: cpu},
+          {pytorch-version: 1.10.1, cuda-version: 10.2},
+          {pytorch-version: 1.10.1, cuda-version: 11.1},
+          {pytorch-version: 1.10.1, cuda-version: 11.3},
+          {pytorch-version: 1.10.2, cuda-version: cpu},
+          {pytorch-version: 1.10.2, cuda-version: 10.2},
+          {pytorch-version: 1.10.2, cuda-version: 11.1},
+          {pytorch-version: 1.10.2, cuda-version: 11.3},
+          {pytorch-version: 1.11.0, cuda-version: cpu},
+          {pytorch-version: 1.11.0, cuda-version: 10.2},
+          {pytorch-version: 1.11.0, cuda-version: 11.3},
+          {pytorch-version: 1.11.0, cuda-version: 11.5},
+          {pytorch-version: 1.12.0, cuda-version: cpu},
+          {pytorch-version: 1.12.0, cuda-version: 10.2},
+          {pytorch-version: 1.12.0, cuda-version: 11.3},
+          {pytorch-version: 1.12.0, cuda-version: 11.6},
+        ]
+        exclude:
+          - dep: {pytorch-version: 1.4.0},  python-version: 3.9
+          - dep: {pytorch-version: 1.5.0},  python-version: 3.9
+          - dep: {pytorch-version: 1.5.1},  python-version: 3.9
+          - dep: {pytorch-version: 1.6.0},  python-version: 3.9
+          - dep: {pytorch-version: 1.6.0},  python-version: 3.9
+          - dep: {pytorch-version: 1.7.0},  python-version: 3.9
+          - dep: {pytorch-version: 1.11.0}, python-version: 3.6
+          - dep: {pytorch-version: 1.12.0}, python-version: 3.6
+          - dep: {cuda-version: 9.2},  os: macos-latest
+          - dep: {cuda-version: 10.0}, os: macos-latest
+          - dep: {cuda-version: 10.1}, os: macos-latest
+          - dep: {cuda-version: 10.2}, os: macos-latest
+          - dep: {cuda-version: 11.0}, os: macos-latest
+          - dep: {cuda-version: 11.1}, os: macos-latest
+          - dep: {cuda-version: 11.3}, os: macos-latest
+          - dep: {cuda-version: 11.5}, os: macos-latest
+          - dep: {cuda-version: 11.6}, os: macos-latest
+        include:
+          - dep: {pytorch-version: 1.4.0},  python-version: 3.5
+          - dep: {pytorch-version: 1.5.0},  python-version: 3.5
+          - dep: {pytorch-version: 1.11.0}, python-version: 3.10
+          - dep: {pytorch-version: 1.12.0}, python-version: 3.10
+
+    env:
+      OS: ${{ github.event.inputs.os }}
+      PYTHON: ${{ github.event.inputs.python-version }}
+      PYTORCH: ${{ github.event.inputs.dep.pytorch-version }}
+      CUDA: ${{ github.event.inputs.dep.cuda-version }}
+      FF_VERSION: ${{ github.event.inputs.ff-version }}
+      FF_CUDA_ARCH_LIST: all
+
+    name: Build wheel for os=${{ github.event.inputs.os }}
+          python=${{ github.event.inputs.python-version }}
+          torch=${{ github.event.inputs.dep.pytorch-version }}
+          cuda=${{ github.event.inputs.dep.cuda-version }}
+    runs-on: ${{ github.event.inputs.os }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up conda with Python ${{ github.event.inputs.python-version }}
+        uses: s-weigand/setup-conda@v1
+        with:
+          python-version: ${{ env.PYTHON }}
+          conda-channels: pytorch
+
+      - if: runner.os == 'macOS'
+        run: echo "CUDA=cpu" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 8.0 }}
+        run: echo "CUDA=8.0.61" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 8.0 }}
+        run: echo "CUDA=8.0.61" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 9.2 }}
+        run: echo "CUDA=9.2.148" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 10.0 }}
+        run: echo "CUDA=10.0.130" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 10.1 }}
+        run: echo "CUDA=10.1.243" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 10.2 }}
+        run: echo "CUDA=10.2.89" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.0 }}
+        run: echo "CUDA=11.0.3" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.1 }}
+        run: echo "CUDA=11.1.1" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.2 }}
+        run: echo "CUDA=11.2.2" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.3 }}
+        run: echo "CUDA=11.3.1" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.4 }}
+        run: echo "CUDA=11.4.3" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.5 }}
+        run: echo "CUDA=11.5.2" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.6 }}
+        run: echo "CUDA=11.6.2" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.7 }}
+        run: echo "CUDA=11.7.0" >> $GITHUB_ENV
+
+      - name: Setup CUDA Toolkit ${{ github.event.inputs.dep.cuda-version }}
+        if: github.event.inputs.dep.cuda-version != 'cpu'
+        id: install-cuda-base
+        uses: Jimver/cuda-toolkit@v0.2.8
+        with:
+          cuda: ${{ env.CUDA }}
+          linux-local-args: '["--toolkit"]'
+
+      - name: Setup conda env with PyTorch ${{ github.event.inputs.dep.pytorch-version }} + CUDA ${{ github.event.inputs.dep.cuda-version }}
+        if: github.event.inputs.dep.cuda-version != 'cpu'
+        run: conda install -y "pytorch=$PYTORCH" "cudatoolkit=$CUDA"
+
+      - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} for CPU
+        if: github.event.inputs.dep.cuda-version != 'cpu'
+        run: conda install -y "pytorch=$PYTORCH" cpuonly
+
+      - name: Build wheel
+        run: python setup.py bdist_wheel
+
+      - name: Simple test
+        run: |
+          pip install -y dist/*.whl
+          python -c "import fastfields as ff; print(ff.__version__)"
+
+      - name: Upload artifact
+        if: github.event.inputs.upload-artifact == 'true'
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheel-ff${{env.FF_VERSION}}-pytorch${{env.PYTORCH}}-cuda${{env.CUDA}}-python${{env.PYTHON}}-${{env.OS}}
+          path: dist/*.whl
+
+      - name: Publish wheels
+        if: github.event.inputs.publish == 'true'
+        env:
+          TOKEN: ${{ secrets.GEMFURY_PUSH_TOKEN }}
+        run: |
+          conda install -y twine
+          pipx run twine upload dist/* --repository-url "https://push.fury.io/balbasty/" -u "${TOKEN}" -p ""
