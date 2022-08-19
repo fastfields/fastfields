@@ -56,6 +56,10 @@ jobs:
           python-version: ${{ env.PYTHON }}
           conda-channels: pytorch
 
+      - if: runner.os == 'macOS'
+        run: echo "CUDA=cpu" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 8.0 }}
+        run: echo "CUDA=8.0.61" >> $GITHUB_ENV
       - if: ${{ env.CUDA == 8.0 }}
         run: echo "CUDA=8.0.61" >> $GITHUB_ENV
       - if: ${{ env.CUDA == 9.2 }}
@@ -92,11 +96,11 @@ jobs:
           linux-local-args: '["--toolkit"]'
 
       - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} + CUDA ${{ github.event.inputs.cuda-version }}
-        if: github.event.inputs.cuda-version != 'cpu'
+        if: ${{ env.CUDA }} != 'cpu'
         run: conda install -y "pytorch=$PYTORCH" "cudatoolkit=$CUDA"
 
       - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} for CPU
-        if: github.event.inputs.cuda-version == 'cpu'
+        if: ${{ env.CUDA }} == 'cpu'
         run: conda install -y "pytorch=$PYTORCH" cpuonly
 
       - name: Build wheel
