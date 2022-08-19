@@ -100,7 +100,7 @@ jobs:
         run: conda install -y "pytorch=$PYTORCH" "cudatoolkit=$CUDA"
 
       - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} for CPU
-        if: github.event.inputs.cuda-version != 'cpu'
+        if: github.event.inputs.cuda-version == 'cpu'
         run: conda install -y "pytorch=$PYTORCH" cpuonly
 
       - name: Build wheel
