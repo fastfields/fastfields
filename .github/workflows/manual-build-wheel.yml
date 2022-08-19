@@ -110,7 +110,7 @@ jobs:
         run: |
           [ -z "$FF_VERSION" ] && FF_VERSION="$(cat VERSION)"
           FF_VERSION+="+torch${PYTORCH}"
-          [ "$CUDA" != "cpu" ] && FF_VERSION += ".cuda${CUDA_MAJORMINOR//./}"
+          [ "$CUDA" != "cpu" ] && FF_VERSION+=".cuda${CUDA_MAJORMINOR//./}"
           echo "FF_VERSION=${FF_VERSION}" >> $GITHUB_ENV
 
       - name: Build wheel
