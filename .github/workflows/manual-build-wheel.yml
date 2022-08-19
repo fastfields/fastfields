@@ -41,7 +41,6 @@ jobs:
       CUDA: ${{ github.event.inputs.cuda-version }}
       FF_VERSION: ${{ github.event.inputs.ff-version }}
       FF_CUDA_ARCH_LIST: all
-      FF_USE_CUDA: 1
 
     name: Build wheel for os=${{ github.event.inputs.os }}
           python=${{ github.event.inputs.python-version }}
@@ -59,9 +58,7 @@ jobs:
           conda-channels: pytorch
 
       - if: runner.os == 'macOS'
-        run: |
-          echo "CUDA=cpu" >> $GITHUB_ENV
-          echo "FF_USE_CUDA=0" >> $GITHUB_ENV
+        run: echo "CUDA=cpu" >> $GITHUB_ENV
       - if: ${{ env.CUDA == 8.0 }}
         run: echo "CUDA=8.0.61" >> $GITHUB_ENV
       - if: ${{ env.CUDA == 8.0 }}
