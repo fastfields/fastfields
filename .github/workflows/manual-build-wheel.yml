@@ -88,7 +88,7 @@ jobs:
         run: echo "CUDA=11.7.0" >> $GITHUB_ENV
 
       - name: Setup CUDA Toolkit ${{ github.event.inputs.cuda-version }}
-        if: ${{ env.CUDA }} != 'cpu'
+        if: github.event.inputs.cuda-version != 'cpu'
         id: install-cuda-base
         uses: Jimver/cuda-toolkit@v0.2.8
         with:
@@ -96,11 +96,11 @@ jobs:
           linux-local-args: '["--toolkit"]'
 
       - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} + CUDA ${{ github.event.inputs.cuda-version }}
-        if: ${{ env.CUDA }} != 'cpu'
+        if: github.event.inputs.cuda-version != 'cpu'
         run: conda install -y "pytorch=$PYTORCH" "cudatoolkit=$CUDA"
 
       - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} for CPU
-        if: ${{ env.CUDA }} == 'cpu'
+        if: github.event.inputs.cuda-version != 'cpu'
         run: conda install -y "pytorch=$PYTORCH" cpuonly
 
       - name: Build wheel
