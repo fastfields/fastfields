@@ -38,6 +38,7 @@ jobs:
       OS: ${{ github.event.inputs.os }}
       PYTHON: ${{ github.event.inputs.python-version }}
       PYTORCH: ${{ github.event.inputs.pytorch-version }}
+      CUDA_MAJORMINOR: ${{ github.event.inputs.cuda-version }}
       CUDA: ${{ github.event.inputs.cuda-version }}
       FF_VERSION: ${{ github.event.inputs.ff-version }}
       FF_CUDA_ARCH_LIST: all
@@ -104,8 +105,17 @@ jobs:
         if: github.event.inputs.cuda-version == 'cpu'
         run: conda install -y "pytorch=$PYTORCH" cpuonly
 
+      - name: Set version
+        if: runner.os != 'Windows'
+        run: |
+          [ -z "$FF_VERSION" ] && FF_VERSION="$(cat VERSION)"
+          FF_VERSION+="+torch${PYTORCH}"
+          [ "$CUDA" != "cpu" ] && FF_VERSION += ".cuda${CUDA_MAJORMINOR//./}"
+          echo "FF_VERSION=${FF_VERSION}" >> $GITHUB_ENV
+
       - name: Build wheel
-        run: python setup.py bdist_wheel
+        if: runner.os != 'Windows'
+        run: FF_VERSION=${{env.FF_VERSION}} python setup.py bdist_wheel
 
       - name: Simple test
         run: |
