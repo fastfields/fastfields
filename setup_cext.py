@@ -124,7 +124,7 @@ def torch_version(astuple=True):
 
 
 def torch_cuda_version(astuple=True):
-    if not torch.cuda.is_available():
+    if torch.version.cuda is None:
         return None
     version = torch.version.cuda.split('.')
     version = tuple(int(v) for v in version)
@@ -136,7 +136,7 @@ def torch_cuda_version(astuple=True):
 
 
 def torch_cudnn_version(astuple=True):
-    if not torch.cuda.is_available():
+    if torch.version.cuda is None:
         return None
     version = torch.backends.cudnn.version()
     version = (version//1000, version//100 % 10, version % 100)
@@ -250,7 +250,7 @@ def cuda_check():
     if use_cuda == 0:
         return None
 
-    if not torch.cuda.is_available():
+    if torch.version.cuda is None:
         if use_cuda == 1:
             raise RuntimeError('PyTorch was not compiled with CUDA, '
                                'but FF_USE_CUDA=1. Unset FF_USE_CUDA to '
