@@ -39,17 +39,18 @@ jobs:
       PYTHON: ${{ github.event.inputs.python-version }}
       PYTORCH: ${{ github.event.inputs.pytorch-version }}
       CUDA: ${{ github.event.inputs.cuda-version }}
+      FF_VERSION: ${{ github.event.inputs.ff-version }}
 
-    name: Build wheel for os=${{ env.OS }} 
-          python=${{ env.PYTHON }} 
-          torch=${{ env.PYTORCH }} 
-          cuda=${{ env.CUDA }}
+    name: Build wheel for os=${{ github.event.inputs.os }}
+          python=${{ github.event.inputs.python-version }}
+          torch=${{ github.event.inputs.pytorch-version }}
+          cuda=${{ github.event.inputs.cuda-version }}
     runs-on: ${{ github.event.inputs.os }}
 
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up conda with Python ${{ env.PYTHON }}
+      - name: Set up conda with Python ${{ github.event.inputs.python-version }}
         uses: s-weigand/setup-conda@v1
         with:
           python-version: ${{ env.PYTHON }}
@@ -82,7 +83,7 @@ jobs:
       - if: ${{ env.CUDA == 11.7 }}
         run: echo "CUDA=11.7.0" >> $GITHUB_ENV
 
-      - name: Setup CUDA Toolkit ${{ env.CUDA }}
+      - name: Setup CUDA Toolkit ${{ github.event.inputs.cuda-version }}
         id: install-cuda-base
         if: ${{ env.CUDA }} != cpu
         uses: Jimver/cuda-toolkit@v0.2.8
@@ -92,32 +93,24 @@ jobs:
 
       - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} + CUDA ${{ github.event.inputs.cuda-version }}
         if: github.event.inputs.cuda-version != 'cpu'
-        env:
-          PYTORCH: ${{ github.event.inputs.pytorch-version }}
-          CUDA: ${{ github.event.inputs.cuda-version }}
         run: conda install -y "pytorch=$PYTORCH" "cudatoolkit=$CUDA"
 
       - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} for CPU
         if: github.event.inputs.cuda-version == 'cpu'
-        env:
-          PYTORCH: ${{ github.event.inputs.pytorch-version }}
         run: conda install -y "pytorch=$PYTORCH" cpuonly
 
       - name: Build wheel
         env:
           FF_CUDA_ARCH_LIST: all
-          FF_VERSION: ${{ github.event.inputs.ff-version }}
         run: |
-          [ "$CUDA_VERSION" == "cpu" ] \
-            && export FF_USE_CUDA="0" \
-            || export FF_USE_CUDA="1" \
+          [ "$CUDA" == "cpu" ] && export FF_USE_CUDA="0" || export FF_USE_CUDA="1"
           python setup.py bdist_wheel
 
       - name: Upload artifact
         if: github.event.inputs.upload-artifact == 'true'
         uses: actions/upload-artifact@v3
         with:
-          name: wheel-ff${{github.event.inputs.ff-version}}-pytorch${{github.event.inputs.pytorch-version}}-cuda${{github.event.inputs.cuda-version}}-python${{github.event.inputs.python-version}}-${{github.event.inputs.os}}
+          name: wheel-ff${{env.FF_VERSION}}-pytorch${{env.PYTORCH}}-cuda${{env.CUDA}}-python${{env.PYTHON}}-${{env.OS}}
           path: dist/*.whl
 
       - name: Publish wheels
