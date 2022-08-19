@@ -34,62 +34,61 @@ on:
 
 jobs:
   build_wheels:
-    name: Build wheel for os=${{ github.event.inputs.os }} 
-          python=${{ github.event.inputs.python-version }} 
-          torch=${{ github.event.inputs.pytorch-version }} 
-          cuda=${{ github.event.inputs.cuda-version }}
-    runs-on: ${{ github.event.inputs.os }}
+    env:
+      OS: ${{ github.event.inputs.os }}
+      PYTHON: ${{ github.event.inputs.python-version }}
+      PYTORCH: ${{ github.event.inputs.pytorch-version }}
+      CUDA: ${{ github.event.inputs.cuda-version }}
+
+    name: Build wheel for os=${{ env.OS }} 
+          python=${{ env.PYTHON }} 
+          torch=${{ env.PYTORCH }} 
+          cuda=${{ env.CUDA }}
+    runs-on: ${{ env.OS }}
 
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up conda with Python ${{ github.event.inputs.python-version }}
+      - name: Set up conda with Python ${{ env.PYTHON }}
         uses: s-weigand/setup-conda@v1
         with:
-          python-version: ${{ github.event.inputs.python-version }}
+          python-version: ${{ env.PYTHON }}
           conda-channels: pytorch
 
-      - name: Setup CUDA Toolkit ${{ github.event.inputs.cuda-version }}
+      - if: ${{ env.CUDA == 8.0 }}
+        run: echo "CUDA=8.0.61" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 9.2 }}
+        run: echo "CUDA=9.2.148" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 10.0 }}
+        run: echo "CUDA=10.0.130" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 10.1 }}
+        run: echo "CUDA=10.1.243" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 10.2 }}
+        run: echo "CUDA=10.2.89" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.0 }}
+        run: echo "CUDA=11.0.3" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.1 }}
+        run: echo "CUDA=11.1.1" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.2 }}
+        run: echo "CUDA=11.2.2" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.3 }}
+        run: echo "CUDA=11.3.1" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.4 }}
+        run: echo "CUDA=11.4.3" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.5 }}
+        run: echo "CUDA=11.5.2" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.6 }}
+        run: echo "CUDA=11.6.2" >> $GITHUB_ENV
+      - if: ${{ env.CUDA == 11.7 }}
+        run: echo "CUDA=11.7.0" >> $GITHUB_ENV
+
+      - name: Setup CUDA Toolkit ${{ env.CUDA }}
         id: install-cuda-base
-        if: github.event.inputs.cuda-version != 'cpu'
+        if: ${{ env.CUDA }} != cpu
         uses: Jimver/cuda-toolkit@v0.2.8
         with:
-          cuda: ${{ github.event.inputs.cuda-version }}
+          cuda: ${{ env.CUDA }}
           linux-local-args: '["--toolkit"]'
-        continue-on-error: true
-      - name: Setup CUDA Toolkit ${{ github.event.inputs.cuda-version }}.2
-        id: install-cuda-2
-        if: |
-          steps.hello.install-cuda-base != 'success'
-          && github.event.inputs.cuda-version != 'cpu'
-        uses: Jimver/cuda-toolkit@v0.2.8
-        with:
-          cuda: ${{ github.event.inputs.cuda-version }}.2
-          linux-local-args: '["--toolkit"]'
-        continue-on-error: true
-      - name: Setup CUDA Toolkit ${{ github.event.inputs.cuda-version }}.1
-        id: install-cuda-1
-        if: |
-          steps.hello.install-cuda-base != 'success'
-          && steps.hello.install-cuda-2 != 'success'
-          && github.event.inputs.cuda-version != 'cpu'
-        uses: Jimver/cuda-toolkit@v0.2.8
-        with:
-          cuda: ${{ github.event.inputs.cuda-version }}.1
-          linux-local-args: '["--toolkit"]'
-        continue-on-error: true
-      - name: Setup CUDA Toolkit ${{ github.event.inputs.cuda-version }}.0
-        id: install-cuda-0
-        if: |
-          steps.hello.install-cuda-base != 'success'
-          && steps.hello.install-cuda-2 != 'success'
-          && steps.hello.install-cuda-1 != 'success'
-          && github.event.inputs.cuda-version != 'cpu'
-        uses: Jimver/cuda-toolkit@v0.2.8
-        with:
-          cuda: ${{ github.event.inputs.cuda-version }}.0
-          linux-local-args: '["--toolkit"]'
-        continue-on-error: true
 
       - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} + CUDA ${{ github.event.inputs.cuda-version }}
         if: github.event.inputs.cuda-version != 'cpu'
