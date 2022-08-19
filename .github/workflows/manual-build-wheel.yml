@@ -50,11 +50,43 @@ jobs:
           conda-channels: pytorch
 
       - name: Setup CUDA Toolkit ${{ github.event.inputs.cuda-version }}
+        id: install-cuda-base
         if: github.event.inputs.cuda-version != 'cpu'
         uses: Jimver/cuda-toolkit@v0.2.8
         with:
           cuda: ${{ github.event.inputs.cuda-version }}
           linux-local-args: '["--toolkit"]'
+        continue-on-error: true
+      - name: Setup CUDA Toolkit ${{ github.event.inputs.cuda-version }}.2
+        id: install-cuda-2
+        if: steps.hello.install-cuda-base != 'success' \
+            && github.event.inputs.cuda-version != 'cpu'
+        uses: Jimver/cuda-toolkit@v0.2.8
+        with:
+          cuda: ${{ github.event.inputs.cuda-version }}.2
+          linux-local-args: '["--toolkit"]'
+        continue-on-error: true
+      - name: Setup CUDA Toolkit ${{ github.event.inputs.cuda-version }}.1
+        id: install-cuda-1
+        if: steps.hello.install-cuda-base != 'success' \
+            && steps.hello.install-cuda-2 != 'success' \
+            && github.event.inputs.cuda-version != 'cpu'
+        uses: Jimver/cuda-toolkit@v0.2.8
+        with:
+          cuda: ${{ github.event.inputs.cuda-version }}.1
+          linux-local-args: '["--toolkit"]'
+        continue-on-error: true
+      - name: Setup CUDA Toolkit ${{ github.event.inputs.cuda-version }}.0
+        id: install-cuda-0
+        if: steps.hello.install-cuda-base != 'success' \
+            && steps.hello.install-cuda-2 != 'success' \
+            && steps.hello.install-cuda-1 != 'success' \
+            && github.event.inputs.cuda-version != 'cpu'
+        uses: Jimver/cuda-toolkit@v0.2.8
+        with:
+          cuda: ${{ github.event.inputs.cuda-version }}.0
+          linux-local-args: '["--toolkit"]'
+        continue-on-error: true
 
       - name: Setup conda env with PyTorch ${{ github.event.inputs.pytorch-version }} + CUDA ${{ github.event.inputs.cuda-version }}
         if: github.event.inputs.cuda-version != 'cpu'
