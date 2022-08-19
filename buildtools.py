@@ -407,12 +407,13 @@ class build_ext(build_ext_base.build_ext):
             self.get_ext_filename = self.get_ext_filename_shared_lib
 
         # OSX: change -bundle to -dynamiclib
-        linker_so = []
-        for arg in self.compiler.linker_so:
-            linker_so += shlex.split(arg)
-        linker_so = ['-dynamiclib' if arg == '-bundle' else arg
-                     for arg in linker_so]
-        self.compiler.set_executables(linker_so=linker_so)
+        if hasattr(self.compiler, 'linker_so'):
+            linker_so = []
+            for arg in self.compiler.linker_so:
+                linker_so += shlex.split(arg)
+            linker_so = ['-dynamiclib' if arg == '-bundle' else arg
+                         for arg in linker_so]
+            self.compiler.set_executables(linker_so=linker_so)
 
         try:
             # Build extension

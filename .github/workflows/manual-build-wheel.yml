@@ -107,6 +107,11 @@ jobs:
       - name: Build wheel
         run: python setup.py bdist_wheel
 
+      - name: Simple test
+        run: |
+          pip install -y dist/*.whl
+          python -c "import fastfields as ff; print(ff.__version__)"
+
       - name: Upload artifact
         if: github.event.inputs.upload-artifact == 'true'
         uses: actions/upload-artifact@v3
