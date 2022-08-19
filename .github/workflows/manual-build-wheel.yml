@@ -119,7 +119,7 @@ jobs:
 
       - name: Simple test
         run: |
-          pip install -y dist/*.whl
+          pip install dist/*.whl
           python -c "import fastfields as ff; print(ff.__version__)"
 
       - name: Upload artifact
