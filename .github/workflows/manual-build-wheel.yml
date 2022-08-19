@@ -44,7 +44,7 @@ jobs:
           python=${{ env.PYTHON }} 
           torch=${{ env.PYTORCH }} 
           cuda=${{ env.CUDA }}
-    runs-on: ${{ env.OS }}
+    runs-on: ${{ github.event.inputs.os }}
 
     steps:
       - uses: actions/checkout@v3
