@@ -5,11 +5,11 @@ Verify that dispatching a numpy array and a torch tensor through
 missing backends give clear errors.
 """
 
+import fastfields.numpy as ffn
 import numpy as np
 import pytest
 
 import fastfields.any as ff
-import fastfields.numpy as ffn
 
 
 def _pack_symmetric(mats):
