@@ -1,7 +1,30 @@
 [build-system]
-# Minimum requirements for the build system to execute.
-requires = [
-    "setuptools",
-    "wheel",
-    "torch >= 1.4"
-]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastfields"
+version = "0.1.0"
+description = "Backend-dispatching interface (fastfields.any) over the fastfields wrappers."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "fastfields" }]
+# Only the raw bindings are a hard dependency (needed for the shared enums and
+# for dispatch to work at all). The array backends are optional extras so that
+# `fastfields.any` works with whatever subset of numpy/torch/cupy is installed.
+dependencies = ["fastfields-dlpack"]
+
+[project.optional-dependencies]
+numpy = ["fastfields-numpy"]
+torch = ["fastfields-torch"]
+cupy = ["fastfields-cupy"]
+all = ["fastfields-numpy", "fastfields-torch", "fastfields-cupy"]
+test = ["pytest", "numpy"]
+
+# Ships only the ``fastfields.any`` subpackage; no ``fastfields/__init__.py`` is
+# created, keeping ``fastfields`` a PEP 420 native namespace package that merges
+# with fastfields.dlpack / .numpy / .torch / .cupy.
+[tool.setuptools.packages.find]
+include = ["fastfields.any*"]
+namespaces = true
