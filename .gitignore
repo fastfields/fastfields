@@ -127,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# versioningit-generated version file
+fastfields/any/_version.py
