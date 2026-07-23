@@ -48,10 +48,9 @@ Backends are imported **lazily** (only the one whose array type is passed), so
 pip install fastfields[numpy]      # or [torch], [cupy], [all]
 ```
 
-Unified names map to each backend's actual function (which sometimes differ),
-e.g. `dt_euclidean` -> numpy `euclidean_distance_transform` / torch+cupy
-`dt_euclidean`, and `mesh_distance` -> numpy `mesh_distance` / torch+cupy
-`dt_mesh`. Arguments are forwarded unchanged, so each dispatched call shares the
-signature of the selected backend's function. A clear `TypeError` is raised for
-an unrecognised array type, and a clear `ImportError` if the needed backend is
-not installed.
+Every backend exposes the same canonical `dt_*` / `sym_*` names, and each
+unified name (e.g. `dt_euclidean`, `dt_mesh`) maps straight onto that function
+in the selected backend. Arguments are forwarded unchanged, so each dispatched
+call shares the signature of the selected backend's function. A clear
+`TypeError` is raised for an unrecognised array type, and a clear `ImportError`
+if the needed backend is not installed.

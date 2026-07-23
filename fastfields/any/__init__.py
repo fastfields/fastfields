@@ -13,12 +13,10 @@ backends installed (only ``fastfields-dlpack`` is a hard dependency). A clear
 error is raised for an unknown array type, and a clear ``ImportError`` if the
 required backend package (or its own dependency, e.g. torch/cupy) is missing.
 
-Because the underlying wrapper packages use slightly different function names
-(e.g. numpy's ``euclidean_distance_transform`` vs torch/cupy's
-``dt_euclidean``, or numpy's ``mesh_distance`` vs torch/cupy's ``dt_mesh``),
-this module exposes a single unified name per operation and maps it to each
-backend's actual function. Arguments are forwarded unchanged, so each
-dispatched call shares the signature of the selected backend's function.
+Every backend wrapper package exposes the same canonical ``dt_*`` / ``sym_*``
+names, and this module exposes one unified name per operation that maps to each
+backend's function. Arguments are forwarded unchanged, so each dispatched call
+shares the signature of the selected backend's function.
 
 The dispatchers are split by category into :mod:`._dt` (distance transforms),
 :mod:`._sym` (compact-symmetric ops) and :mod:`._resample` (resampling / spline
@@ -33,10 +31,10 @@ from fastfields.dlpack import Bound, Spline
 from ._dt import (
     dt_euclidean,
     dt_l1,
-    mesh_distance,
-    spline_distance_brent,
-    spline_distance_gaussnewton,
-    spline_distance_table,
+    dt_mesh,
+    dt_spline_brent,
+    dt_spline_gaussnewton,
+    dt_spline_table,
 )
 from ._resample import resample, restriction, spline_coeff
 from ._sym import sym_invert, sym_matvec, sym_matvec_backward, sym_solve
@@ -50,10 +48,10 @@ __all__ = [
     # distance transforms
     "dt_euclidean",
     "dt_l1",
-    "spline_distance_table",
-    "spline_distance_brent",
-    "spline_distance_gaussnewton",
-    "mesh_distance",
+    "dt_spline_table",
+    "dt_spline_brent",
+    "dt_spline_gaussnewton",
+    "dt_mesh",
     # compact-symmetric ops
     "sym_matvec",
     "sym_matvec_backward",

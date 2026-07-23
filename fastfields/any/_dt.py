@@ -1,8 +1,8 @@
 """Backend-dispatching distance-transform wrappers (:mod:`fastfields.any`).
 
-Each name here forwards to the matching backend function; the backends use
-slightly different names (e.g. numpy's ``euclidean_distance_transform`` vs
-torch/cupy's ``dt_euclidean``), which the per-name tables below reconcile.
+Each name here forwards to the matching backend function; every backend now
+exposes the canonical ``dt_*`` names, so the per-name tables below map each
+unified name onto the same attribute in each backend package.
 """
 
 from __future__ import annotations
@@ -12,29 +12,29 @@ from ._util import make_dispatcher
 # unified name -> {backend root: attribute name in that backend package}
 _ALIASES = {
     "dt_euclidean": {
-        "numpy": "euclidean_distance_transform",
+        "numpy": "dt_euclidean",
         "torch": "dt_euclidean",
         "cupy": "dt_euclidean",
     },
     "dt_l1": {
-        "numpy": "l1_distance_transform",
+        "numpy": "dt_l1",
         "torch": "dt_l1",
         "cupy": "dt_l1",
     },
-    "spline_distance_table": {
-        "numpy": "spline_distance_table",
+    "dt_spline_table": {
+        "numpy": "dt_spline_table",
         "cupy": "dt_spline_table",
     },
-    "spline_distance_brent": {
-        "numpy": "spline_distance_brent",
+    "dt_spline_brent": {
+        "numpy": "dt_spline_brent",
         "cupy": "dt_spline_brent",
     },
-    "spline_distance_gaussnewton": {
-        "numpy": "spline_distance_gaussnewton",
+    "dt_spline_gaussnewton": {
+        "numpy": "dt_spline_gaussnewton",
         "cupy": "dt_spline_gaussnewton",
     },
-    "mesh_distance": {
-        "numpy": "mesh_distance",
+    "dt_mesh": {
+        "numpy": "dt_mesh",
         "torch": "dt_mesh",
         "cupy": "dt_mesh",
     },

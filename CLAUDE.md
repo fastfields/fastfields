@@ -17,10 +17,9 @@ namespace the other distributions merge into. This is the top of the stack.
   imported, so `fastfields.any` works with whatever subset of numpy/torch/cupy
   is installed. Only `fastfields-dlpack` is a hard dependency; array backends
   come via extras (`fastfields[numpy|torch|cupy|all]`).
-- Unified names map to each backend's actual function (which sometimes differ),
-  e.g. unified `dt_euclidean` → numpy `euclidean_distance_transform` vs.
-  torch/cupy `dt_euclidean`; unified `mesh_distance` → numpy `mesh_distance` vs.
-  torch/cupy `dt_mesh`. Args are forwarded unchanged, so a dispatched call
+- Every backend exposes the same canonical `dt_*` / `sym_*` names, and each
+  unified name (e.g. `dt_euclidean`, `dt_mesh`) maps straight onto that function
+  in the selected backend. Args are forwarded unchanged, so a dispatched call
   shares the selected backend's signature.
 - Raises a clear `TypeError` for an unknown array type and a clear `ImportError`
   when the needed backend isn't installed.

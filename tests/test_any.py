@@ -45,10 +45,10 @@ def test_dispatch_numpy_matches_backend():
 
 
 def test_dispatch_numpy_dt_euclidean_name_mapping():
-    # unified name dt_euclidean -> numpy euclidean_distance_transform
+    # unified name dt_euclidean -> numpy dt_euclidean
     x = np.array([[0, np.inf, np.inf, 0, np.inf]], dtype=np.float64)
     out_any = ff.dt_euclidean(x, voxel_spacing=1.0)
-    out_direct = ffn.euclidean_distance_transform(x, voxel_spacing=1.0)
+    out_direct = ffn.dt_euclidean(x, voxel_spacing=1.0)
     np.testing.assert_array_equal(out_any, out_direct)
 
 
