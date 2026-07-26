@@ -79,6 +79,34 @@ def test_dispatch_selects_by_first_argument():
     np.testing.assert_allclose(on, ot.numpy(), rtol=1e-6, atol=1e-6)
 
 
+def test_resample_unified_signature_matches_backend():
+    # C2: numpy/torch/cupy share the factor/shape/order signature, so
+    # any.resample forwards it unchanged and matches the direct backend call.
+    x = np.arange(8.0)
+    out_any = ff.resample(x, factor=2, order="linear", anchor="centers")
+    out_direct = ffn.resample(x, factor=2, order="linear", anchor="centers")
+    assert out_any.shape == (16,)
+    np.testing.assert_array_equal(out_any, out_direct)
+    # `shape=` and a string `order`/`bound` also cross unchanged
+    out_shape = ff.resample(x, shape=4, order="cubic", bound="dct2")
+    np.testing.assert_array_equal(
+        out_shape, ffn.resample(x, shape=4, order="cubic", bound="dct2")
+    )
+
+
+def test_resample_factor_means_factor_on_every_backend():
+    # The C2 footgun is gone: a positional 2 is a *factor* on numpy AND torch
+    # (previously it meant an output shape on torch/cupy).
+    torch = pytest.importorskip("torch")
+
+    xn = np.arange(8.0)
+    xt = torch.arange(8.0, dtype=torch.float64)
+    on = ff.resample(xn, 2, order="linear")
+    ot = ff.resample(xt, 2, order="linear")
+    assert on.shape == (16,) and tuple(ot.shape) == (16,)
+    np.testing.assert_allclose(on, ot.numpy(), rtol=1e-6, atol=1e-6)
+
+
 def test_unknown_type_raises():
     with pytest.raises(TypeError):
         ff.sym_matvec([1.0, 2.0, 3.0], [1.0, 2.0])
