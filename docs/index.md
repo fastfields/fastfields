@@ -44,6 +44,8 @@ tdist = ff.dt_euclidean(tmask)    # same call, dispatched to PyTorch
 | **Distance transforms** | `dt_euclidean`, `dt_l1`; point-to-spline `dt_spline_table` / `dt_spline_brent` / `dt_spline_gaussnewton`; point-to-mesh `dt_mesh` |
 | **Positive-definite linear algebra** | `sym_matvec`, `sym_matvec_backward`, `sym_solve`, `sym_invert` over whole fields of small symmetric matrices |
 | **Resampling** | `resample` (spline up/down-sampling), `restriction` (its adjoint), `spline_coeff` (coefficient prefilter) |
+| **Pushpull** | `pull` / `push` (spline gather & its adjoint scatter), `count`, `grad` — the building blocks of image warping/sampling |
+| **Regularisers** | `field_matvec` / `flow_matvec` (absolute / membrane / bending energies on fields & vector flows) and their `*_diag` preconditioners |
 
 Each call forwards straight to the selected backend, so it shares that backend's
 signature and behaviour (autograd on PyTorch, CUDA streams on CuPy). Prefer a
@@ -62,8 +64,8 @@ before you install.
 | Distance — point-to-mesh / point-to-spline | 🧪 | 🧪¹ | 🧭 |
 | Positive-definite linear algebra (`sym_*`) | ✅ | ✅ | 🧭 |
 | Resampling (`resample` / `restriction` / `spline_coeff`) | ✅ | ✅ | 🧭 |
-| Pushpull (spline gather / scatter / grad) | 🧭 | 🧭 | 🧭 |
-| Regularisers (membrane / bending energies) | 🧭 | 🧭 | 🧭 |
+| Pushpull (spline gather / scatter / grad) | ✅ | ✅ | 🧭 |
+| Regularisers (membrane / bending energies) | ✅ | ✅ | 🧭 |
 
 **✅ works, covered by the CPU test suite** &nbsp;·&nbsp; **🧪 exposed but not
 yet covered by tests** (shape contracts still being firmed up — use with care)
@@ -74,11 +76,11 @@ variants.
 
 What "planned" means here:
 
-- **GPU / CuPy.** The CUDA kernels and the CuPy wrapper exist and compile + link,
-  but there is no GPU in CI, so no GPU wheel is published yet and nothing has run
-  on real hardware. The wheel lanes are deferred until that changes.
-- **Pushpull and regularisers.** These are implemented in the C++ library but are
-  not yet bound in the Python bindings, so no backend exposes them today.
+- **GPU / CuPy** (the only remaining 🧭). The CUDA kernels and the CuPy wrapper
+  exist and compile + link — every op family, pushpull and the regularisers
+  included, is exposed on all three backends — but there is no GPU in CI, so no
+  GPU wheel is published yet and nothing has run on real hardware. The wheel
+  lanes are deferred until that changes.
 
 Everything marked ✅ is exercised by a brute-force reference test on CPU.
 
