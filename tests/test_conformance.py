@@ -146,3 +146,48 @@ def test_numpy_torch_equivalence(op, args, kwargs):
     np.testing.assert_allclose(
         np_out, t_out.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
     )
+
+
+# --------------------------------------------------------------------------- #
+# pushpull + regulariser dispatch (added when those op families were exposed) #
+# --------------------------------------------------------------------------- #
+
+
+def _pull_case():
+    inp = np.array([[0.0], [10.0], [20.0], [30.0]])
+    grid = np.array([[0.5], [1.5], [2.5]])
+    return inp, grid
+
+
+def test_any_exposes_pushpull_and_reg():
+    for name in [
+        "pull",
+        "push",
+        "count",
+        "grad",
+        "field_matvec",
+        "flow_matvec",
+    ]:
+        assert hasattr(ff, name), name
+
+
+def test_any_pull_numpy_torch_equivalence():
+    torch = pytest.importorskip("torch")
+    _import_backend("torch")
+    inp, grid = _pull_case()
+    on = ff.pull(inp, grid, order=1)
+    ot = ff.pull(torch.as_tensor(inp), torch.as_tensor(grid), order=1)
+    np.testing.assert_allclose(
+        on, ot.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
+    )
+
+
+def test_any_field_matvec_numpy_torch_equivalence():
+    torch = pytest.importorskip("torch")
+    _import_backend("torch")
+    f = np.random.default_rng(0).standard_normal((8, 2))
+    on = ff.field_matvec(f, absolute=[2.0, 3.0], ndim=1)
+    ot = ff.field_matvec(torch.as_tensor(f), absolute=[2.0, 3.0], ndim=1)
+    np.testing.assert_allclose(
+        on, ot.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
+    )
