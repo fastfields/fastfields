@@ -1,26 +1,24 @@
 # fastfields
 
 **fastfields** is the one-import way to use the toolkit: `fastfields.any` looks
-at whatever array you hand it — NumPy, PyTorch or CuPy — and runs the operation
-on the matching backend. Write your code once and it works across frameworks,
-CPU and GPU.
+at whatever array you hand it — NumPy or PyTorch — and runs the operation on the
+matching backend. Write your code once and it works across frameworks.
 
 Only the backends you install are loaded, so `fastfields[numpy]` alone is a
-perfectly good CPU-only setup.
+perfectly good setup. Today the tested, working path is **CPU** (NumPy and
+PyTorch); the CuPy/GPU path is implemented but not yet published as a wheel or
+validated on hardware — see [Status](#status) below.
 
 ## Install
 
 ```sh
-# CPU only
+# CPU (NumPy)
 pip install "fastfields[numpy]" \
     --extra-index-url https://fastfields.github.io/whl/cpu/
-
-# GPU (CUDA 12.8)
-pip install "fastfields[cupy]" \
-    --extra-index-url https://fastfields.github.io/whl/cu128/
 ```
 
-Use `fastfields[torch]` for PyTorch, or `fastfields[all]` for everything.
+Use `fastfields[torch]` for PyTorch. A GPU (CuPy / CUDA) wheel lane is planned
+but **not published yet** — see [Status](#status).
 
 ## Use it
 
@@ -51,5 +49,37 @@ Each call forwards straight to the selected backend, so it shares that backend's
 signature and behaviour (autograd on PyTorch, CUDA streams on CuPy). Prefer a
 single framework? Use `fastfields.numpy`, `fastfields.torch` or `fastfields.cupy`
 directly.
+
+## Status
+
+fastfields is **alpha**. The table below is what is actually exposed and tested
+today, mirroring the candour of the internal migration matrix — so you know
+before you install.
+
+| Operation | NumPy (CPU) | PyTorch (CPU) | CuPy (GPU) |
+|---|:---:|:---:|:---:|
+| Distance — Euclidean / L1 | ✅ | ✅ | 🧭 |
+| Distance — point-to-mesh / point-to-spline | 🧪 | 🧪¹ | 🧭 |
+| Positive-definite linear algebra (`sym_*`) | ✅ | ✅ | 🧭 |
+| Resampling (`resample` / `restriction` / `spline_coeff`) | ✅ | ✅ | 🧭 |
+| Pushpull (spline gather / scatter / grad) | 🧭 | 🧭 | 🧭 |
+| Regularisers (membrane / bending energies) | 🧭 | 🧭 | 🧭 |
+
+**✅ works, covered by the CPU test suite** &nbsp;·&nbsp; **🧪 exposed but not
+yet covered by tests** (shape contracts still being firmed up — use with care)
+&nbsp;·&nbsp; **🧭 planned** (see below).
+
+¹ PyTorch exposes point-to-mesh (`dt_mesh`) but not the point-to-spline
+variants.
+
+What "planned" means here:
+
+- **GPU / CuPy.** The CUDA kernels and the CuPy wrapper exist and compile + link,
+  but there is no GPU in CI, so no GPU wheel is published yet and nothing has run
+  on real hardware. The wheel lanes are deferred until that changes.
+- **Pushpull and regularisers.** These are implemented in the C++ library but are
+  not yet bound in the Python bindings, so no backend exposes them today.
+
+Everything marked ✅ is exercised by a brute-force reference test on CPU.
 
 See the [API reference](api/index.md) for full signatures and options.
