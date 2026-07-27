@@ -39,8 +39,16 @@ from ._dt import (
 from ._pushpull import count, grad, pull, push
 from ._reg import (
     field_matvec,
+    flow_diag_add,
+    flow_diag_add_,
+    flow_diag_sub,
+    flow_diag_sub_,
     flow_forward,
     flow_matvec,
+    flow_matvec_add,
+    flow_matvec_add_,
+    flow_matvec_sub,
+    flow_matvec_sub_,
     flow_precond,
     flow_relax,
 )
@@ -74,9 +82,17 @@ __all__ = [
     "push",
     "count",
     "grad",
-    # regularisers (operators; *_diag are backend-specific)
+    # regularisers (operators; plain *_diag / flow_kernel are backend-specific)
     "field_matvec",
     "flow_matvec",
+    "flow_matvec_add",
+    "flow_matvec_add_",
+    "flow_matvec_sub",
+    "flow_matvec_sub_",
+    "flow_diag_add",
+    "flow_diag_add_",
+    "flow_diag_sub",
+    "flow_diag_sub_",
     "flow_relax",
     "flow_precond",
     "flow_forward",
