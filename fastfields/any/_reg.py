@@ -1,7 +1,8 @@
 """Backend-dispatching regulariser wrappers (fastfields.any).
 
-Only the operators (``*_matvec``) are dispatched here — they take the field as
-their first array argument, so the backend is unambiguous. The ``*_diag``
+Operators that take a field/matrix as their first array argument are dispatched
+here (``field_matvec``, ``flow_matvec``, ``flow_relax``, ``flow_precond``,
+``flow_forward``) — the backend is unambiguous from that array. The ``*_diag``
 preconditioners allocate from a *shape* (no array to dispatch on); call them on
 a concrete backend (``fastfields.numpy`` / ``.torch`` / ``.cupy``) directly.
 """
@@ -25,6 +26,16 @@ _ALIASES = {
         "numpy": "flow_relax",
         "torch": "flow_relax",
         "cupy": "flow_relax",
+    },
+    "flow_precond": {
+        "numpy": "flow_precond",
+        "torch": "flow_precond",
+        "cupy": "flow_precond",
+    },
+    "flow_forward": {
+        "numpy": "flow_forward",
+        "torch": "flow_forward",
+        "cupy": "flow_forward",
     },
 }
 

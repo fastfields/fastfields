@@ -79,6 +79,27 @@ def test_dispatch_selects_by_first_argument():
     np.testing.assert_allclose(on, ot.numpy(), rtol=1e-6, atol=1e-6)
 
 
+def test_dispatch_flow_forward_matches_backend():
+    # flow_forward/flow_precond dispatch on `mat` (first array arg).
+    mat = _random_packed(30, 2, seed=7).reshape(5, 6, 3)
+    vec = np.random.default_rng(8).standard_normal((5, 6, 2))
+    kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5, ndim=2)
+    np.testing.assert_array_equal(
+        ff.flow_forward(mat, vec, **kw), ffn.flow_forward(mat, vec, **kw)
+    )
+
+
+def test_dispatch_flow_precond_matches_backend():
+    m = np.random.default_rng(9).standard_normal((30, 2, 2))
+    m = np.einsum("bij,bkj->bik", m, m) + 3.0 * np.eye(2)  # SPD
+    mat = _pack_symmetric(m).reshape(5, 6, 3)
+    vec = np.random.default_rng(10).standard_normal((5, 6, 2))
+    kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5, ndim=2)
+    np.testing.assert_array_equal(
+        ff.flow_precond(mat, vec, **kw), ffn.flow_precond(mat, vec, **kw)
+    )
+
+
 def test_resample_unified_signature_matches_backend():
     # C2: numpy/torch/cupy share the factor/shape/order signature, so
     # any.resample forwards it unchanged and matches the direct backend call.
