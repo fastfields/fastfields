@@ -21,6 +21,11 @@ _ALIASES = {
         "torch": "flow_matvec",
         "cupy": "flow_matvec",
     },
+    "flow_relax": {
+        "numpy": "flow_relax",
+        "torch": "flow_relax",
+        "cupy": "flow_relax",
+    },
 }
 
 for _name, _table in _ALIASES.items():
