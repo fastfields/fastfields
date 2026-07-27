@@ -100,6 +100,27 @@ def test_dispatch_flow_precond_matches_backend():
     )
 
 
+def test_dispatch_flow_accumulate_matches_backend():
+    # The _add/_sub/in-place variants dispatch on `inp` (first array arg).
+    rng = np.random.default_rng(13)
+    flow = rng.standard_normal((5, 6, 2))
+    base = rng.standard_normal((5, 6, 2))
+    kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5, ndim=2)
+    for name in ("flow_matvec_add", "flow_matvec_sub"):
+        np.testing.assert_array_equal(
+            getattr(ff, name)(base, flow, **kw),
+            getattr(ffn, name)(base, flow, **kw),
+        )
+    for name in ("flow_diag_add", "flow_diag_sub"):
+        np.testing.assert_array_equal(
+            getattr(ff, name)(base, **kw), getattr(ffn, name)(base, **kw)
+        )
+    # in-place through any mutates the passed array and returns it
+    a = base.copy()
+    assert ff.flow_matvec_add_(a, flow, **kw) is a
+    np.testing.assert_array_equal(a, base + ffn.flow_matvec(flow, **kw))
+
+
 def test_resample_unified_signature_matches_backend():
     # C2: numpy/torch/cupy share the factor/shape/order signature, so
     # any.resample forwards it unchanged and matches the direct backend call.
