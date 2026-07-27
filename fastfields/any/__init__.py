@@ -37,7 +37,13 @@ from ._dt import (
     dt_spline_table,
 )
 from ._pushpull import count, grad, pull, push
-from ._reg import field_matvec, flow_matvec
+from ._reg import (
+    field_matvec,
+    flow_forward,
+    flow_matvec,
+    flow_precond,
+    flow_relax,
+)
 from ._resample import resample, restriction, spline_coeff
 from ._sym import sym_invert, sym_matvec, sym_matvec_backward, sym_solve
 
@@ -71,4 +77,7 @@ __all__ = [
     # regularisers (operators; *_diag are backend-specific)
     "field_matvec",
     "flow_matvec",
+    "flow_relax",
+    "flow_precond",
+    "flow_forward",
 ]
