@@ -16,6 +16,16 @@ from ._util import make_dispatcher
 # Every unified name maps to the identically-named function on each backend.
 _DISPATCHED = [
     "field_matvec",
+    "field_matvec_add",
+    "field_matvec_add_",
+    "field_matvec_sub",
+    "field_matvec_sub_",
+    "field_diag_add",
+    "field_diag_add_",
+    "field_diag_sub",
+    "field_diag_sub_",
+    "field_precond",
+    "field_forward",
     "flow_matvec",
     "flow_matvec_add",
     "flow_matvec_add_",

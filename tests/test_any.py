@@ -100,6 +100,25 @@ def test_dispatch_flow_precond_matches_backend():
     )
 
 
+def test_dispatch_field_precond_forward_matches_backend():
+    # field_precond/forward dispatch on `mat`; accumulate on `inp`.
+    m = np.random.default_rng(14).standard_normal((30, 2, 2))
+    m = np.einsum("bij,bkj->bik", m, m) + 3.0 * np.eye(2)  # SPD
+    mat = _pack_symmetric(m).reshape(5, 6, 3)
+    vec = np.random.default_rng(15).standard_normal((5, 6, 2))
+    kw = dict(absolute=[0.3, 0.4], membrane=[0.7, 0.5], ndim=2)
+    np.testing.assert_array_equal(
+        ff.field_forward(mat, vec, **kw), ffn.field_forward(mat, vec, **kw)
+    )
+    np.testing.assert_array_equal(
+        ff.field_precond(mat, vec, **kw), ffn.field_precond(mat, vec, **kw)
+    )
+    np.testing.assert_array_equal(
+        ff.field_matvec_add(vec, vec, **kw),
+        ffn.field_matvec_add(vec, vec, **kw),
+    )
+
+
 def test_dispatch_flow_accumulate_matches_backend():
     # The _add/_sub/in-place variants dispatch on `inp` (first array arg).
     rng = np.random.default_rng(13)
