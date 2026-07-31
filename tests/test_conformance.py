@@ -82,10 +82,25 @@ def test_torch_omits_inplace_ops():
     # In-place mutation does not compose with autograd, so torch deliberately
     # ships a functional-only surface (API_CONTRACT.md, in-place policy).
     mod = _import_backend("torch")
-    for name in dir(mod):
-        assert not (name.endswith("_") and not name.startswith("_")), (
-            f"torch unexpectedly exposes an in-place op: {name!r}"
-        )
+    offenders = [
+        name
+        for name in dir(mod)
+        if name.endswith("_") and not name.startswith("_")
+    ]
+    assert not offenders, (
+        f"torch unexpectedly exposes in-place ops: {offenders}"
+    )
+
+
+def test_any_inplace_reg_rejects_torch_cleanly():
+    # The `_`-suffixed accumulate forms are a numpy/cupy-only extension. Asking
+    # `any` for one with a torch tensor must fail with the informative
+    # NotImplementedError, not an AttributeError leaking from the backend.
+    torch = pytest.importorskip("torch")
+    _import_backend("torch")
+    x = torch.zeros((4, 4, 2), dtype=torch.float64)
+    with pytest.raises(NotImplementedError, match="not available for the"):
+        ff.field_diag_add_(x, absolute=[0.3, 0.4], ndim=2)
 
 
 # --------------------------------------------------------------------------- #

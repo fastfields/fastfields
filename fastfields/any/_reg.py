@@ -7,6 +7,9 @@ accumulate forms, ``flow_diag`` accumulate forms, ``flow_relax``,
 array. The plain ``*_diag`` / ``flow_kernel`` builders allocate from a *shape*
 (no array to dispatch on); call them on a concrete backend
 (``fastfields.numpy`` / ``.torch`` / ``.cupy``) directly.
+
+The in-place (``_``-suffixed) accumulate forms dispatch to numpy and cupy only
+-- torch has no in-place ops by design (see ``API_CONTRACT.md``).
 """
 
 from __future__ import annotations
@@ -40,8 +43,19 @@ _DISPATCHED = [
     "flow_forward",
 ]
 
+# In-place (``_``-suffixed) forms are a numpy/cupy-only extension: the torch
+# backend deliberately ships a functional-only surface, because in-place
+# mutation does not compose with autograd (see the in-place policy in
+# API_CONTRACT.md, and fastfields-torch#19). Leaving "torch" out of their table
+# makes ``fastfields.any`` raise the intended NotImplementedError -- naming the
+# op and the backends that do support it -- instead of an opaque AttributeError
+# from the backend module.
 _ALIASES = {
-    _name: {"numpy": _name, "torch": _name, "cupy": _name}
+    _name: (
+        {"numpy": _name, "cupy": _name}
+        if _name.endswith("_")
+        else {"numpy": _name, "torch": _name, "cupy": _name}
+    )
     for _name in _DISPATCHED
 }
 
