@@ -5,7 +5,7 @@ interface over the per-backend wrappers, and anchors the `fastfields` PEP 420
 namespace the other distributions merge into. This is the top of the stack.
 
 ```
-… ─ bind-py ─ {numpy,cupy,torch} ─ fastfields ← (you are here)
+… ─ dlpack ─ {numpy,cupy,torch} ─ fastfields ← (you are here)
 ```
 
 ## Philosophy / role
