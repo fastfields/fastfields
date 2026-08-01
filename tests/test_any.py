@@ -114,8 +114,8 @@ def test_dispatch_field_precond_forward_matches_backend():
         ff.field_precond(mat, vec, **kw), ffn.field_precond(mat, vec, **kw)
     )
     np.testing.assert_array_equal(
-        ff.field_matvec_add(vec, vec, **kw),
-        ffn.field_matvec_add(vec, vec, **kw),
+        ff.field_addmatvec(vec, vec, **kw),
+        ffn.field_addmatvec(vec, vec, **kw),
     )
 
 
@@ -125,18 +125,18 @@ def test_dispatch_flow_accumulate_matches_backend():
     flow = rng.standard_normal((5, 6, 2))
     base = rng.standard_normal((5, 6, 2))
     kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5, ndim=2)
-    for name in ("flow_matvec_add", "flow_matvec_sub"):
+    for name in ("flow_addmatvec", "flow_submatvec"):
         np.testing.assert_array_equal(
             getattr(ff, name)(base, flow, **kw),
             getattr(ffn, name)(base, flow, **kw),
         )
-    for name in ("flow_diag_add", "flow_diag_sub"):
+    for name in ("flow_adddiag", "flow_subdiag"):
         np.testing.assert_array_equal(
             getattr(ff, name)(base, **kw), getattr(ffn, name)(base, **kw)
         )
     # in-place through any mutates the passed array and returns it
     a = base.copy()
-    assert ff.flow_matvec_add_(a, flow, **kw) is a
+    assert ff.flow_addmatvec_(a, flow, **kw) is a
     np.testing.assert_array_equal(a, base + ffn.flow_matvec(flow, **kw))
 
 
