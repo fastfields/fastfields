@@ -78,14 +78,39 @@ def test_numpy_exposes_inplace_sym():
     assert hasattr(mod, "sym_submatvec_")
 
 
-def test_torch_omits_inplace_ops():
-    # In-place mutation does not compose with autograd, so torch deliberately
-    # ships a functional-only surface (API_CONTRACT.md, in-place policy).
+# The regulariser accumulate ops are additive in the tensor they mutate, so
+# their backward never needs the pre-mutation value -- they are autograd-safe
+# in place and are exposed on every backend, torch included.
+# See API_CONTRACT.md, "In-place policy".
+_TORCH_INPLACE_ALLOWED = frozenset(
+    f"{fam}_{op}_{sign}_"
+    for fam in ("field", "flow")
+    for op in ("matvec", "diag")
+    for sign in ("add", "sub")
+)
+
+
+def test_torch_inplace_ops_are_only_the_autograd_safe_ones():
+    # torch must not grow in-place ops whose backward would need the
+    # pre-mutation value of the mutated tensor (e.g. sym_solve_, sym_invert_,
+    # spline_coeff_): those stay out-of-place only (API_CONTRACT.md).
     mod = _import_backend("torch")
-    for name in dir(mod):
-        assert not (name.endswith("_") and not name.startswith("_")), (
-            f"torch unexpectedly exposes an in-place op: {name!r}"
-        )
+    exposed = {
+        name for name in dir(mod)
+        if name.endswith("_") and not name.startswith("_")
+    }
+    unexpected = exposed - _TORCH_INPLACE_ALLOWED
+    assert not unexpected, (
+        f"torch exposes in-place op(s) that are not known to be autograd-safe: "
+        f"{sorted(unexpected)!r}"
+    )
+
+
+def test_torch_exposes_the_autograd_safe_inplace_ops():
+    # The converse: the accumulate set must actually be present on torch.
+    mod = _import_backend("torch")
+    missing = _TORCH_INPLACE_ALLOWED - set(dir(mod))
+    assert not missing, f"torch is missing in-place op(s): {sorted(missing)!r}"
 
 
 # --------------------------------------------------------------------------- #

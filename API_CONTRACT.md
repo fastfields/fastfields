@@ -36,16 +36,72 @@ torch/cupy) is gone (see fastfields-lib#17 C2).
 
 ## In-place policy (per backend, by design)
 
-In-place (`_`-suffixed) variants mutate the caller's buffer and return it. Their
-availability differs **intentionally**:
+In-place (`_`-suffixed) variants mutate the caller's buffer and return it.
 
-- **numpy / cupy** expose the in-place set (e.g. `sym_addmatvec_`,
-  `sym_submatvec_`; cupy additionally `dt_euclidean_`, `sym_solve_`,
-  `sym_invert_`, `spline_coeff_`, …). They mutate the caller's array in place.
-- **torch omits every in-place op.** In-place mutation does not compose with
-  autograd (it breaks the graph / gradient bookkeeping), so the torch backend is
-  deliberately a smaller, functional-only surface. Callers that need in-place
-  semantics should use numpy or cupy.
+### The rule (per-op, not per-backend)
+
+An in-place op is exposed **iff its backward does not require the pre-mutation
+value of the tensor being mutated.**
+
+Concretely, for `out <- f(out, ...)` the in-place form is safe under autograd
+iff `d f / d out` is a constant that does not depend on `out` — i.e. `f` is
+*additive* in `out`:
+
+| shape of `f` | `d f/d out` | pre-mutation value needed? | in-place exposed? |
+| --- | --- | --- | --- |
+| `out += g(...)` / `out -= g(...)` | `+/- I` | **no** | **yes**, all backends |
+| `out *= g(...)`, or any nonlinear `f(out)` | depends on `out` | **yes** | no — out-of-place only |
+
+This is exactly why PyTorch itself ships `Tensor.add_` as a fully autograd-safe
+in-place op while e.g. an in-place nonlinearity has to stash its input.
+
+**The previous blanket rule — "torch omits every in-place op, because in-place
+mutation does not compose with autograd" — was wrong** and has been replaced by
+the per-op test above. Additive accumulation composes with autograd perfectly
+well.
+
+### Consequences for torch
+
+- `{field,flow}_{matvec,diag}_{add_,sub_}` **are** exposed on torch. They are
+  additive in the mutated tensor, so their `torch.autograd.Function` saves
+  nothing for backward (no `save_for_backward` at all — that absence *is* the
+  safety argument) and returns the incoming gradient unchanged for the
+  accumulated-into tensor.
+- Any in-place op implemented as a `torch.autograd.Function` **must** call
+  `ctx.mark_dirty()` on the tensor it mutates, so the version counter is bumped
+  and a stale save elsewhere raises instead of silently producing a wrong
+  gradient.
+- Torch's ordinary **leaf rule** is unchanged and is *not* a fastfields policy:
+  a leaf tensor with `requires_grad=True` cannot be mutated in place, exactly as
+  for `x.add_(y)`. Use the out-of-place spelling in that case.
+- Ops whose backward *does* need the original values — `sym_solve_`,
+  `sym_invert_`, `spline_coeff_`, `dt_euclidean_` — remain **out-of-place only**
+  on torch. That is the rule biting, not an arbitrary exclusion.
+
+### One kernel, two spellings
+
+For the regulariser accumulate ops there is a **single** C primitive, and it is
+in-place only (`ff::{field,flow}_{matvec,diag}_{add_,sub_}`, mirroring the
+original jitfields `op='+'`/`op='-'` entry points). The two Python spellings
+differ only in whether the caller's tensor is passed straight through or cloned
+first:
+
+```python
+def field_matvec_add_(inp, field, ...):   # in-place
+    return _prim(inp, field, ...)
+
+def field_matvec_add(inp, field, ...):    # out-of-place
+    return _prim(inp.clone(), field, ...)
+```
+
+There is deliberately no separate "return a fresh tensor" kernel below Python.
+This holds identically on numpy, torch and cupy.
+
+### Availability
+
+`{field,flow}_{matvec,diag}_{add,sub}` and their `_`-suffixed in-place forms are
+available on **numpy, torch and cupy alike**. Other `_`-suffixed ops remain
+backend-specific (see below).
 
 Because these live outside the canonical set, `fastfields.any` never routes to a
 `_`-suffixed op implicitly; they are backend-specific extensions.
@@ -56,7 +112,10 @@ Beyond the canonical set, backends may add:
 
 - **numpy** — `sym_matvec_backward`, `sym_channels_from_packed`,
   `dt_spline_{table,brent,gaussnewton}`.
-- **torch** — nothing beyond the canonical set (autograd-focused, minimal).
+- **torch** — the regulariser accumulate set
+  (`{field,flow}_{matvec,diag}_{add,sub}` and their `_` in-place forms),
+  which are autograd-safe by the rule above. Nothing else beyond the
+  canonical set.
 - **cupy** — the in-place set above plus `current_stream_ptr` and the
   `dt_spline_*` variants.
 
