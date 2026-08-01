@@ -62,7 +62,7 @@ well.
 
 ### Consequences for torch
 
-- `{field,flow}_{matvec,diag}_{add_,sub_}` **are** exposed on torch. They are
+- `{field,flow}_{add,sub}{matvec,diag}_` **are** exposed on torch. They are
   additive in the mutated tensor, so their `torch.autograd.Function` saves
   nothing for backward (no `save_for_backward` at all — that absence *is* the
   safety argument) and returns the incoming gradient unchanged for the
@@ -81,16 +81,16 @@ well.
 ### One kernel, two spellings
 
 For the regulariser accumulate ops there is a **single** C primitive, and it is
-in-place only (`ff::{field,flow}_{matvec,diag}_{add_,sub_}`, mirroring the
+in-place only (`ff::{field,flow}_{add,sub}{matvec,diag}_`, mirroring the
 original jitfields `op='+'`/`op='-'` entry points). The two Python spellings
 differ only in whether the caller's tensor is passed straight through or cloned
 first:
 
 ```python
-def field_matvec_add_(inp, field, ...):   # in-place
+def field_addmatvec_(inp, field, ...):   # in-place
     return _prim(inp, field, ...)
 
-def field_matvec_add(inp, field, ...):    # out-of-place
+def field_addmatvec(inp, field, ...):    # out-of-place
     return _prim(inp.clone(), field, ...)
 ```
 
@@ -99,7 +99,7 @@ This holds identically on numpy, torch and cupy.
 
 ### Availability
 
-`{field,flow}_{matvec,diag}_{add,sub}` and their `_`-suffixed in-place forms are
+`{field,flow}_{add,sub}{matvec,diag}` and their `_`-suffixed in-place forms are
 available on **numpy, torch and cupy alike**. Other `_`-suffixed ops remain
 backend-specific (see below).
 
@@ -113,7 +113,7 @@ Beyond the canonical set, backends may add:
 - **numpy** — `sym_matvec_backward`, `sym_channels_from_packed`,
   `dt_spline_{table,brent,gaussnewton}`.
 - **torch** — the regulariser accumulate set
-  (`{field,flow}_{matvec,diag}_{add,sub}` and their `_` in-place forms),
+  (`{field,flow}_{add,sub}{matvec,diag}` and their `_` in-place forms),
   which are autograd-safe by the rule above. Nothing else beyond the
   canonical set.
 - **cupy** — the in-place set above plus `current_stream_ptr` and the

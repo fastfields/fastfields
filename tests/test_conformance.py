@@ -83,7 +83,7 @@ def test_numpy_exposes_inplace_sym():
 # in place and are exposed on every backend, torch included.
 # See API_CONTRACT.md, "In-place policy".
 _TORCH_INPLACE_ALLOWED = frozenset(
-    f"{fam}_{op}_{sign}_"
+    f"{fam}_{sign}{op}_"
     for fam in ("field", "flow")
     for op in ("matvec", "diag")
     for sign in ("add", "sub")
