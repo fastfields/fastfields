@@ -96,13 +96,14 @@ def test_torch_inplace_ops_are_only_the_autograd_safe_ones():
     # spline_coeff_): those stay out-of-place only (API_CONTRACT.md).
     mod = _import_backend("torch")
     exposed = {
-        name for name in dir(mod)
+        name
+        for name in dir(mod)
         if name.endswith("_") and not name.startswith("_")
     }
     unexpected = exposed - _TORCH_INPLACE_ALLOWED
     assert not unexpected, (
-        f"torch exposes in-place op(s) that are not known to be autograd-safe: "
-        f"{sorted(unexpected)!r}"
+        f"torch exposes in-place op(s) that are not known to be "
+        f"autograd-safe: {sorted(unexpected)!r}"
     )
 
 
