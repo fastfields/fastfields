@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]  # windows red-by-design -> fastfields-bind-py#8
+        os: [ubuntu-latest, macos-latest]  # windows red-by-design -> fastfields-dlpack#8
         python-version: ["3.9", "3.11", "3.12"]
     # The C++ build that fastfields-dlpack needs is driven by clang++ on every
     # OS; the per-OS steps below make sure a clang++ is on PATH.
@@ -47,10 +47,9 @@ jobs:
       # TODO: the git+ install of fastfields-dlpack below does NOT fetch its
       # submodules, so this cross-repo source build is fragile and will likely
       # need a live-CI iteration (or installing from a wheel index once one
-      # exists). For fastfields-bind-py this step is skipped (it IS dlpack).
+      # exists).
       - name: Install fastfields-dlpack from source
-        if: ${{ github.event.repository.name != 'fastfields-bind-py' }}
-        run: pip install "fastfields-dlpack @ git+https://github.com/fastfields/fastfields-bind-py@main"
+        run: pip install "fastfields-dlpack @ git+https://github.com/fastfields/fastfields-dlpack@main"
       - name: Install sibling wrapper packages (numpy, torch)
         # test_any.py imports fastfields.numpy / fastfields.torch, so the meta
         # package needs the sibling wrappers installed. They resolve over public
