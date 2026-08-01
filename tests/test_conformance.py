@@ -192,6 +192,7 @@ def test_any_exposes_pushpull_and_reg():
         "count",
         "grad",
         "field_matvec",
+        "field_relax",
         "flow_matvec",
     ]:
         assert hasattr(ff, name), name
@@ -214,6 +215,30 @@ def test_any_field_matvec_numpy_torch_equivalence():
     f = np.random.default_rng(0).standard_normal((8, 2))
     on = ff.field_matvec(f, absolute=[2.0, 3.0], ndim=1)
     ot = ff.field_matvec(torch.as_tensor(f), absolute=[2.0, 3.0], ndim=1)
+    np.testing.assert_allclose(
+        on, ot.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
+    )
+
+
+def test_any_field_relax_numpy_torch_equivalence():
+    # field_relax is dispatched on its first array arg and mutates it in
+    # place; both backends must land on the same refined field.
+    torch = pytest.importorskip("torch")
+    _import_backend("torch")
+    rng = np.random.default_rng(11)
+    H, W, C, hdiag = 5, 6, 2, 6.0
+    hes = np.zeros((H, W, C * (C + 1) // 2))
+    hes[..., 0] = hdiag
+    hes[..., 1] = hdiag
+    grd = rng.standard_normal((H, W, C))
+    kw = dict(absolute=[0.3, 0.4], membrane=[0.7, 0.5], ndim=2, nb_iter=20)
+    on = ff.field_relax(np.zeros((H, W, C)), hes, grd, **kw)
+    ot = ff.field_relax(
+        torch.zeros(H, W, C, dtype=torch.float64),
+        torch.as_tensor(hes),
+        torch.as_tensor(grd),
+        **kw,
+    )
     np.testing.assert_allclose(
         on, ot.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
     )
