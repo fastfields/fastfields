@@ -1,6 +1,6 @@
 # fastfields
 
-**fastfields** is the one-import way to use the toolkit: `fastfields.any` looks
+**fastfields** is the one-import way to use the toolkit: `fastfields.auto` looks
 at whatever array you hand it — NumPy or PyTorch — and runs the operation on the
 matching backend. Write your code once and it works across frameworks.
 
@@ -24,7 +24,7 @@ but **not published yet** — see [Status](#status).
 
 ```python
 import numpy as np
-from fastfields import any as ff
+from fastfields import auto as ff
 
 mask = np.zeros((256, 256), "float32")
 mask[:, 128] = 1.0

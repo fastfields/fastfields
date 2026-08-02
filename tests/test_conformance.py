@@ -3,7 +3,7 @@
 Enforces the contract in ``API_CONTRACT.md``: every backend exposes the same
 canonical operation names, the in-place policy differs as documented
 (numpy/cupy have ``_``-suffixed ops, torch does not), and a canonical call
-dispatched through ``fastfields.any`` gives the same result on numpy and torch.
+dispatched through ``fastfields.auto`` gives the same result on numpy and torch.
 
 numpy is a hard test dependency; torch is imported via ``importorskip`` so the
 suite still runs where torch is absent; cupy is skipped (needs a CUDA GPU).
@@ -16,7 +16,7 @@ import importlib
 import numpy as np
 import pytest
 
-import fastfields.any as ff
+import fastfields.auto as ff
 
 # The canonical operations every backend must expose, plus the re-exported
 # enums. A backend may ADD trailing optional params or extra ops, never drop or
@@ -115,7 +115,7 @@ def test_torch_exposes_the_autograd_safe_inplace_ops():
 
 
 # --------------------------------------------------------------------------- #
-# 3. numpy vs torch numerical equivalence (dispatched through fastfields.any) #
+# 3. numpy vs torch numerical equivalence (dispatched through fastfields.auto) #
 # --------------------------------------------------------------------------- #
 
 
@@ -185,7 +185,7 @@ def _pull_case():
     return inp, grid
 
 
-def test_any_exposes_pushpull_and_reg():
+def test_auto_exposes_pushpull_and_reg():
     for name in [
         "pull",
         "push",
@@ -198,7 +198,7 @@ def test_any_exposes_pushpull_and_reg():
         assert hasattr(ff, name), name
 
 
-def test_any_pull_numpy_torch_equivalence():
+def test_auto_pull_numpy_torch_equivalence():
     torch = pytest.importorskip("torch")
     _import_backend("torch")
     inp, grid = _pull_case()
@@ -209,7 +209,7 @@ def test_any_pull_numpy_torch_equivalence():
     )
 
 
-def test_any_field_matvec_numpy_torch_equivalence():
+def test_auto_field_matvec_numpy_torch_equivalence():
     torch = pytest.importorskip("torch")
     _import_backend("torch")
     f = np.random.default_rng(0).standard_normal((8, 2))

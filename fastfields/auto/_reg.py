@@ -1,4 +1,4 @@
-"""Backend-dispatching regulariser wrappers (fastfields.any).
+"""Backend-dispatching regulariser wrappers (fastfields.auto).
 
 Operators that take a field/matrix as their first array argument are dispatched
 here (``field_matvec``, ``flow_matvec`` and its ``_add``/``_sub``/in-place

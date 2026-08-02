@@ -1,6 +1,6 @@
 # Cross-backend API contract
 
-`fastfields.any` dispatches on the type of the first array argument and forwards
+`fastfields.auto` dispatches on the type of the first array argument and forwards
 the call **unchanged** to the matching backend (`fastfields.numpy`,
 `fastfields.torch`, `fastfields.cupy`). For that to be safe, every backend must
 agree on the name, argument order, and meaning of each canonical operation. This
@@ -9,7 +9,7 @@ it that can be checked automatically.
 
 The golden rule: **a backend may _add_ trailing keyword parameters, but never
 rename, drop, or reorder a canonical parameter.** Anything a backend adds must be
-optional so an `any` call written against the canonical signature keeps working.
+optional so an `auto` call written against the canonical signature keeps working.
 
 ## Canonical operations
 
@@ -103,7 +103,7 @@ This holds identically on numpy, torch and cupy.
 available on **numpy, torch and cupy alike**. Other `_`-suffixed ops remain
 backend-specific (see below).
 
-Because these live outside the canonical set, `fastfields.any` never routes to a
+Because these live outside the canonical set, `fastfields.auto` never routes to a
 `_`-suffixed op implicitly; they are backend-specific extensions.
 
 ## Backend-specific extensions (allowed)
@@ -119,7 +119,7 @@ Beyond the canonical set, backends may add:
 - **cupy** — the in-place set above plus `current_stream_ptr` and the
   `dt_spline_*` variants.
 
-These are not part of the `any` contract; code that relies on them targets a
+These are not part of the `auto` contract; code that relies on them targets a
 specific backend on purpose.
 
 ## What the conformance test checks
@@ -131,6 +131,6 @@ specific backend on purpose.
 2. **In-place policy** — numpy exposes `sym_addmatvec_`/`sym_submatvec_`; torch
    exposes neither (the documented autograd exclusion).
 3. **Equivalence** — for the shared ops, a numpy call and the equivalent torch
-   call (dispatched through `fastfields.any`) produce numerically identical
-   results, so `any` means the same thing on both. cupy is skipped where no GPU
+   call (dispatched through `fastfields.auto`) produce numerically identical
+   results, so `auto` means the same thing on both. cupy is skipped where no GPU
    is available.

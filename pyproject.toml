@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastfields"
-description = "Backend-dispatching interface (fastfields.any) over the fastfields wrappers."
+description = "Backend-dispatching interface (fastfields.auto) over the fastfields wrappers."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -28,7 +28,7 @@ classifiers = [
 ]
 # Only the raw bindings are a hard dependency (needed for the shared enums and
 # for dispatch to work at all). The array backends are optional extras so that
-# `fastfields.any` works with whatever subset of numpy/torch/cupy is installed.
+# `fastfields.auto` works with whatever subset of numpy/torch/cupy is installed.
 # `==0.*` is a bare wildcard, not a range: it allows any 0.x.y — including
 # 0.0.x and any dev/alpha/beta/rc, e.g. `0.1.0.dev1` or `0.0.dev0` — while
 # still blocking a future 1.x whose ABI/enums no longer match this wrapper.
@@ -55,11 +55,11 @@ cupy = ["fastfields-cupy==0.*"]
 all = ["fastfields-numpy==0.*", "fastfields-torch==0.*", "fastfields-cupy==0.*"]
 test = ["pytest", "numpy"]
 
-# Ships only the ``fastfields.any`` subpackage; no ``fastfields/__init__.py`` is
+# Ships only the ``fastfields.auto`` subpackage; no ``fastfields/__init__.py`` is
 # created, keeping ``fastfields`` a PEP 420 native namespace package that merges
 # with fastfields.dlpack / .numpy / .torch / .cupy.
 [tool.setuptools.packages.find]
-include = ["fastfields.any*"]
+include = ["fastfields.auto*"]
 namespaces = true
 
 [tool.ruff]
@@ -95,13 +95,13 @@ dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
 distance-dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
 
 [tool.versioningit.write]
-file = "fastfields/any/_version.py"
+file = "fastfields/auto/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["fastfields.any"]
+source = ["fastfields.auto"]
 omit = ["*/_version.py"]
 
 [tool.codespell]

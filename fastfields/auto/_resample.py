@@ -1,4 +1,4 @@
-"""Backend-dispatching resampling / spline-coeff wrappers (fastfields.any)."""
+"""Backend-dispatching resampling / spline-coeff wrappers (fastfields.auto)."""
 
 from __future__ import annotations
 
