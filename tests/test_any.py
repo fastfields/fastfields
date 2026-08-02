@@ -79,6 +79,95 @@ def test_dispatch_selects_by_first_argument():
     np.testing.assert_allclose(on, ot.numpy(), rtol=1e-6, atol=1e-6)
 
 
+def test_dispatch_flow_forward_matches_backend():
+    # flow_forward/flow_precond dispatch on `mat` (first array arg).
+    mat = _random_packed(30, 2, seed=7).reshape(5, 6, 3)
+    vec = np.random.default_rng(8).standard_normal((5, 6, 2))
+    kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5, ndim=2)
+    np.testing.assert_array_equal(
+        ff.flow_forward(mat, vec, **kw), ffn.flow_forward(mat, vec, **kw)
+    )
+
+
+def test_dispatch_flow_precond_matches_backend():
+    m = np.random.default_rng(9).standard_normal((30, 2, 2))
+    m = np.einsum("bij,bkj->bik", m, m) + 3.0 * np.eye(2)  # SPD
+    mat = _pack_symmetric(m).reshape(5, 6, 3)
+    vec = np.random.default_rng(10).standard_normal((5, 6, 2))
+    kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5, ndim=2)
+    np.testing.assert_array_equal(
+        ff.flow_precond(mat, vec, **kw), ffn.flow_precond(mat, vec, **kw)
+    )
+
+
+def test_dispatch_field_precond_forward_matches_backend():
+    # field_precond/forward dispatch on `mat`; accumulate on `inp`.
+    m = np.random.default_rng(14).standard_normal((30, 2, 2))
+    m = np.einsum("bij,bkj->bik", m, m) + 3.0 * np.eye(2)  # SPD
+    mat = _pack_symmetric(m).reshape(5, 6, 3)
+    vec = np.random.default_rng(15).standard_normal((5, 6, 2))
+    kw = dict(absolute=[0.3, 0.4], membrane=[0.7, 0.5], ndim=2)
+    np.testing.assert_array_equal(
+        ff.field_forward(mat, vec, **kw), ffn.field_forward(mat, vec, **kw)
+    )
+    np.testing.assert_array_equal(
+        ff.field_precond(mat, vec, **kw), ffn.field_precond(mat, vec, **kw)
+    )
+    np.testing.assert_array_equal(
+        ff.field_addmatvec(vec, vec, **kw),
+        ffn.field_addmatvec(vec, vec, **kw),
+    )
+
+
+def test_dispatch_flow_accumulate_matches_backend():
+    # The _add/_sub/in-place variants dispatch on `inp` (first array arg).
+    rng = np.random.default_rng(13)
+    flow = rng.standard_normal((5, 6, 2))
+    base = rng.standard_normal((5, 6, 2))
+    kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5, ndim=2)
+    for name in ("flow_addmatvec", "flow_submatvec"):
+        np.testing.assert_array_equal(
+            getattr(ff, name)(base, flow, **kw),
+            getattr(ffn, name)(base, flow, **kw),
+        )
+    for name in ("flow_adddiag", "flow_subdiag"):
+        np.testing.assert_array_equal(
+            getattr(ff, name)(base, **kw), getattr(ffn, name)(base, **kw)
+        )
+    # in-place through any mutates the passed array and returns it
+    a = base.copy()
+    assert ff.flow_addmatvec_(a, flow, **kw) is a
+    np.testing.assert_array_equal(a, base + ffn.flow_matvec(flow, **kw))
+
+
+def test_resample_unified_signature_matches_backend():
+    # C2: numpy/torch/cupy share the factor/shape/order signature, so
+    # any.resample forwards it unchanged and matches the direct backend call.
+    x = np.arange(8.0)
+    out_any = ff.resample(x, factor=2, order="linear", anchor="centers")
+    out_direct = ffn.resample(x, factor=2, order="linear", anchor="centers")
+    assert out_any.shape == (16,)
+    np.testing.assert_array_equal(out_any, out_direct)
+    # `shape=` and a string `order`/`bound` also cross unchanged
+    out_shape = ff.resample(x, shape=4, order="cubic", bound="dct2")
+    np.testing.assert_array_equal(
+        out_shape, ffn.resample(x, shape=4, order="cubic", bound="dct2")
+    )
+
+
+def test_resample_factor_means_factor_on_every_backend():
+    # The C2 footgun is gone: a positional 2 is a *factor* on numpy AND torch
+    # (previously it meant an output shape on torch/cupy).
+    torch = pytest.importorskip("torch")
+
+    xn = np.arange(8.0)
+    xt = torch.arange(8.0, dtype=torch.float64)
+    on = ff.resample(xn, 2, order="linear")
+    ot = ff.resample(xt, 2, order="linear")
+    assert on.shape == (16,) and tuple(ot.shape) == (16,)
+    np.testing.assert_allclose(on, ot.numpy(), rtol=1e-6, atol=1e-6)
+
+
 def test_unknown_type_raises():
     with pytest.raises(TypeError):
         ff.sym_matvec([1.0, 2.0, 3.0], [1.0, 2.0])
