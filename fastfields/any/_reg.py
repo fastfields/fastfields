@@ -2,11 +2,11 @@
 
 Operators that take a field/matrix as their first array argument are dispatched
 here (``field_matvec``, ``flow_matvec`` and its ``_add``/``_sub``/in-place
-accumulate forms, ``flow_diag`` accumulate forms, ``flow_relax``,
-``flow_precond``, ``flow_forward``) — the backend is unambiguous from that
-array. The plain ``*_diag`` / ``flow_kernel`` builders allocate from a *shape*
-(no array to dispatch on); call them on a concrete backend
-(``fastfields.numpy`` / ``.torch`` / ``.cupy``) directly.
+accumulate forms, ``flow_diag`` accumulate forms, ``field_relax`` /
+``flow_relax``, ``flow_precond``, ``flow_forward``) — the backend is
+unambiguous from that array. The plain ``*_diag`` / ``flow_kernel`` builders
+allocate from a *shape* (no array to dispatch on); call them on a concrete
+backend (``fastfields.numpy`` / ``.torch`` / ``.cupy``) directly.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ _DISPATCHED = [
     "field_adddiag_",
     "field_subdiag",
     "field_subdiag_",
+    "field_relax",
     "field_precond",
     "field_forward",
     "flow_matvec",
