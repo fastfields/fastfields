@@ -25,6 +25,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
+          # versioningit derives the version from `git describe`, which needs
+          # the tags -- a shallow (depth 1) checkout hides them and the version
+          # silently falls back to "0+unknown".
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -45,10 +49,10 @@ jobs:
         # iteration on the first real Windows run (DLL-search / import-library
         # specifics can only be confirmed on the runner).
         run: choco install -y llvm make
-      # TODO: the git+ install of fastfields-dlpack below does NOT fetch its
-      # submodules, so this cross-repo source build is fragile and will likely
-      # need a live-CI iteration (or installing from a wheel index once one
-      # exists).
+      # pip *does* run `git submodule update --init --recursive` for a git+
+      # install, so this works as long as the pinned submodule chain on
+      # fastfields-dlpack@main is healthy. Once the wheel index carries a
+      # release, prefer installing from there instead.
       - name: Install fastfields-dlpack from source
         run: pip install "fastfields-dlpack @ git+https://github.com/fastfields/fastfields-dlpack@main"
       - name: Install sibling wrapper packages (numpy, torch)
