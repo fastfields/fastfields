@@ -1,11 +1,11 @@
 """Shared dispatch machinery for :mod:`fastfields.auto`.
 
-Every public wrapper dispatches on the **type of the first array argument** and
-forwards the call to the matching backend package
+Every public wrapper dispatches on the **type of the first array
+argument** and forwards the call to the matching backend package
 (:mod:`fastfields.numpy` / :mod:`fastfields.torch` / :mod:`fastfields.cupy`).
-Backends are imported **lazily**: only the backend for the array type actually
-passed is imported, so ``fastfields.auto`` works with any subset of the optional
-backends installed.
+Backends are imported **lazily**: only the backend for the array type
+actually passed is imported, so ``fastfields.auto`` works with any subset
+of the optional backends installed.
 """
 
 from __future__ import annotations

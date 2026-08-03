@@ -3,7 +3,8 @@
 Enforces the contract in ``API_CONTRACT.md``: every backend exposes the same
 canonical operation names, the in-place policy differs as documented
 (numpy/cupy have ``_``-suffixed ops, torch does not), and a canonical call
-dispatched through ``fastfields.auto`` gives the same result on numpy and torch.
+dispatched through ``fastfields.auto`` gives the same result on numpy and
+torch.
 
 numpy is a hard test dependency; torch is imported via ``importorskip`` so the
 suite still runs where torch is absent; cupy is skipped (needs a CUDA GPU).
@@ -114,9 +115,9 @@ def test_torch_exposes_the_autograd_safe_inplace_ops():
     assert not missing, f"torch is missing in-place op(s): {sorted(missing)!r}"
 
 
-# --------------------------------------------------------------------------- #
-# 3. numpy vs torch numerical equivalence (dispatched through fastfields.auto) #
-# --------------------------------------------------------------------------- #
+# ------------------------------------------------------------------------- #
+# 3. numpy vs torch numerical equivalence (dispatched via fastfields.auto)  #
+# ------------------------------------------------------------------------- #
 
 
 def _packed_spd(batch, c, seed):
