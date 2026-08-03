@@ -1,7 +1,7 @@
 # fastfields
 
 `fastfields` is the umbrella distribution of the fastfields project. It provides
-**`fastfields.any`**, a backend-dispatching interface over the per-backend
+**`fastfields.auto`**, a backend-dispatching interface over the per-backend
 wrapper packages, and anchors the `fastfields` PEP 420 namespace that the other
 distributions merge into:
 
@@ -11,20 +11,20 @@ distributions merge into:
 | `fastfields.numpy`  | `fastfields-numpy`   | numpy          |
 | `fastfields.torch`  | `fastfields-torch`   | torch          |
 | `fastfields.cupy`   | `fastfields-cupy`    | cupy           |
-| `fastfields.any`    | `fastfields`         | dispatch       |
+| `fastfields.auto`   | `fastfields`         | dispatch       |
 
 No distribution ships a `fastfields/__init__.py`; each ships only its
 `fastfields/<sub>/` subpackage, so `fastfields` stays a native (PEP 420)
 namespace package and the five installs merge into one importable namespace.
 
-## fastfields.any
+## fastfields.auto
 
-`fastfields.any` exposes one unified function per operation and dispatches on the
+`fastfields.auto` exposes one unified function per operation and dispatches on the
 **type of the first array argument**:
 
 ```python
 import numpy as np
-import fastfields.any as ff
+import fastfields.auto as ff
 
 mat = np.random.randn(5, 6).astype(np.float64)   # packed C=3 symmetric
 vec = np.random.randn(5, 3)
@@ -41,7 +41,7 @@ out_t = ff.sym_matvec(t_mat, t_vec)   # -> fastfields.torch.sym_matvec
 * `cupy.ndarray`  -> `fastfields.cupy`
 
 Backends are imported **lazily** (only the one whose array type is passed), so
-`fastfields.any` works with whatever subset of the backends is installed. Only
+`fastfields.auto` works with whatever subset of the backends is installed. Only
 `fastfields-dlpack` is a hard dependency; pull the array backends via extras:
 
 ```bash

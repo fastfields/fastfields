@@ -1,4 +1,4 @@
-"""Backend-dispatching pushpull wrappers (fastfields.any)."""
+"""Backend-dispatching pushpull wrappers (fastfields.auto)."""
 
 from __future__ import annotations
 

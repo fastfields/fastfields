@@ -1,4 +1,4 @@
-"""Backend-dispatching compact-symmetric ops (:mod:`fastfields.any`)."""
+"""Backend-dispatching compact-symmetric ops (:mod:`fastfields.auto`)."""
 
 from __future__ import annotations
 

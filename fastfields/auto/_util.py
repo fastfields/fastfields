@@ -1,11 +1,11 @@
-"""Shared dispatch machinery for :mod:`fastfields.any`.
+"""Shared dispatch machinery for :mod:`fastfields.auto`.
 
-Every public wrapper dispatches on the **type of the first array argument** and
-forwards the call to the matching backend package
+Every public wrapper dispatches on the **type of the first array
+argument** and forwards the call to the matching backend package
 (:mod:`fastfields.numpy` / :mod:`fastfields.torch` / :mod:`fastfields.cupy`).
-Backends are imported **lazily**: only the backend for the array type actually
-passed is imported, so ``fastfields.any`` works with any subset of the optional
-backends installed.
+Backends are imported **lazily**: only the backend for the array type
+actually passed is imported, so ``fastfields.auto`` works with any subset
+of the optional backends installed.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def _backend_root(arr: Any) -> str:
     if root in _ARRAY_BACKENDS:
         return root
     raise TypeError(
-        "fastfields.any could not dispatch on an object of type "
+        "fastfields.auto could not dispatch on an object of type "
         f"{type(arr).__module__}.{type(arr).__name__}; expected a "
         "numpy.ndarray, torch.Tensor or cupy.ndarray as the first argument."
     )
@@ -79,7 +79,7 @@ def _load_backend(root: str) -> Any:
             backend = importlib.import_module(_ARRAY_BACKENDS[root])
         except ImportError as exc:
             raise ImportError(
-                f"fastfields.any needs the '{root}' backend to handle {root} "
+                f"fastfields.auto needs the '{root}' backend to handle {root} "
                 f"arrays, but importing {_ARRAY_BACKENDS[root]} failed. "
                 f"Install it via `pip install fastfields[{root}]`."
             ) from exc
@@ -112,7 +112,7 @@ def _first_array(args: tuple, kwargs: dict) -> Any:
     for value in kwargs.values():
         return value
     raise TypeError(
-        "fastfields.any dispatch requires at least one array argument."
+        "fastfields.auto dispatch requires at least one array argument."
     )
 
 
@@ -122,7 +122,7 @@ def make_dispatcher(name: str, table: dict[str, str]) -> Callable[..., Any]:
     Parameters
     ----------
     name : str
-        The unified operation name exposed by :mod:`fastfields.any`.
+        The unified operation name exposed by :mod:`fastfields.auto`.
     table : dict of {str: str}
         Mapping ``{backend_root: attribute_name}`` giving the backend function
         that implements ``name`` in each backend package.
@@ -140,7 +140,7 @@ def make_dispatcher(name: str, table: dict[str, str]) -> Callable[..., Any]:
         attr = table.get(root)
         if attr is None:
             raise NotImplementedError(
-                f"fastfields.any.{name} is not available for the {root} "
+                f"fastfields.auto.{name} is not available for the {root} "
                 f"backend (supported by: {', '.join(sorted(table))})."
             )
         backend = _load_backend(root)

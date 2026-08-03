@@ -56,7 +56,7 @@ jobs:
       - name: Install fastfields-dlpack from source
         run: pip install "fastfields-dlpack @ git+https://github.com/fastfields/fastfields-dlpack@main"
       - name: Install sibling wrapper packages (numpy, torch)
-        # test_any.py imports fastfields.numpy / fastfields.torch, so the meta
+        # test_auto.py imports fastfields.numpy / fastfields.torch, so the meta
         # package needs the sibling wrappers installed. They resolve over public
         # HTTPS now that the submodule URLs are HTTPS (fastfields-lib#13). cupy is
         # not installed (needs a CUDA GPU); tests that need it should skip.

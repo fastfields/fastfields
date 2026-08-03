@@ -1,6 +1,6 @@
 [project]
 site_name = "fastfields"
-site_description = "Backend-dispatching interface (fastfields.any) over the fastfields wrappers."
+site_description = "Backend-dispatching interface (fastfields.auto) over the fastfields wrappers."
 site_author = "Yaël Balbastre"
 site_url = "https://fastfields.github.io/fastfields/"
 repo_url = "https://github.com/fastfields/fastfields"

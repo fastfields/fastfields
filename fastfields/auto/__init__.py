@@ -1,4 +1,4 @@
-"""fastfields.any: a backend-dispatching interface over fastfields wrappers.
+"""fastfields.auto: a backend-dispatching interface over fastfields wrappers.
 
 Every function here dispatches on the **type of the first array argument** and
 forwards the call to the matching backend package:
@@ -7,11 +7,12 @@ forwards the call to the matching backend package:
 * ``torch.Tensor``  -> :mod:`fastfields.torch`
 * ``cupy.ndarray``  -> :mod:`fastfields.cupy`
 
-Backends are imported **lazily**: only the backend for the array type actually
-passed is imported, so ``fastfields.any`` works with any subset of the optional
-backends installed (only ``fastfields-dlpack`` is a hard dependency). A clear
-error is raised for an unknown array type, and a clear ``ImportError`` if the
-required backend package (or its own dependency, e.g. torch/cupy) is missing.
+Backends are imported **lazily**: only the backend for the array type
+actually passed is imported, so ``fastfields.auto`` works with any subset
+of the optional backends installed (only ``fastfields-dlpack`` is a hard
+dependency). A clear error is raised for an unknown array type, and a
+clear ``ImportError`` if the required backend package (or its own
+dependency, e.g. torch/cupy) is missing.
 
 Every backend wrapper package exposes the same canonical ``dt_*`` / ``sym_*``
 names, and this module exposes one unified name per operation that maps to each

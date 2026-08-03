@@ -1,7 +1,7 @@
-"""Tests for fastfields.any dispatch.
+"""Tests for fastfields.auto dispatch.
 
 Verify that dispatching a numpy array and a torch tensor through
-``fastfields.any`` matches the direct backend calls, and that unknown types /
+``fastfields.auto`` matches the direct backend calls, and that unknown types /
 missing backends give clear errors.
 """
 
@@ -9,7 +9,7 @@ import fastfields.numpy as ffn
 import numpy as np
 import pytest
 
-import fastfields.any as ff
+import fastfields.auto as ff
 
 
 def _pack_symmetric(mats):
@@ -134,7 +134,7 @@ def test_dispatch_flow_accumulate_matches_backend():
         np.testing.assert_array_equal(
             getattr(ff, name)(base, **kw), getattr(ffn, name)(base, **kw)
         )
-    # in-place through any mutates the passed array and returns it
+    # in-place through auto mutates the passed array and returns it
     a = base.copy()
     assert ff.flow_addmatvec_(a, flow, **kw) is a
     np.testing.assert_array_equal(a, base + ffn.flow_matvec(flow, **kw))
@@ -142,7 +142,7 @@ def test_dispatch_flow_accumulate_matches_backend():
 
 def test_resample_unified_signature_matches_backend():
     # C2: numpy/torch/cupy share the factor/shape/order signature, so
-    # any.resample forwards it unchanged and matches the direct backend call.
+    # auto.resample forwards it unchanged and matches the direct backend call.
     x = np.arange(8.0)
     out_any = ff.resample(x, factor=2, order="linear", anchor="centers")
     out_direct = ffn.resample(x, factor=2, order="linear", anchor="centers")
