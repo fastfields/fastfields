@@ -221,7 +221,7 @@ def test_auto_field_matvec_numpy_torch_equivalence():
     )
 
 
-def test_any_field_relax_numpy_torch_equivalence():
+def test_auto_field_relax_numpy_torch_equivalence():
     # field_relax is dispatched on its first array arg and mutates it in
     # place; both backends must land on the same refined field.
     torch = pytest.importorskip("torch")
