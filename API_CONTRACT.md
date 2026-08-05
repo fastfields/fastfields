@@ -112,35 +112,60 @@ well.
 - Torch's ordinary **leaf rule** is unchanged and is *not* a fastfields policy:
   a leaf tensor with `requires_grad=True` cannot be mutated in place, exactly as
   for `x.add_(y)`. Use the out-of-place spelling in that case.
-- `sym_invert_` and `dt_euclidean_`/`dt_l1_` remain **out-of-place only** on
-  torch, and for two different reasons — worth spelling out precisely, because
-  they look alike but aren't:
-  - `sym_invert` is genuinely **nonlinear** in the matrix (`d(inv(M))/dM`
-    depends on `M`), so an in-place `sym_invert_` would need the pre-mutation
-    matrix for backward. It isn't even differentiable today
-    (`fastfields-torch/_sym.py` raises if `mat.requires_grad`) — the rule
-    bites before the question of in-place even comes up.
-  - `dt_euclidean`/`dt_l1` are **not differentiable at all**
-    (`fastfields-torch/_dt.py` raises via `_reject_grad`), so there is no
-    backward to protect. The wrapper always clones purely as a defensive
-    default (never surprise-mutate a caller's tensor on a non-differentiable
-    op), not because the additive-backward rule forces it. This is a
-    deliberate, conservative choice, not the rule from the table above —
-    see the fastfields#4 discussion for the reasoning.
-- `spline_coeff_` and `sym_solve_` are two ops where the backward *as
-  currently implemented* does not read the pre-mutation tensor either
-  (`_SplineCoeff.backward` only needs the saved `spline`/`bound` scalars;
-  `_Solve.backward` only needs the saved `mat`/`weight`, never `vec`) — so by
-  the letter of the rule above they would qualify for an in-place form. They
-  are kept out-of-place on torch anyway, as a deliberate, conservative
-  choice: an in-place op still requires `ctx.mark_dirty()` machinery to
-  protect against a *different* tensor in the graph aliasing the mutated
-  buffer, and the memory saved is minor for the modest tensor sizes these ops
-  are typically used on. Torch is not resource-constrained the way numpy/cupy
-  buffers can be, so out-of-place-by-default was judged the safer stance.
-  Flagged explicitly here (see fastfields#4) so a future contributor doesn't
-  read the table above, "prove" these are safe, and add them without
-  re-deriving this same tradeoff.
+- `spline_coeff_` and `sym_solve_` **are** exposed on torch, and are fully
+  differentiable in place: their backward — identical to the out-of-place
+  form's — never reads the pre-mutation tensor (`_SplineCoeff.backward` only
+  needs the saved `spline`/`bound` scalars; `_Solve.backward` only needs the
+  saved `mat`/`weight`, never `vec`), so mutating in place destroys no
+  information backward needs. This satisfies the per-op rule above cleanly;
+  the earlier revision that kept them out-of-place-only "for autograd
+  reasons" had no such reason once you check the actual backward — that was
+  the mislabeled half of the fastfields#4 concern, now fixed and gradcheck-
+  verified (see `fastfields-torch` tests).
+
+### Non-differentiable ops: exposed everywhere, backward raises (not omitted)
+
+`dt_euclidean`, `dt_l1`, `dt_mesh` and `sym_invert` have **no supported
+gradient** — for `dt_euclidean`/`dt_l1`/`dt_mesh` because the underlying
+op has no meaningful gradient at all; for `sym_invert` because the inverse
+is nonlinear in the matrix (`d(inv(M))/dM` depends on `M`) and no backward
+is implemented for it on any backend. This is a **different** situation
+from the additive-vs-nonlinear in-place question above — it's about whether
+the *op itself* has a gradient, not about whether mutating in place is safe.
+
+**Earlier revisions handled this two different, both-wrong ways**: the
+in-place forms (`dt_euclidean_`, `dt_l1_`, `sym_invert_`) were omitted from
+torch entirely — described as excluded "for autograd reasons", as if a
+gradient existed that in-place mutation would corrupt, when in fact there
+was no gradient to protect in the first place. The out-of-place forms were
+kept, but guarded by rejecting any grad-requiring input *at call time*
+(`ValueError` from `forward`, before a graph even existed) — which meant a
+call could fail even when the caller never intended to backprop through it,
+and the failure mode differed from every other non-differentiable case in
+the ecosystem (e.g. `torch.argmax`, which lets the graph form and simply
+carries no gradient).
+
+**The current policy, on every backend**:
+
+- All four ops — and their in-place forms where one exists
+  (`dt_euclidean_`, `dt_l1_`, `sym_invert_`; `dt_mesh` has no in-place form
+  on any backend, since its output shape/target differs from every input) —
+  are exposed, for full parity with numpy/cupy. No op is omitted because it
+  lacks a gradient.
+- On torch specifically, forward always runs normally, including when an
+  input requires grad, so the output can sit inside a larger autograd graph
+  (e.g. as an intentional stop-gradient boundary). Only calling
+  `.backward()` through that output raises — a `torch.autograd.Function`
+  whose `backward()` raises a clear `RuntimeError` naming the op and stating
+  it has no gradient (see `fastfields.torch._util.raise_not_differentiable`
+  and each function's docstring), never a generic/cryptic autograd internal
+  error and never a silent wrong answer.
+- The in-place forms additionally call `ctx.mark_dirty()` like every other
+  in-place `torch.autograd.Function` here, and are subject to the same
+  leaf rule as any in-place op.
+- numpy/cupy have no autograd, so their `_`-suffixed forms
+  (`dt_euclidean_`, `dt_l1_`, `sym_invert_`) simply mutate and return —
+  there is nothing to guard on those backends.
 
 ### One kernel, two spellings
 
@@ -170,14 +195,27 @@ backend-specific (see below).
 Because these live outside the canonical set, `fastfields.auto` never routes to a
 `_`-suffixed op implicitly; they are backend-specific extensions.
 
-Beyond the regulariser accumulate set, **numpy and cupy expose the identical
-in-place surface for every non-differentiable-on-torch op**:
-`dt_euclidean_`, `dt_l1_`, `spline_coeff_`, `sym_addmatvec_`, `sym_submatvec_`,
-`sym_solve_`, `sym_invert_`. Neither backend has autograd, so nothing blocks
-in-place there; earlier revisions had numpy spell some of these as an
-`inplace=` keyword and were missing `sym_solve_`/`sym_invert_` outright —
-that was an accidental gap (not a deliberate difference) and has been closed
-(fastfields#4; see `fastfields-numpy` PR #24).
+Beyond the regulariser accumulate set, **numpy, torch and cupy now all expose
+the same in-place surface**: `dt_euclidean_`, `dt_l1_`, `spline_coeff_`,
+`sym_solve_`, `sym_invert_` (plus `sym_addmatvec_`/`sym_submatvec_` on numpy
+and cupy, which have no torch equivalent — see below). Neither numpy nor cupy
+has autograd, so nothing blocks in-place there; earlier revisions had numpy
+spell some of these as an `inplace=` keyword and were missing
+`sym_solve_`/`sym_invert_` outright — that was an accidental gap (not a
+deliberate difference) and has been closed (fastfields#4; see
+`fastfields-numpy` PR #24). Torch was missing all five outright — also
+closed (fastfields#4; see `fastfields-torch`'s "Non-differentiable ops"
+section above and its "in-place autograd-safe" fixes for `sym_solve_`/
+`spline_coeff_`).
+
+`sym_addmatvec_`/`sym_submatvec_` (the posdef accumulate ops, distinct from
+the regulariser `{field,flow}_{add,sub}matvec_` family above) remain
+numpy/cupy-only: they have no torch wrapper at all — differentiable
+accumulation for compact-symmetric matvec was never wired up as a torch
+op, out-of-place or in-place, so there is no `sym_addmatvec`/`sym_submatvec`
+to add an in-place form of. This is a real, currently-open gap, not a
+reviewed-and-rejected one; flagged here rather than silently left
+undocumented.
 
 ## Backend-specific extensions (allowed)
 
@@ -185,19 +223,26 @@ Beyond the canonical set, backends may add:
 
 - **numpy** — `sym_matvec_backward`, `sym_channels_from_packed`,
   `dt_spline_{table,brent,gaussnewton}`, and the in-place set
-  `dt_euclidean_`/`dt_l1_`/`spline_coeff_`/`sym_solve_`/`sym_invert_`
-  (mirroring cupy's in-place surface — see "Availability" above).
+  `dt_euclidean_`/`dt_l1_`/`spline_coeff_`/`sym_solve_`/`sym_invert_`/
+  `sym_addmatvec_`/`sym_submatvec_`.
 - **torch** — the regulariser accumulate set
-  (`{field,flow}_{add,sub}{matvec,diag}` and their `_` in-place forms),
-  which are autograd-safe by the rule above. Nothing else beyond the
-  canonical set.
-- **cupy** — the regulariser accumulate set above, plus
+  (`{field,flow}_{add,sub}{matvec,diag}` and their `_` in-place forms), which
+  are autograd-safe by the rule above; and the in-place set
   `dt_euclidean_`/`dt_l1_`/`spline_coeff_`/`sym_solve_`/`sym_invert_`
-  (identical to numpy's in-place set), `current_stream_ptr`, and the
-  `dt_spline_*` variants.
+  (mirroring numpy/cupy — see "Availability" above). `spline_coeff_`/
+  `sym_solve_` are differentiable; `dt_euclidean_`/`dt_l1_`/`sym_invert_`
+  raise a clear `RuntimeError` from `.backward()` (see "Non-differentiable
+  ops" above). Nothing else beyond the canonical set.
+- **cupy** — the regulariser accumulate set above, plus
+  `dt_euclidean_`/`dt_l1_`/`spline_coeff_`/`sym_solve_`/`sym_invert_`/
+  `sym_addmatvec_`/`sym_submatvec_` (identical to numpy's in-place set),
+  `current_stream_ptr`, and the `dt_spline_*` variants.
 
 These are not part of the `auto` contract; code that relies on them targets a
-specific backend on purpose.
+specific backend on purpose. In particular, `fastfields.auto` never routes to
+any `_`-suffixed op implicitly, torch's non-differentiable ops included —
+calling one through `auto` still means calling it directly on the resolved
+backend and taking on that backend's differentiability behavior yourself.
 
 ## What the conformance test checks
 
@@ -205,10 +250,14 @@ specific backend on purpose.
 
 1. **Surface** — every installed backend exposes each canonical name (and the
    `Spline`/`Bound` enums).
-2. **In-place policy** — numpy exposes the full non-differentiable in-place
-   set (`sym_addmatvec_`/`sym_submatvec_`/`sym_solve_`/`sym_invert_`/
-   `dt_euclidean_`/`dt_l1_`/`spline_coeff_`); torch exposes none of those
-   plus the regulariser accumulate set (the documented autograd exclusion).
+2. **In-place / non-differentiable-op parity** — numpy, torch and cupy all
+   expose the same `dt_euclidean_`/`dt_l1_`/`spline_coeff_`/`sym_solve_`/
+   `sym_invert_` in-place surface (no backend silently omits one of these);
+   `sym_addmatvec_`/`sym_submatvec_` remain numpy/cupy-only (torch has no
+   `sym_addmatvec`/`sym_submatvec` at all, see "Availability" above); torch
+   additionally exposes the regulariser accumulate set. On torch, calling
+   `.backward()` through `dt_euclidean`/`dt_euclidean_`/`dt_l1`/`dt_l1_`/
+   `sym_invert`/`sym_invert_` raises a `RuntimeError` naming the op.
 3. **Equivalence** — for the shared ops, a numpy call and the equivalent torch
    call (dispatched through `fastfields.auto`) produce numerically identical
    results, so `auto` means the same thing on both. cupy is skipped where no GPU
