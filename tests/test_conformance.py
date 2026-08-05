@@ -380,9 +380,7 @@ def test_auto_field_matvec_rls_numpy_torch_equivalence():
     w = 0.5 + np.abs(rng.standard_normal((H, W, 1)))
     kw = dict(absolute=[0.3, 0.4], membrane=[1.0, 0.7], ndim=2)
     on = ff.field_matvec_rls(f, w, **kw)
-    ot = ff.field_matvec_rls(
-        torch.as_tensor(f), torch.as_tensor(w), **kw
-    )
+    ot = ff.field_matvec_rls(torch.as_tensor(f), torch.as_tensor(w), **kw)
     np.testing.assert_allclose(
         on, ot.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
     )
