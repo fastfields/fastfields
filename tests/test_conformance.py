@@ -338,6 +338,9 @@ def test_auto_exposes_pushpull_and_reg():
         "grad",
         "field_matvec",
         "field_relax",
+        "field_matvec_rls",
+        "field_diag_rls",
+        "field_relax_rls",
         "flow_matvec",
     ]:
         assert hasattr(ff, name), name
@@ -360,6 +363,26 @@ def test_auto_field_matvec_numpy_torch_equivalence():
     f = np.random.default_rng(0).standard_normal((8, 2))
     on = ff.field_matvec(f, absolute=[2.0, 3.0], ndim=1)
     ot = ff.field_matvec(torch.as_tensor(f), absolute=[2.0, 3.0], ndim=1)
+    np.testing.assert_allclose(
+        on, ot.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
+    )
+
+
+def test_auto_field_matvec_rls_numpy_torch_equivalence():
+    # field_matvec_rls dispatches on `inp` (its first array arg), exactly
+    # like field_matvec; a real (non-uniform) weight map must reach the
+    # same result on both backends.
+    torch = pytest.importorskip("torch")
+    _import_backend("torch")
+    rng = np.random.default_rng(12)
+    H, W, C = 6, 7, 2
+    f = rng.standard_normal((H, W, C))
+    w = 0.5 + np.abs(rng.standard_normal((H, W, 1)))
+    kw = dict(absolute=[0.3, 0.4], membrane=[1.0, 0.7], ndim=2)
+    on = ff.field_matvec_rls(f, w, **kw)
+    ot = ff.field_matvec_rls(
+        torch.as_tensor(f), torch.as_tensor(w), **kw
+    )
     np.testing.assert_allclose(
         on, ot.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
     )
