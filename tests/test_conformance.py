@@ -13,6 +13,7 @@ suite still runs where torch is absent; cupy is skipped (needs a CUDA GPU).
 from __future__ import annotations
 
 import importlib
+import inspect
 
 import numpy as np
 import pytest
@@ -68,15 +69,63 @@ def test_enums_reexported(backend):
     assert int(mod.Bound.DCT2) == 3
 
 
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_dt_mesh_flags_are_not_keyword_only(backend):
+    # signed/naive/return_nearest must be positional-or-keyword on every
+    # backend (API_CONTRACT.md, "Canonical operations"): a positional call
+    # must not work on some backends and raise TypeError on others. numpy
+    # used to make these keyword-only; fixed in fastfields-numpy#24.
+    mod = _import_backend(backend)
+    sig = inspect.signature(mod.dt_mesh)
+    for name in ("signed", "naive", "return_nearest"):
+        assert sig.parameters[name].kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.POSITIONAL_ONLY,
+        ), f"fastfields.{backend}.dt_mesh's {name!r} must not be keyword-only"
+
+
 # --------------------------------------------------------------------------- #
 # 2. In-place policy                                                          #
 # --------------------------------------------------------------------------- #
+
+
+# numpy and cupy have no autograd, so both expose the same in-place surface
+# for the ops torch keeps out-of-place: the regulariser accumulate set
+# (sym_addmatvec_/sym_submatvec_) plus dt_euclidean_/dt_l1_/spline_coeff_/
+# sym_solve_/sym_invert_. Prior to fastfields-numpy#24 numpy spelled the first
+# three as an `inplace=` keyword and was missing the last two outright --
+# an accidental gap, not a deliberate difference (API_CONTRACT.md,
+# "Availability"). This set is enforced identically for both backends so it
+# can't silently drift apart again.
+_NUMPY_CUPY_INPLACE = frozenset(
+    {
+        "sym_addmatvec_",
+        "sym_submatvec_",
+        "sym_solve_",
+        "sym_invert_",
+        "dt_euclidean_",
+        "dt_l1_",
+        "spline_coeff_",
+    }
+)
 
 
 def test_numpy_exposes_inplace_sym():
     mod = _import_backend("numpy")
     assert hasattr(mod, "sym_addmatvec_")
     assert hasattr(mod, "sym_submatvec_")
+
+
+def test_numpy_exposes_the_full_nonautograd_inplace_set():
+    mod = _import_backend("numpy")
+    missing = _NUMPY_CUPY_INPLACE - set(dir(mod))
+    assert not missing, f"numpy is missing in-place op(s): {sorted(missing)!r}"
+
+
+def test_cupy_exposes_the_full_nonautograd_inplace_set():
+    mod = _import_backend("cupy")
+    missing = _NUMPY_CUPY_INPLACE - set(dir(mod))
+    assert not missing, f"cupy is missing in-place op(s): {sorted(missing)!r}"
 
 
 # The regulariser accumulate ops are additive in the tensor they mutate, so
@@ -92,9 +141,13 @@ _TORCH_INPLACE_ALLOWED = frozenset(
 
 
 def test_torch_inplace_ops_are_only_the_autograd_safe_ones():
-    # torch must not grow in-place ops whose backward would need the
-    # pre-mutation value of the mutated tensor (e.g. sym_solve_, sym_invert_,
-    # spline_coeff_): those stay out-of-place only (API_CONTRACT.md).
+    # torch must not grow in-place ops beyond the accumulate set. Some of the
+    # excluded ops (sym_invert_, dt_euclidean_/dt_l1_) are excluded because
+    # their backward would need the pre-mutation tensor, or because they
+    # aren't differentiable at all; others (sym_solve_, spline_coeff_) are a
+    # deliberate conservative choice even though their *current* backward
+    # implementation happens not to need the pre-mutation value -- see
+    # API_CONTRACT.md, "Consequences for torch", for the op-by-op reasoning.
     mod = _import_backend("torch")
     exposed = {
         name
