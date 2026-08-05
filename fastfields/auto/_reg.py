@@ -7,6 +7,11 @@ accumulate forms, ``flow_diag`` accumulate forms, ``field_relax`` /
 unambiguous from that array. The plain ``*_diag`` / ``flow_kernel`` builders
 allocate from a *shape* (no array to dispatch on); call them on a concrete
 backend (``fastfields.numpy`` / ``.torch`` / ``.cupy``) directly.
+
+The RLS/JRLS-weighted variants (``field_matvec_rls``, ``field_relax_rls``, and
+``field_diag_rls``) all take a real ``wgt`` array as an argument -- unlike
+plain ``field_diag``, ``field_diag_rls`` *is* dispatchable here (its first
+argument is ``wgt``, not a shape).
 """
 
 from __future__ import annotations
@@ -25,6 +30,9 @@ _DISPATCHED = [
     "field_subdiag",
     "field_subdiag_",
     "field_relax",
+    "field_matvec_rls",
+    "field_diag_rls",
+    "field_relax_rls",
     "field_precond",
     "field_forward",
     "flow_matvec",
