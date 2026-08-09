@@ -1,10 +1,14 @@
 """Cross-backend API conformance tests (fastfields#4).
 
 Enforces the contract in ``API_CONTRACT.md``: every backend exposes the same
-canonical operation names, the in-place policy differs as documented
-(numpy/cupy have ``_``-suffixed ops, torch does not), and a canonical call
-dispatched through ``fastfields.auto`` gives the same result on numpy and
-torch.
+canonical operation names; numpy, torch and cupy now expose the *same*
+``dt_euclidean_``/``dt_l1_``/``spline_coeff_``/``sym_solve_``/``sym_invert_``
+in-place surface (full parity -- no backend silently omits a non-
+differentiable op); torch's non-differentiable ops (``dt_euclidean``,
+``dt_l1``, ``dt_mesh``, ``sym_invert``, and their in-place forms) raise a
+clear ``RuntimeError`` from ``.backward()`` rather than being omitted or
+silently wrong; and a canonical call dispatched through ``fastfields.auto``
+gives the same result on numpy and torch.
 
 numpy is a hard test dependency; torch is imported via ``importorskip`` so the
 suite still runs where torch is absent; cupy is skipped (needs a CUDA GPU).
@@ -89,14 +93,15 @@ def test_dt_mesh_flags_are_not_keyword_only(backend):
 # --------------------------------------------------------------------------- #
 
 
-# numpy and cupy have no autograd, so both expose the same in-place surface
-# for the ops torch keeps out-of-place: the regulariser accumulate set
-# (sym_addmatvec_/sym_submatvec_) plus dt_euclidean_/dt_l1_/spline_coeff_/
-# sym_solve_/sym_invert_. Prior to fastfields-numpy#24 numpy spelled the first
-# three as an `inplace=` keyword and was missing the last two outright --
-# an accidental gap, not a deliberate difference (API_CONTRACT.md,
-# "Availability"). This set is enforced identically for both backends so it
-# can't silently drift apart again.
+# numpy and cupy have no autograd, so both expose the same in-place surface:
+# the regulariser accumulate set (field/flow, shared with torch -- see below)
+# plus the posdef accumulate ops (sym_addmatvec_/sym_submatvec_, numpy/cupy
+# only -- torch has no sym_addmatvec/sym_submatvec at all) plus
+# dt_euclidean_/dt_l1_/spline_coeff_/sym_solve_/sym_invert_. Prior to
+# fastfields-numpy#24 numpy spelled the first three as an `inplace=` keyword
+# and was missing the last two outright -- an accidental gap, not a
+# deliberate difference (API_CONTRACT.md, "Availability"). This set is
+# enforced identically for numpy and cupy so it can't silently drift apart.
 _NUMPY_CUPY_INPLACE = frozenset(
     {
         "sym_addmatvec_",
@@ -107,6 +112,40 @@ _NUMPY_CUPY_INPLACE = frozenset(
         "dt_l1_",
         "spline_coeff_",
     }
+)
+
+# The non-differentiable in-place ops that fastfields#4 asked to be exposed
+# on torch too, for parity with numpy/cupy -- previously omitted "for
+# autograd reasons" even though there was no gradient to protect (see
+# API_CONTRACT.md, "Non-differentiable ops: exposed everywhere, backward
+# raises"). sym_addmatvec_/sym_submatvec_ are deliberately excluded here:
+# torch has no sym_addmatvec/sym_submatvec at all (a separate, open gap --
+# see API_CONTRACT.md, "Availability" -- not something fastfields#4 covers).
+_TORCH_NONDIFF_INPLACE = _NUMPY_CUPY_INPLACE - {
+    "sym_addmatvec_",
+    "sym_submatvec_",
+}
+
+# The regulariser accumulate ops are additive in the tensor they mutate, so
+# their backward never needs the pre-mutation value -- they are autograd-safe
+# in place and are exposed on every backend, torch included.
+# See API_CONTRACT.md, "In-place policy".
+_TORCH_ACCUMULATE_INPLACE = frozenset(
+    f"{fam}_{sign}{op}_"
+    for fam in ("field", "flow")
+    for op in ("matvec", "diag")
+    for sign in ("add", "sub")
+)
+
+_TORCH_INPLACE_ALLOWED = _TORCH_ACCUMULATE_INPLACE | _TORCH_NONDIFF_INPLACE
+
+# Ops with no supported gradient (on any backend): forward always runs, but
+# calling `.backward()` through the output must raise a clear RuntimeError
+# naming the op -- never a silent wrong answer, never a generic/cryptic
+# autograd internal error, and never simply omitted. See API_CONTRACT.md,
+# "Non-differentiable ops: exposed everywhere, backward raises".
+_TORCH_NONDIFF_OUT_OF_PLACE = frozenset(
+    {"dt_euclidean", "dt_l1", "sym_invert"}
 )
 
 
@@ -128,26 +167,13 @@ def test_cupy_exposes_the_full_nonautograd_inplace_set():
     assert not missing, f"cupy is missing in-place op(s): {sorted(missing)!r}"
 
 
-# The regulariser accumulate ops are additive in the tensor they mutate, so
-# their backward never needs the pre-mutation value -- they are autograd-safe
-# in place and are exposed on every backend, torch included.
-# See API_CONTRACT.md, "In-place policy".
-_TORCH_INPLACE_ALLOWED = frozenset(
-    f"{fam}_{sign}{op}_"
-    for fam in ("field", "flow")
-    for op in ("matvec", "diag")
-    for sign in ("add", "sub")
-)
-
-
-def test_torch_inplace_ops_are_only_the_autograd_safe_ones():
-    # torch must not grow in-place ops beyond the accumulate set. Some of the
-    # excluded ops (sym_invert_, dt_euclidean_/dt_l1_) are excluded because
-    # their backward would need the pre-mutation tensor, or because they
-    # aren't differentiable at all; others (sym_solve_, spline_coeff_) are a
-    # deliberate conservative choice even though their *current* backward
-    # implementation happens not to need the pre-mutation value -- see
-    # API_CONTRACT.md, "Consequences for torch", for the op-by-op reasoning.
+def test_torch_inplace_ops_are_only_the_known_safe_ones():
+    # torch must not grow undocumented in-place ops: only the regulariser
+    # accumulate set (autograd-safe by construction) and the non-
+    # differentiable set (dt_euclidean_/dt_l1_/spline_coeff_/sym_solve_/
+    # sym_invert_ -- exposed for parity, guarded by a backward that either
+    # works (spline_coeff_/sym_solve_) or raises (the rest) -- see
+    # API_CONTRACT.md, "Consequences for torch" / "Non-differentiable ops").
     mod = _import_backend("torch")
     exposed = {
         name
@@ -156,16 +182,81 @@ def test_torch_inplace_ops_are_only_the_autograd_safe_ones():
     }
     unexpected = exposed - _TORCH_INPLACE_ALLOWED
     assert not unexpected, (
-        f"torch exposes in-place op(s) that are not known to be "
-        f"autograd-safe: {sorted(unexpected)!r}"
+        f"torch exposes in-place op(s) that are not in the documented "
+        f"allowed set: {sorted(unexpected)!r}"
     )
 
 
 def test_torch_exposes_the_autograd_safe_inplace_ops():
-    # The converse: the accumulate set must actually be present on torch.
+    # The accumulate set must actually be present on torch.
     mod = _import_backend("torch")
-    missing = _TORCH_INPLACE_ALLOWED - set(dir(mod))
+    missing = _TORCH_ACCUMULATE_INPLACE - set(dir(mod))
     assert not missing, f"torch is missing in-place op(s): {sorted(missing)!r}"
+
+
+def test_torch_matches_numpy_cupy_nondiff_inplace_surface():
+    # fastfields#4: torch must no longer silently omit the non-differentiable
+    # in-place ops that numpy/cupy expose.
+    mod = _import_backend("torch")
+    missing = _TORCH_NONDIFF_INPLACE - set(dir(mod))
+    assert not missing, (
+        f"torch is missing non-differentiable in-place op(s) that numpy/"
+        f"cupy expose: {sorted(missing)!r}"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(_TORCH_NONDIFF_OUT_OF_PLACE))
+def test_torch_nondiff_op_backward_raises(name):
+    torch = pytest.importorskip("torch")
+    mod = _import_backend("torch")
+    # A length-3 float64 vector is a valid input to all three: dt_euclidean/
+    # dt_l1 only care about dtype, sym_invert needs a valid packed matrix
+    # (len 3 == C=2).
+    x = torch.tensor([1.0, 1.0, 0.0], dtype=torch.float64, requires_grad=True)
+    out = getattr(mod, name)(x)
+    assert out.requires_grad, f"{name} should still build a graph on forward"
+    with pytest.raises(RuntimeError, match=name):
+        out.sum().backward()
+
+
+# Of the non-differentiable in-place set, only these three actually raise on
+# backward: spline_coeff_/sym_solve_ are differentiable in place (covered by
+# test_torch_sym_solve_inplace_and_spline_coeff_inplace_are_differentiable).
+_TORCH_NONDIFF_INPLACE_RAISES = _TORCH_NONDIFF_INPLACE - {
+    "spline_coeff_",
+    "sym_solve_",
+}
+
+
+@pytest.mark.parametrize("name", sorted(_TORCH_NONDIFF_INPLACE_RAISES))
+def test_torch_nondiff_inplace_op_backward_raises(name):
+    torch = pytest.importorskip("torch")
+    mod = _import_backend("torch")
+    base = torch.zeros(3, dtype=torch.float64, requires_grad=True)
+    x = base + torch.tensor([1.0, 1.0, 0.0], dtype=torch.float64)  # non-leaf
+    out = getattr(mod, name)(x)
+    assert out is x
+    with pytest.raises(RuntimeError, match=name):
+        out.sum().backward()
+
+
+def test_torch_sym_solve_inplace_and_spline_coeff_inplace_are_differentiable():
+    # The two non-differentiable-in-place-set members that ARE actually
+    # differentiable in place: verify gradcheck passes (not just "doesn't
+    # raise") -- see API_CONTRACT.md, "Consequences for torch".
+    torch = pytest.importorskip("torch")
+    mod = _import_backend("torch")
+
+    packed = torch.tensor([[2.0, 3.0, 0.5]], dtype=torch.float64)
+    vec = torch.randn(1, 2, dtype=torch.float64, requires_grad=True)
+    assert torch.autograd.gradcheck(
+        lambda v: mod.sym_solve_(v.clone(), packed), (vec,)
+    )
+
+    x = torch.randn(1, 8, dtype=torch.float64, requires_grad=True)
+    assert torch.autograd.gradcheck(
+        lambda t: mod.spline_coeff_(t.clone(), 3, "dct2"), (x,)
+    )
 
 
 # ------------------------------------------------------------------------- #
@@ -289,9 +380,7 @@ def test_auto_field_matvec_rls_numpy_torch_equivalence():
     w = 0.5 + np.abs(rng.standard_normal((H, W, 1)))
     kw = dict(absolute=[0.3, 0.4], membrane=[1.0, 0.7], ndim=2)
     on = ff.field_matvec_rls(f, w, **kw)
-    ot = ff.field_matvec_rls(
-        torch.as_tensor(f), torch.as_tensor(w), **kw
-    )
+    ot = ff.field_matvec_rls(torch.as_tensor(f), torch.as_tensor(w), **kw)
     np.testing.assert_allclose(
         on, ot.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
     )
