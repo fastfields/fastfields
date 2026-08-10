@@ -8,9 +8,10 @@ unambiguous from that array. The plain ``*_diag`` / ``flow_kernel`` builders
 allocate from a *shape* (no array to dispatch on); call them on a concrete
 backend (``fastfields.numpy`` / ``.torch`` / ``.cupy``) directly.
 
-The RLS/JRLS-weighted variants (``field_matvec_rls``, ``field_relax_rls``, and
-``field_diag_rls``) all take a real ``wgt`` array as an argument -- unlike
-plain ``field_diag``, ``field_diag_rls`` *is* dispatchable here (its first
+The RLS/JRLS-weighted variants (``{field,flow}_matvec_rls``,
+``{field,flow}_relax_rls`` and ``{field,flow}_diag_rls``) all take a real
+``wgt`` array as an argument -- unlike the plain ``*_diag`` builders,
+``field_diag_rls``/``flow_diag_rls`` *are* dispatchable here (their first
 argument is ``wgt``, not a shape).
 """
 
@@ -45,6 +46,9 @@ _DISPATCHED = [
     "flow_subdiag",
     "flow_subdiag_",
     "flow_relax",
+    "flow_matvec_rls",
+    "flow_diag_rls",
+    "flow_relax_rls",
     "flow_precond",
     "flow_forward",
 ]
