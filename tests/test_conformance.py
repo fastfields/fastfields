@@ -342,6 +342,10 @@ def test_auto_exposes_pushpull_and_reg():
         "field_diag_rls",
         "field_relax_rls",
         "flow_matvec",
+        "flow_relax",
+        "flow_matvec_rls",
+        "flow_diag_rls",
+        "flow_relax_rls",
     ]:
         assert hasattr(ff, name), name
 
@@ -403,6 +407,66 @@ def test_auto_field_relax_numpy_torch_equivalence():
         torch.zeros(H, W, C, dtype=torch.float64),
         torch.as_tensor(hes),
         torch.as_tensor(grd),
+        **kw,
+    )
+    np.testing.assert_allclose(
+        on, ot.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
+    )
+
+
+def test_auto_flow_matvec_rls_numpy_torch_equivalence():
+    # The flow-side RLS/JRLS ops dispatch on their first array arg just like
+    # the field-side ones. `wgt` is always joint here (trailing size-1 axis).
+    torch = pytest.importorskip("torch")
+    _import_backend("torch")
+    rng = np.random.default_rng(13)
+    H, W, D = 6, 7, 2
+    f = rng.standard_normal((H, W, D))
+    w = 0.5 + np.abs(rng.standard_normal((H, W, 1)))
+    kw = dict(absolute=0.3, membrane=1.0, shears=0.5, div=0.4, ndim=2)
+    on = ff.flow_matvec_rls(f, w, **kw)
+    ot = ff.flow_matvec_rls(torch.as_tensor(f), torch.as_tensor(w), **kw)
+    np.testing.assert_allclose(
+        on, ot.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
+    )
+
+
+def test_auto_flow_diag_rls_numpy_torch_equivalence():
+    # flow_diag_rls is dispatchable (unlike plain flow_diag, which builds
+    # from a shape): its first argument is the weight *array*.
+    torch = pytest.importorskip("torch")
+    _import_backend("torch")
+    rng = np.random.default_rng(14)
+    H, W = 6, 7
+    w = 0.5 + np.abs(rng.standard_normal((H, W, 1)))
+    kw = dict(absolute=0.3, membrane=1.0, shears=0.5, div=0.4, ndim=2)
+    on = ff.flow_diag_rls(w, **kw)
+    ot = ff.flow_diag_rls(torch.as_tensor(w), **kw)
+    assert on.shape == (H, W, 2)
+    np.testing.assert_allclose(
+        on, ot.detach().cpu().numpy(), rtol=1e-6, atol=1e-6
+    )
+
+
+def test_auto_flow_relax_rls_numpy_torch_equivalence():
+    torch = pytest.importorskip("torch")
+    _import_backend("torch")
+    rng = np.random.default_rng(15)
+    H, W, D, hdiag = 5, 6, 2, 8.0
+    hes = np.zeros((H, W, D * (D + 1) // 2))
+    hes[..., 0] = hdiag
+    hes[..., 1] = hdiag
+    grd = rng.standard_normal((H, W, D))
+    w = 0.5 + np.abs(rng.standard_normal((H, W, 1)))
+    kw = dict(
+        absolute=0.3, membrane=0.7, shears=1.0, div=0.5, ndim=2, nb_iter=20
+    )
+    on = ff.flow_relax_rls(np.zeros((H, W, D)), hes, grd, w, **kw)
+    ot = ff.flow_relax_rls(
+        torch.zeros(H, W, D, dtype=torch.float64),
+        torch.as_tensor(hes),
+        torch.as_tensor(grd),
+        torch.as_tensor(w),
         **kw,
     )
     np.testing.assert_allclose(
