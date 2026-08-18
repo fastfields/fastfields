@@ -26,9 +26,17 @@ classifiers = [
     "Topic :: Scientific/Engineering",
     "Typing :: Typed",
 ]
-# Only the raw bindings are a hard dependency (needed for the shared enums and
-# for dispatch to work at all). The array backends are optional extras so that
-# `fastfields.auto` works with whatever subset of numpy/torch/cupy is installed.
+# fastfields-helpers -- the pure-Python Spline/Bound enums and argument
+# normalisers, no compiled extension -- is the only hard dependency. It used
+# to be fastfields-dlpack (needed then because that was the only place the
+# shared enums lived), but fastfields.auto never actually touches the
+# compiled dlpack bindings itself -- dispatch works by lazily importing
+# whichever backend wrapper (fastfields.numpy/.torch/.cupy) matches the
+# array type passed, and each of those wrappers carries its own dlpack
+# dependency independently. Depending on fastfields-helpers instead means
+# `pip install fastfields` no longer pulls in a compiled wheel at all.
+# The array backends are optional extras so that `fastfields.auto` works
+# with whatever subset of numpy/torch/cupy is installed.
 # `==0.*` is a bare wildcard, not a range: it allows any 0.x.y — including
 # 0.0.x and any dev/alpha/beta/rc, e.g. `0.1.0.dev1` or `0.0.dev0` — while
 # still blocking a future 1.x whose ABI/enums no longer match this wrapper.
@@ -44,7 +52,7 @@ classifiers = [
 # (fires when `git describe` can't find a tag, e.g. a shallow-clone CI
 # misconfiguration) would also satisfy `==0.*` if it were ever accidentally
 # published. That's an accepted risk, not something this pin tries to solve.
-dependencies = ["fastfields-dlpack==0.*"]
+dependencies = ["fastfields-helpers==0.*"]
 
 # The sibling wrappers move on the same 0.x line and are constrained the same
 # bare-wildcard way as fastfields-dlpack above.
@@ -57,7 +65,7 @@ test = ["pytest", "numpy"]
 
 # Ships only the ``fastfields.auto`` subpackage; no ``fastfields/__init__.py`` is
 # created, keeping ``fastfields`` a PEP 420 native namespace package that merges
-# with fastfields.dlpack / .numpy / .torch / .cupy.
+# with fastfields.helpers / .dlpack / .numpy / .torch / .cupy.
 [tool.setuptools.packages.find]
 include = ["fastfields.auto*"]
 namespaces = true
