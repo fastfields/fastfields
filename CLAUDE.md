@@ -5,7 +5,8 @@ interface over the per-backend wrappers, and anchors the `fastfields` PEP 420
 namespace the other distributions merge into. This is the top of the stack.
 
 ```
-… ─ dlpack ─ {numpy,cupy,torch} ─ fastfields ← (you are here)
+helpers ─┐
+dlpack ─ {numpy,cupy,torch} ─ fastfields ← (you are here)
 ```
 
 ## Philosophy / role
@@ -15,8 +16,13 @@ namespace the other distributions merge into. This is the top of the stack.
   `cupy.ndarray -> fastfields.cupy`.
 - **Lazy backend imports**: only the backend whose array type is passed is
   imported, so `fastfields.auto` works with whatever subset of numpy/torch/cupy
-  is installed. Only `fastfields-dlpack` is a hard dependency; array backends
-  come via extras (`fastfields[numpy|torch|cupy|all]`).
+  is installed. Only `fastfields-helpers` -- the pure-Python enums/normalisers,
+  no compiled extension -- is a hard dependency, so `pip install fastfields`
+  alone pulls no compiled wheel; array backends (which carry their own
+  `fastfields-dlpack` dependency) come via extras
+  (`fastfields[numpy|torch|cupy|all]`). `fastfields.auto` itself never imports
+  `fastfields.dlpack` -- verified by grep across this repo, only
+  `fastfields/auto/__init__.py` ever touched it, and that import is now gone.
 - Every backend exposes the same canonical `dt_*` / `sym_*` names, and each
   unified name (e.g. `dt_euclidean`, `dt_mesh`) maps straight onto that function
   in the selected backend. Args are forwarded unchanged, so a dispatched call
@@ -37,9 +43,9 @@ Prefer a regular install over editable (native-namespace merge).
 
 ## Conventions & caveats
 - **PEP 420 namespace**: this distribution ships only `fastfields/auto/` and
-  **no `fastfields/__init__.py`** — the five installs
-  (`dlpack`/`numpy`/`torch`/`cupy`/`auto`) merge into one importable `fastfields`
-  namespace. Do not add a top-level `__init__.py`.
+  **no `fastfields/__init__.py`** — the six installs
+  (`helpers`/`dlpack`/`numpy`/`torch`/`cupy`/`auto`) merge into one importable
+  `fastfields` namespace. Do not add a top-level `__init__.py`.
 - Keep the unified→backend name mapping in sync when backend wrappers rename
   functions.
 - Ruff: line-length 79, select B/E/F/I/W.

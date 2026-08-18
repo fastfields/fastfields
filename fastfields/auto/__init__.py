@@ -9,10 +9,12 @@ forwards the call to the matching backend package:
 
 Backends are imported **lazily**: only the backend for the array type
 actually passed is imported, so ``fastfields.auto`` works with any subset
-of the optional backends installed (only ``fastfields-dlpack`` is a hard
-dependency). A clear error is raised for an unknown array type, and a
-clear ``ImportError`` if the required backend package (or its own
-dependency, e.g. torch/cupy) is missing.
+of the optional backends installed (only ``fastfields-helpers`` -- the
+pure-Python enums/normalisers, no compiled extension -- is a hard
+dependency; ``fastfields.auto`` never touches the compiled
+``fastfields-dlpack`` bindings directly). A clear error is raised for an
+unknown array type, and a clear ``ImportError`` if the required backend
+package (or its own dependency, e.g. torch/cupy) is missing.
 
 Every backend wrapper package exposes the same canonical ``dt_*`` / ``sym_*``
 names, and this module exposes one unified name per operation that maps to each
@@ -26,8 +28,9 @@ coefficients), all built on the shared machinery in :mod:`._util`.
 
 from __future__ import annotations
 
-# Enums are backend-independent (they live in fastfields.dlpack).
-from fastfields.dlpack import Bound, Spline
+# Enums are backend-independent (they live in fastfields.helpers, the
+# pure-Python dependency this package now uses -- see pyproject.toml).
+from fastfields.helpers import Bound, Spline
 
 from ._dt import (
     dt_euclidean,
