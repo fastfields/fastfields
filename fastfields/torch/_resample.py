@@ -35,6 +35,8 @@ from __future__ import annotations
 from typing import Optional, Sequence
 
 import fastfields.dlpack as _fb
+
+import torch
 from fastfields.helpers import (
     Bound,
     anchor_scale_shift,
@@ -44,8 +46,6 @@ from fastfields.helpers import (
     infer_ndim,
     resolve_out_spatial,
 )
-
-import torch
 from torch import Tensor
 
 from ._util import check_dtype, check_inplace_leaf, stream_ptr

@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 # `order`/`bound` normalisation is centralised in fastfields.helpers so
 # every backend shares one implementation; re-export under the private
 # names the numpy modules (_dt, _resample) already import.
 from fastfields.helpers import as_bound as _as_bound  # noqa: F401
 from fastfields.helpers import as_spline as _as_spline  # noqa: F401
-
-import numpy as np
 
 # The bindings only implement float32/float64 kernels.
 _FLOAT_DTYPES = (np.float32, np.float64)

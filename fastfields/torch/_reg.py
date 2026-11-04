@@ -14,9 +14,9 @@ from __future__ import annotations
 from typing import Optional, Sequence
 
 import fastfields.dlpack as _fb
-from fastfields.helpers import as_bound
 
 import torch
+from fastfields.helpers import as_bound
 from torch import Tensor
 
 from ._sym import sym_matvec, sym_solve

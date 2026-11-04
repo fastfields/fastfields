@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Sequence
 
 import fastfields.dlpack as _ff
+
+import numpy as np
 from fastfields.helpers import (
     anchor_scale_shift,
     infer_ndim,
     resolve_out_spatial,
 )
-
-import numpy as np
 
 from ._util import _as_bound, _as_float_array, _as_spline, _validate_inplace
 

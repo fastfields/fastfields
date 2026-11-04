@@ -21,9 +21,9 @@ from __future__ import annotations
 from typing import Sequence
 
 import fastfields.dlpack as _fb
-from fastfields.helpers import as_bound, as_spline
 
 import torch
+from fastfields.helpers import as_bound, as_spline
 from torch import Tensor
 
 from ._util import check_dtype, stream_ptr

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional, Sequence
 
 import fastfields.dlpack as _ff
+
 from fastfields.helpers import (
     anchor_scale_shift,
     as_bound,
