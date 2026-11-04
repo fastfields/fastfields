@@ -1,6 +1,6 @@
-# fastfields-numpy
+# fastfields.numpy
 
-**fastfields-numpy** brings the fastfields field operators to plain **NumPy
+**`fastfields.numpy`** brings the fastfields field operators to plain **NumPy
 arrays** on the CPU. Every function takes NumPy arrays in and returns fresh
 NumPy arrays out — your inputs are left untouched unless you explicitly ask for
 an in-place variant.
@@ -8,9 +8,15 @@ an in-place variant.
 ## Install
 
 ```sh
-pip install fastfields-numpy \
+pip install "fastfields[numpy]" \
     --extra-index-url https://fastfields.github.io/whl/cpu/
 ```
+
+The `numpy` extra pulls NumPy itself; the `fastfields` distribution
+ships this subpackage along with `fastfields.torch`,
+`fastfields.cupy`, `fastfields.auto` and `fastfields.helpers`. The
+`--extra-index-url` is what selects the compiled
+`fastfields-dlpack` lane -- `cpu` is the right one here.
 
 ## Use it
 
@@ -35,4 +41,4 @@ dist = ff.dt_euclidean(mask)      # squared Euclidean distance along the last ax
 Spline order and boundary arguments accept an `int`, a `Spline` / `Bound` enum,
 or a friendly string like `"cubic"` or `"dct2"`.
 
-See the [API reference](api/index.md) for full signatures and options.
+See the [API reference](api/numpy.md) for full signatures and options.

@@ -1,6 +1,6 @@
-# fastfields-torch
+# fastfields.torch
 
-**fastfields-torch** brings the fastfields field operators to **PyTorch**, and
+**`fastfields.torch`** brings the fastfields field operators to **PyTorch**, and
 the core operations are **fully differentiable** — drop them into a model and
 gradients flow straight through. Functions take and return `torch` tensors and
 allocate their own outputs.
@@ -8,9 +8,17 @@ allocate their own outputs.
 ## Install
 
 ```sh
-pip install fastfields-torch \
+pip install "fastfields[torch]" \
     --extra-index-url https://fastfields.github.io/whl/cpu/
 ```
+
+CPU tensors work on any build. A CUDA tensor needs a CUDA build of
+`fastfields-dlpack`, which means installing from a `cu*` lane of the
+index instead of `cpu/`; pass one and the same code runs on the GPU.
+Hand a CUDA tensor to a CPU-only build and the call raises a
+`RuntimeError` naming the lane to install -- it is checked when the
+tensor arrives, not at import, precisely so that the CPU path keeps
+working everywhere.
 
 ## Use it
 
@@ -37,4 +45,4 @@ out.sum().backward()              # gradients land on mat and vec
 autograd; the distance transforms and `sym_invert` do not and will raise if an
 input requires grad.
 
-See the [API reference](api/index.md) for full signatures and options.
+See the [API reference](api/torch.md) for full signatures and options.

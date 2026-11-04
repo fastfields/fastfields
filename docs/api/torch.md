@@ -1,4 +1,4 @@
-# API reference
+# `fastfields.torch`
 
 Every function in `fastfields.torch`, with its arguments and options.
 
