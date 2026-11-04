@@ -243,9 +243,7 @@ def test_every_backend_exposes_the_point_to_spline_distances(backend):
         {"dt_spline_table", "dt_spline_brent", "dt_spline_gaussnewton"}
         - set(dir(mod))
     )
-    assert not missing, (
-        f"fastfields.{backend} is missing {missing!r}"
-    )
+    assert not missing, f"fastfields.{backend} is missing {missing!r}"
 
 
 def test_torch_exposes_the_autograd_safe_inplace_ops():
