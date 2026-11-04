@@ -43,7 +43,7 @@ repo = "fontawesome/brands/github"
 inventories = [
   "https://docs.python.org/3/objects.inv",
   "https://numpy.org/doc/stable/objects.inv",
-  "https://docs.pytorch.org/docs/stable/objects.inv",
+  "https://pytorch.org/docs/stable/objects.inv",
   "https://docs.cupy.dev/en/stable/objects.inv",
 ]
 paths = ["."]
