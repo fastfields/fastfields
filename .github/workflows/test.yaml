@@ -26,4 +26,34 @@ jobs:
   # CPU-lane dlpack build (tests/test_cupy.py asserts exactly that).
   pytest:
     uses: fastfields/.github/.github/workflows/python-test.yml@claude/dogfood-wheel-index
+    with:
+      # The shared defaults are '["ubuntu-latest", "macos-latest"]' x
+      # '["3.9", "3.11", "3.12"]'. Both axes are overridden here, for reasons
+      # that are about the runner images rather than about this repo -- stated
+      # in full because an unexplained matrix override is the kind of thing
+      # that gets "tidied" back to the default:
+      #
+      # * `ubuntu-latest` has moved to Ubuntu 26.04, and
+      #   actions/python-versions publishes no 3.9 build for it (3.9.25 exists
+      #   for linux-22.04 and linux-24.04 only). The 3.9 leg therefore fails
+      #   in `actions/setup-python` before it can install a Python at all.
+      #   24.04 is the newest image this distribution's declared floor
+      #   (`requires-python = ">=3.9"`) can actually be tested on.
+      # * macOS is dropped. The org's macOS runners did not pick these jobs
+      #   up -- three legs sat queued and were cancelled after 15 minutes --
+      #   and the 3.9 x macOS cell could not have run regardless, since
+      #   actions/python-versions ships darwin 3.9 for x64 only while
+      #   `macos-latest` is arm64. It also buys the least here: this
+      #   distribution is a single `py3-none-any` wheel with no compiled
+      #   content, so the Python-version axis is the one that finds bugs. The
+      #   platform axis matters for `fastfields-dlpack`, which is where the
+      #   compiled artifacts live and where that leg belongs; its own release
+      #   workflow already excludes macOS for a separate reason
+      #   (fastfields-dlpack#8).
+      #
+      # Both are overrides of shared defaults that are stale for every
+      # caller, not just this one. Fixing the defaults is a separate call
+      # about which Pythons and platforms the project supports.
+      os: '["ubuntu-24.04"]'
+      python-versions: '["3.9", "3.11", "3.12"]'
     secrets: inherit
