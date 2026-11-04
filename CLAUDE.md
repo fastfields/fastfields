@@ -132,9 +132,28 @@ each caller reads `backend` itself and passes it in.
 - **`fastfields.auto`** — dispatches on the **type of the first array
   argument**, importing only the backend that type needs. Keep the
   unified→backend name tables in `_dt`/`_sym`/`_resample`/`_pushpull`/`_reg`
-  in sync when a wrapper renames a function; a name missing from the selected
-  backend now raises a message naming the op, the backend and the likely
-  cause, instead of a bare `AttributeError`.
+  in sync when a wrapper renames a function. `tests/test_auto_surface.py` is
+  the forcing function: it parametrises over every `_ALIASES` entry in every
+  category module and asserts the named attribute exists on that backend, so
+  a table that drifts from the wrappers fails instead of waiting for a call.
+  **Dispatch failures must be intelligible.** `_util.make_dispatcher` used to
+  end in a bare `getattr(backend, attr)(...)`, so an over-promising table
+  produced an `AttributeError` naming a module the caller never mentioned. A
+  missing attribute now raises `NotImplementedError` naming the op, the
+  backend and the likely cause — which, since the five namespaces ship in one
+  distribution, is a stale copy of a retired `fastfields-<backend>`
+  distribution shadowing this one in the namespace — and an op a backend
+  genuinely lacks raises one naming the backends that do have it
+  (`_reg._PARTIAL`).
+  **Two kinds of op are deliberately not dispatchable**, both spelled out in
+  the package docstring and checked by `test_auto_surface.py`: shape-taking
+  builders (`{field,flow}_{diag,kernel}` — no array to dispatch on) and the
+  pushpull adjoints (`*_backward` — autograd-only, wired into torch's
+  `autograd.Function`).
+  **Known cross-backend inconsistency**: the three `dt_spline_*` ops return
+  `(dist, time)` on numpy/torch and `(time, dist)` on cupy. A dispatcher
+  cannot normalise a *result*, so it is documented in `_dt.py` and
+  `docs/index.md` and needs a decision upstream.
 
 ## Op naming
 

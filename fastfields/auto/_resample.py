@@ -21,6 +21,11 @@ _ALIASES = {
         "torch": "spline_coeff",
         "cupy": "spline_coeff",
     },
+    "spline_coeff_": {
+        "numpy": "spline_coeff_",
+        "torch": "spline_coeff_",
+        "cupy": "spline_coeff_",
+    },
 }
 
 for _name, _table in _ALIASES.items():

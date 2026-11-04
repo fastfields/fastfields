@@ -61,6 +61,50 @@ single framework? Use [`fastfields.numpy`](numpy.md),
 [`fastfields.torch`](torch.md) or [`fastfields.cupy`](cupy.md) directly — they
 are in the same install.
 
+In-place spellings are dispatched too (`dt_euclidean_`, `sym_solve_`,
+`spline_coeff_`, the `*_add…_`/`*_sub…_` accumulate forms): they mutate their
+first argument, which is also the array the backend is chosen from.
+
+### What is not dispatched here, and why
+
+`fastfields.auto` picks a backend from the type of the first array argument
+and forwards everything unchanged. Two kinds of operation cannot be reached
+through it, and both are deliberate.
+
+**Builders that take a shape, not an array** — `field_diag`, `flow_diag`,
+`field_kernel`, `flow_kernel` allocate their output from a rank and a set of
+penalty weights, so there is no array to dispatch on. Call them on a concrete
+backend and pass the result into the dispatched operators. Their
+`*_add…`/`*_sub…` accumulate forms *do* take an array and are dispatched.
+
+**Adjoints that exist for autograd** — `pull_backward`, `push_backward`,
+`count_backward` and `grad_backward` are the gradients of the pushpull
+operators. Only `fastfields.torch` has an autograd engine, and there they are
+wired into the forward op's `autograd.Function` rather than exported, so
+there is nothing uniform to dispatch. Call `fastfields.auto.pull(...)` on a
+torch tensor and `.backward()`, or reach for `fastfields.dlpack` raw.
+
+Operations only *some* backends have are still dispatched, with a partial
+table that raises `NotImplementedError` naming the backends that do have
+them: `field_cg` (CPU-only in the C++ library, so numpy), `field_precond_` /
+`flow_precond_` (numpy and cupy), `sym_matvec_backward` (numpy and cupy).
+Listing them with a clear failure beats omitting them, which would make the
+asymmetry invisible from here.
+
+And if a backend turns out not to have an operation this module says it does
+— a mixed install, where `fastfields.auto` is newer than the wrapper — the
+call raises `NotImplementedError` saying which package to upgrade, not a bare
+`AttributeError` from a module you never named.
+
+!!! warning "`dt_spline_*` return order differs by backend"
+    The three point-to-spline operators return a 2-tuple, and the backends do
+    not agree on its order: `fastfields.numpy` and `fastfields.torch` return
+    `(dist, time)`, `fastfields.cupy` returns `(time, dist)`. A dispatcher
+    that forwards arguments unchanged cannot paper over a difference in the
+    *result*, so a call through here means whatever the selected backend
+    means. Unpack by backend, or call the backend directly, until that is
+    reconciled.
+
 ## Status
 
 fastfields is **alpha**. The table below is what is actually exposed and tested

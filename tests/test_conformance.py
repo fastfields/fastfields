@@ -118,24 +118,41 @@ _NUMPY_CUPY_INPLACE = frozenset(
 # on torch too, for parity with numpy/cupy -- previously omitted "for
 # autograd reasons" even though there was no gradient to protect (see
 # API_CONTRACT.md, "Non-differentiable ops: exposed everywhere, backward
-# raises"). sym_addmatvec_/sym_submatvec_ are deliberately excluded here:
-# torch has no sym_addmatvec/sym_submatvec at all (a separate, open gap --
-# see API_CONTRACT.md, "Availability" -- not something fastfields#4 covers).
+# raises").
+#
+# sym_addmatvec_/sym_submatvec_ are excluded from *this* set, but no longer
+# because torch lacks them: fastfields-torch#35 added them, and they belong
+# with the accumulate ops below (differentiable wrt the accumulator, raising
+# only for a mat/vec gradient) rather than with the non-differentiable ones.
+# The tests driven by this set call their op with a single argument, which
+# the three-argument accumulate signature would not accept anyway.
 _TORCH_NONDIFF_INPLACE = _NUMPY_CUPY_INPLACE - {
     "sym_addmatvec_",
     "sym_submatvec_",
 }
 
-# The regulariser accumulate ops are additive in the tensor they mutate, so
-# their backward never needs the pre-mutation value -- they are autograd-safe
-# in place and are exposed on every backend, torch included.
+# The accumulate ops are additive in the tensor they mutate, so their backward
+# never needs the pre-mutation value -- they are autograd-safe in place and
+# are exposed on every backend, torch included.
 # See API_CONTRACT.md, "In-place policy".
+#
+# `kernel` joined `matvec`/`diag` here once the *_addkernel_/*_subkernel_
+# wrappers landed (fastfields-numpy#30, -cupy#25, -torch#35); the bindings had
+# been there all along with nothing calling them. The posdef pair
+# sym_addmatvec_/sym_submatvec_ is the same shape of operation and is listed
+# with them.
 _TORCH_ACCUMULATE_INPLACE = frozenset(
     f"{fam}_{sign}{op}_"
     for fam in ("field", "flow")
-    for op in ("matvec", "diag")
+    for op in ("matvec", "diag", "kernel")
     for sign in ("add", "sub")
-)
+) | frozenset({"sym_addmatvec_", "sym_submatvec_"})
+
+# In-place ops numpy and cupy have and torch does not. Not an oversight:
+# an in-place preconditioner solve has to resolve against autograd's rules
+# for a mutated buffer first (fastfields.torch's package docstring says so,
+# and lists it with the other two solver entry points it does not wrap).
+_NUMPY_CUPY_ONLY_INPLACE = frozenset({"field_precond_", "flow_precond_"})
 
 _TORCH_INPLACE_ALLOWED = _TORCH_ACCUMULATE_INPLACE | _TORCH_NONDIFF_INPLACE
 
@@ -185,6 +202,48 @@ def test_torch_inplace_ops_are_only_the_known_safe_ones():
         f"torch exposes in-place op(s) that are not in the documented "
         f"allowed set: {sorted(unexpected)!r}"
     )
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_every_backend_exposes_the_accumulate_inplace_set(backend):
+    """The accumulate ops are shared by all three backends, torch included."""
+    mod = _import_backend(backend)
+    missing = sorted(_TORCH_ACCUMULATE_INPLACE - set(dir(mod)))
+    assert not missing, (
+        f"fastfields.{backend} is missing accumulate in-place op(s): "
+        f"{missing!r}"
+    )
+
+
+@pytest.mark.parametrize("backend", ["numpy", "cupy"])
+def test_numpy_cupy_expose_the_inplace_preconditioners(backend):
+    mod = _import_backend(backend)
+    missing = sorted(_NUMPY_CUPY_ONLY_INPLACE - set(dir(mod)))
+    assert not missing, (
+        f"fastfields.{backend} is missing in-place op(s): {missing!r}"
+    )
+
+
+def test_torch_does_not_claim_the_inplace_preconditioners():
+    """A documented absence that got filled must be de-documented."""
+    mod = _import_backend("torch")
+    present = sorted(_NUMPY_CUPY_ONLY_INPLACE & set(dir(mod)))
+    assert not present, (
+        f"fastfields.torch now exposes {present!r}; move them out of "
+        "_NUMPY_CUPY_ONLY_INPLACE and out of fastfields.torch's "
+        "'deliberately does not expose' list"
+    )
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_every_backend_exposes_the_point_to_spline_distances(backend):
+    """fastfields-torch#35: torch no longer omits the dt_spline_* family."""
+    mod = _import_backend(backend)
+    missing = sorted(
+        {"dt_spline_table", "dt_spline_brent", "dt_spline_gaussnewton"}
+        - set(dir(mod))
+    )
+    assert not missing, f"fastfields.{backend} is missing {missing!r}"
 
 
 def test_torch_exposes_the_autograd_safe_inplace_ops():
