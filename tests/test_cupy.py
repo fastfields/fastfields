@@ -10,6 +10,19 @@ Two groups:
 2. GPU correctness tests that require cupy *and* a CUDA device. They mirror the
    numpy-package checks (Euclidean DT vs brute force, sym_matvec vs dense) and
    are cleanly skipped when cupy/GPU is unavailable.
+
+Two *different* things can make this package unusable, and the suite keeps
+them apart because the package does:
+
+* **cupy, or a GPU, is missing.** ``import fastfields.cupy`` still succeeds --
+  the client library is imported lazily -- so group 1 runs anywhere.
+* **``fastfields-dlpack`` is a CPU-only build.** Then the import itself
+  raises, by design (``fastfields/cupy/_backend.py``): CUDA kernels that were
+  never compiled cannot be made to appear, and every operation here needs
+  them. That is the normal state of CI, so every test that imports the package
+  goes through :func:`_import_wrapper`, which turns that refusal into a skip.
+  :func:`test_import_guard_matches_installed_backend` is the one test that
+  asserts the refusal itself rather than skipping on it.
 """
 
 from __future__ import annotations
@@ -17,14 +30,53 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from fastfields.helpers import is_cuda_backend
+
+
+def _dlpack_backend():
+    """The installed ``fastfields-dlpack``'s compute-backend label."""
+    import fastfields.dlpack as ff
+
+    return ff.backend
+
+
+def _import_wrapper():
+    """Import ``fastfields.cupy``, or skip if it refuses to load.
+
+    It refuses on a CPU-only build of ``fastfields-dlpack``; see the module
+    docstring.
+    """
+    return pytest.importorskip("fastfields.cupy")
+
 
 # --------------------------------------------------------------------------- #
 # 1. Always-on tests (must pass even where cupy / GPU is absent)              #
 # --------------------------------------------------------------------------- #
-def test_import_without_cupy():
-    """`import fastfields.cupy` must not hard-fail when cupy is missing."""
-    import fastfields.cupy as ffc
+def test_import_guard_matches_installed_backend():
+    """The import must succeed, or refuse *usefully*, per the build installed.
 
+    A missing cupy must never block the import (the client library is lazy).
+    A CPU-only ``fastfields-dlpack`` must block it, and the message has to be
+    actionable on its own: a user who ran ``pip install fastfields[cupy]`` and
+    got a working install has no reason to suspect that the wheel *lane* is a
+    separate axis from the extra, so the error is the only thing that can tell
+    them. It therefore has to name the index and the command.
+    """
+    backend = _dlpack_backend()
+
+    if backend is not None and not is_cuda_backend(backend):
+        with pytest.raises(ImportError) as excinfo:
+            import fastfields.cupy  # noqa: F401
+        message = str(excinfo.value)
+        assert "fastfields.cupy" in message
+        assert backend in message
+        assert "https://fastfields.github.io/whl" in message
+        assert "pip install" in message
+        return
+
+    # A CUDA build, or an unlabelled source build (which is unverifiable and
+    # therefore let through): the import must work with no cupy installed.
+    ffc = _import_wrapper()
     # Enums come straight from fastfields.helpers (no cupy needed).
     assert int(ffc.Spline.Cubic) == 3
     assert int(ffc.Bound.DCT2) == 3
@@ -101,7 +153,7 @@ def _cupy_missing() -> bool:
 @pytest.mark.skipif(not _cupy_missing(), reason="cupy is installed")
 def test_call_without_cupy_raises():
     """Calling a wrapper without cupy raises a clear ImportError."""
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     with pytest.raises(ImportError, match="cupy"):
         ffc.current_stream_ptr()
@@ -154,7 +206,7 @@ def _pack_symmetric(mats):
 
 def test_dt_euclidean_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     inp = np.array(
         [
@@ -170,7 +222,7 @@ def test_dt_euclidean_gpu():
 
 def test_dt_euclidean_inplace_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     inp = np.array(
         [[0, np.inf, np.inf, 0, np.inf, np.inf, np.inf]],
@@ -185,7 +237,7 @@ def test_dt_euclidean_inplace_gpu():
 
 def test_sym_matvec_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     for C in (2, 3):
         B = 4
@@ -204,7 +256,7 @@ def test_sym_matvec_gpu():
 
 def test_sym_matvec_broadcasts_batch_dims_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     # hessian batch (1,) vs vec batch (5,): must broadcast (zero-copy) and
     # match the manually-broadcast dense product.
@@ -233,7 +285,7 @@ if __name__ == "__main__":
 
 
 def test_pushpull_reg_surface_present():
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     for name in [
         "pull",
@@ -270,7 +322,7 @@ def test_pushpull_reg_surface_present():
 
 def test_pull_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     inp = cupy.asarray([[0.0], [10.0], [20.0], [30.0]], dtype=cupy.float64)
     grid = cupy.asarray([[0.5], [1.5], [2.5]], dtype=cupy.float64)
@@ -280,7 +332,7 @@ def test_pull_gpu():
 
 def test_push_is_pull_adjoint_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     grid = cupy.linspace(0, 5, 4, dtype=cupy.float64).reshape(4, 1)
     x = cupy.random.standard_normal((6, 1)).astype(cupy.float64)
@@ -292,7 +344,7 @@ def test_push_is_pull_adjoint_gpu():
 
 def test_field_matvec_absolute_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     f = cupy.random.standard_normal((8, 2)).astype(cupy.float64)
     out = ffc.field_matvec(f, absolute=[2.0, 3.0], ndim=1)
@@ -311,7 +363,7 @@ def _flow_hessian_2d_gpu(cupy, H, W, seed):
 
 def test_flow_kernel_is_matvec_impulse_response_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     cases = [
         (dict(absolute=2.5), False, 1),
@@ -350,7 +402,7 @@ def test_flow_kernel_is_matvec_impulse_response_gpu():
 
 def test_flow_forward_is_sym_matvec_plus_flow_matvec_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     H, W = 5, 6
     mat = _flow_hessian_2d_gpu(cupy, H, W, 11)
@@ -363,7 +415,7 @@ def test_flow_forward_is_sym_matvec_plus_flow_matvec_gpu():
 
 def test_flow_precond_solves_diagonal_system_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     H, W = 5, 6
     mat = _flow_hessian_2d_gpu(cupy, H, W, 12)
@@ -377,7 +429,7 @@ def test_flow_precond_solves_diagonal_system_gpu():
 
 def test_flow_accumulate_variants_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     H, W = 5, 6
     rng = cupy.random.RandomState(21)
@@ -400,7 +452,7 @@ def test_flow_accumulate_variants_gpu():
 
 def test_field_precond_forward_accumulate_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     H, W, C = 5, 6, 2
     rng = np.random.default_rng(31)
@@ -424,7 +476,7 @@ def test_field_precond_forward_accumulate_gpu():
 
 def test_field_kernel_is_matvec_impulse_response_gpu():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     cases = [
         (1, dict(absolute=[2.5, 1.5])),
@@ -460,7 +512,7 @@ def test_field_kernel_is_matvec_impulse_response_gpu():
 # --------------------------------------------------------------------------- #
 def test_accumulate_inplace_and_out_of_place():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     kw = dict(absolute=[0.3, 0.4], membrane=[0.7, 0.5], ndim=2)
     H, W, C = 4, 5, 2
@@ -485,7 +537,7 @@ def test_accumulate_inplace_and_out_of_place():
 
 def test_accumulate_matches_reference_composition():
     cupy = _require_gpu()
-    import fastfields.cupy as ffc
+    ffc = _import_wrapper()
 
     kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5, ndim=2)
     H, W = 5, 6

@@ -26,11 +26,37 @@ from fastfields.helpers import (
 
 
 def test_import_is_stdlib_only():
-    """Importing the package must not drag in numpy/torch/cupy or dlpack."""
+    """Importing the package must not drag in numpy/torch/cupy or dlpack.
+
+    This runs in a subprocess, and has to. It used to inspect this process'
+    ``sys.modules``, which worked while ``fastfields-helpers`` was its own
+    distribution with a suite of its own -- but the five Python
+    distributions are now one, and the sibling suites in this same directory
+    import numpy and torch at collection time. In-process the check would
+    therefore pass or fail on test *ordering*, not on what importing
+    ``fastfields.helpers`` actually pulls in. A fresh interpreter is the only
+    place the question has a stable answer.
+    """
+    import subprocess
     import sys
 
-    forbidden = ("numpy", "torch", "cupy", "fastfields.dlpack")
-    assert not [m for m in forbidden if m in sys.modules]
+    probe = (
+        "import sys, fastfields.helpers;"
+        "bad = [m for m in ('numpy', 'torch', 'cupy', 'fastfields.dlpack')"
+        " if m in sys.modules];"
+        "print(','.join(bad))"
+    )
+    # -I: isolated, so neither the cwd nor PYTHONPATH can inject anything
+    # that would make the answer depend on where pytest was started.
+    out = subprocess.run(
+        [sys.executable, "-I", "-c", probe],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.strip() == "", (
+        "importing fastfields.helpers pulled in: " + out.stdout.strip()
+    )
 
 
 def test_enums():

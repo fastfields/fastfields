@@ -19,22 +19,92 @@ run here. The primary guard is therefore **static** -- it reads the wrapper
 source and checks which ``_ff.*`` binding each one can reach. That runs
 everywhere and is what actually catches a family swap. The runtime spy test is
 kept as well, mirroring the siblings exactly, and skips without cupy + device.
+
+Reading the source rather than importing the package is not a stylistic
+choice. ``import fastfields.cupy`` deliberately **fails** on a CPU-only build
+of ``fastfields-dlpack`` (see ``fastfields/cupy/_backend.py``), which is
+exactly the build CI has -- so importing the package here would skip the
+static guard on every run, in the one environment where it is the only guard
+there is. The helpers below therefore locate the installed package's files
+through the ``fastfields`` namespace path and parse them, importing nothing.
 """
 
 from __future__ import annotations
 
 import ast
-import inspect
+import importlib.util
 import math
+import pathlib
 
 import pytest
 
-import fastfields.cupy as ff
-from fastfields.cupy import _reg
+
+def _cupy_pkg_dir():
+    """Path of the installed ``fastfields/cupy/`` directory.
+
+    Found through the ``fastfields`` namespace package's search locations,
+    which resolving does not execute any of its portions -- so this works on a
+    build where ``import fastfields.cupy`` raises.
+    """
+    spec = importlib.util.find_spec("fastfields")
+    assert spec is not None, "the fastfields namespace is not installed"
+    for location in spec.submodule_search_locations:
+        candidate = pathlib.Path(location) / "cupy"
+        if (candidate / "_reg.py").is_file():
+            return candidate
+    raise AssertionError(
+        "fastfields/cupy/_reg.py not found in any fastfields namespace "
+        f"portion: {list(spec.submodule_search_locations)}"
+    )
+
+
+def _module_ast(name):
+    """Parse ``fastfields/cupy/<name>.py`` without importing it."""
+    return ast.parse((_cupy_pkg_dir() / f"{name}.py").read_text())
+
+
+def _dunder_all(tree):
+    """The ``__all__`` list of a parsed module, as a set of strings."""
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
+        ):
+            continue
+        return {
+            elt.value
+            for elt in node.value.elts
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+        }
+    raise AssertionError("module defines no __all__")
+
+
+def _imported_names(tree):
+    """Every name the module binds with an ``import`` statement."""
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".")[0])
+    return names
 
 
 def _public_reg_names():
-    return {n for n in ff.__all__ if n.startswith(("field_", "flow_"))}
+    return {
+        n
+        for n in _dunder_all(_module_ast("__init__"))
+        if n.startswith(("field_", "flow_"))
+    }
+
+
+def _import_wrapper():
+    """Import ``fastfields.cupy``, skipping the test if it refuses to load.
+
+    It refuses on a CPU-only build of ``fastfields-dlpack``, which is the
+    normal CI situation; the runtime tests below need a GPU anyway.
+    """
+    return pytest.importorskip("fastfields.cupy")
 
 
 # --------------------------------------------------------------------------- #
@@ -44,7 +114,7 @@ def _public_reg_names():
 
 def _function_defs():
     """Every ``def`` at module scope in ``_reg``, by name."""
-    tree = ast.parse(inspect.getsource(_reg))
+    tree = _module_ast("_reg")
     return {
         node.name: node
         for node in tree.body
@@ -105,8 +175,12 @@ def test_public_wrapper_is_re_exported(name):
     Forgetting the ``__init__.py`` re-export is a real bug this stack has
     shipped before (fastfields-lib#33).
     """
-    assert callable(getattr(ff, name, None)), f"{name} not re-exported"
-    assert name in _reg.__all__, f"{name} missing from _reg.__all__"
+    assert name in _imported_names(_module_ast("__init__")), (
+        f"{name} not re-exported by fastfields/cupy/__init__.py"
+    )
+    assert name in _dunder_all(_module_ast("_reg")), (
+        f"{name} missing from _reg.__all__"
+    )
 
 
 def test_rls_wrappers_are_exposed():
@@ -152,6 +226,7 @@ def _require_gpu():
 
 def _cases(cp):
     """Every public field_*/flow_* wrapper, with a call that reaches C."""
+    ff = _import_wrapper()
 
     def _x():
         n = math.prod(SHAPE)
