@@ -25,5 +25,5 @@ jobs:
   # runtime tests skip and `import fastfields.cupy` is expected to refuse the
   # CPU-lane dlpack build (tests/test_cupy.py asserts exactly that).
   pytest:
-    uses: fastfields/.github/.github/workflows/python-test.yml@main
+    uses: fastfields/.github/.github/workflows/python-test.yml@claude/dogfood-wheel-index
     secrets: inherit
