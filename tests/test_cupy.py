@@ -44,9 +44,16 @@ def _import_wrapper():
     """Import ``fastfields.cupy``, or skip if it refuses to load.
 
     It refuses on a CPU-only build of ``fastfields-dlpack``; see the module
-    docstring.
+    docstring. ``pytest.importorskip`` is deliberately not used: as of pytest
+    9 it only swallows a ``ModuleNotFoundError`` for the requested module and
+    re-raises an ``ImportError`` raised *by* the module -- which is exactly
+    what this guard is.
     """
-    return pytest.importorskip("fastfields.cupy")
+    try:
+        import fastfields.cupy
+    except ImportError as exc:
+        pytest.skip(f"fastfields.cupy is unusable here: {exc.args[0][:80]}...")
+    return fastfields.cupy
 
 
 # --------------------------------------------------------------------------- #

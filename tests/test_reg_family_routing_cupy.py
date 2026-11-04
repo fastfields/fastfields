@@ -103,8 +103,15 @@ def _import_wrapper():
 
     It refuses on a CPU-only build of ``fastfields-dlpack``, which is the
     normal CI situation; the runtime tests below need a GPU anyway.
+    ``pytest.importorskip`` is deliberately not used: as of pytest 9 it only
+    swallows a ``ModuleNotFoundError`` for the requested module and re-raises
+    an ``ImportError`` raised *by* the module -- which is what this guard is.
     """
-    return pytest.importorskip("fastfields.cupy")
+    try:
+        import fastfields.cupy
+    except ImportError as exc:
+        pytest.skip(f"fastfields.cupy is unusable here: {exc.args[0][:80]}...")
+    return fastfields.cupy
 
 
 # --------------------------------------------------------------------------- #
