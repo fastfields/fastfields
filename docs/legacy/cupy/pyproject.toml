@@ -1,0 +1,111 @@
+[build-system]
+requires = ["setuptools>=64", "wheel", "versioningit>=3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastfields-cupy"
+description = "User-friendly cupy interface over the fastfields.dlpack nanobind bindings"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dynamic = ["version"]
+authors = [{ name = "Yaël Balbastre", email = "yael.bx@gmail.com" }]
+maintainers = [{ name = "Yaël Balbastre", email = "yael.bx@gmail.com" }]
+keywords = ["fastfields", "medical-imaging", "interpolation", "distance-transform", "gpu", "dlpack"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+]
+# cupy is intentionally NOT a hard dependency: the correct wheel depends on the
+# host CUDA version. Install it via the `cupy` extra or manually.
+# `==0.*` is a bare wildcard, not a range: it allows any 0.x.y — including
+# 0.0.x and any dev/alpha/beta/rc, e.g. `0.1.0.dev1` or `0.0.dev0` — while
+# still blocking a future 1.x whose ABI/enums no longer match this wrapper.
+# The fastfields distributions are versioned and released together off the
+# same 0.x line (versioningit `default-tag = "0.1"`), so the upper bound is
+# the only bound doing real work here. This is the first release of these
+# packages, so there is no earlier version to guard against with a floor —
+# an earlier fix pinned `>=0.1.dev0` to admit 0.1.0 pre-releases, but that
+# floor was protecting against nothing real and has been dropped for a
+# simpler bare wildcard.
+#
+# Accepted risk: versioningit's `default-version = "0+unknown"` fallback
+# (fires when `git describe` can't find a tag, e.g. a shallow-clone CI
+# misconfiguration) would also satisfy `==0.*` if it were ever accidentally
+# published. That's an accepted risk, not something this pin tries to solve.
+# fastfields-helpers is the pure-Python enums/normalisation package this
+# wrapper's argument handling is built on -- same bare-wildcard convention
+# as fastfields-dlpack above, for the same reason: it moves on the same 0.x
+# line.
+dependencies = ["fastfields-dlpack==0.*", "fastfields-helpers==0.*"]
+
+[project.optional-dependencies]
+# Pulls a prebuilt CUDA 12.x cupy wheel. Pick the build matching your CUDA
+# toolkit (e.g. cupy-cuda11x) if 12.x is not appropriate.
+cupy = ["cupy-cuda12x"]
+# numpy is used by the test suite to build reference arrays and to feed the
+# wrappers via the array protocol; it is a test-only dependency (cupy itself
+# is optional and GPU-gated).
+test = ["pytest", "numpy"]
+
+# Ships only the ``fastfields.cupy`` subpackage; no ``fastfields/__init__.py``
+# is created, keeping ``fastfields`` a PEP 420 native namespace package.
+[tool.setuptools.packages.find]
+include = ["fastfields.cupy*"]
+namespaces = true
+
+[tool.ruff]
+line-length = 79
+extend-exclude = ["docs/examples"]
+
+[tool.ruff.format]
+quote-style = "preserve"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "W"]
+ignore = [
+    "B905",   # zip(strict=...) requires Python >= 3.10
+    "B007",   # allow unused loop variables
+    "E731",   # allow assigning lambdas to variables
+]
+
+[project.urls]
+Homepage = "https://github.com/fastfields/fastfields-cupy"
+Documentation = "https://fastfields.github.io/fastfields-cupy/"
+Issues = "https://github.com/fastfields/fastfields-cupy/issues"
+Repository = "https://github.com/fastfields/fastfields-cupy"
+
+[tool.versioningit]
+default-version = "0+unknown"
+
+[tool.versioningit.vcs]
+default-tag = "0.1"
+
+[tool.versioningit.format]
+distance = "{base_version}+{distance}.{vcs}{rev}"
+dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
+distance-dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
+
+[tool.versioningit.write]
+file = "fastfields/cupy/_version.py"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["fastfields.cupy"]
+omit = ["*/_version.py"]
+
+[tool.codespell]
+check-filenames = true
+skip = ".git,*.egg-info,build,dist,*.pdf,*.svg,docs/examples"
