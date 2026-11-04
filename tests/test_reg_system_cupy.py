@@ -22,7 +22,24 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import fastfields.cupy as ff
+
+def _import_wrapper():
+    """Import ``fastfields.cupy``, or skip if it refuses to load.
+
+    Every test in this module is GPU-gated already, so a skip here changes
+    nothing that could run. It is needed because `import fastfields.cupy`
+    raises on a CPU-only build of fastfields-dlpack
+    (fastfields/cupy/_backend.py) -- a module-level import would turn that
+    into a collection *error* for the whole file rather than a skip.
+    ``pytest.importorskip`` does not help: as of pytest 9 it re-raises an
+    ``ImportError`` raised *by* the module, which is what this guard is.
+    """
+    try:
+        import fastfields.cupy
+    except ImportError as exc:
+        pytest.skip(f"fastfields.cupy is unusable here: {exc.args[0][:80]}...")
+    return fastfields.cupy
+
 
 NDIM = 2
 SPATIAL = (5, 6)
@@ -43,6 +60,7 @@ KW = {"voxel_size": VS, "bound": "dct2", "ndim": NDIM}
 
 
 def _require_gpu():
+    _import_wrapper()
     cupy = pytest.importorskip("cupy")
     try:
         ndev = cupy.cuda.runtime.getDeviceCount()
@@ -80,6 +98,7 @@ def _close(cupy, a, b):
 
 def test_field_forward_matches_sym_matvec_plus_field_matvec():
     cupy = _require_gpu()
+    ff = _import_wrapper()
     hes, vec = _operands(cupy, 2)
     got = ff.field_forward(hes, vec, **FIELD_PEN, **KW)
     ref = ff.sym_matvec(hes, vec) + ff.field_matvec(vec, **FIELD_PEN, **KW)
@@ -88,6 +107,7 @@ def test_field_forward_matches_sym_matvec_plus_field_matvec():
 
 def test_flow_forward_matches_sym_matvec_plus_flow_matvec():
     cupy = _require_gpu()
+    ff = _import_wrapper()
     hes, vec = _operands(cupy, NDIM)
     got = ff.flow_forward(hes, vec, **FLOW_PEN, **KW)
     ref = ff.sym_matvec(hes, vec) + ff.flow_matvec(vec, **FLOW_PEN, **KW)
@@ -96,6 +116,7 @@ def test_flow_forward_matches_sym_matvec_plus_flow_matvec():
 
 def test_field_precond_matches_sym_solve_with_field_diag():
     cupy = _require_gpu()
+    ff = _import_wrapper()
     hes, vec = _operands(cupy, 2)
     got = ff.field_precond(hes, vec, **FIELD_PEN, **KW)
     diag = ff.field_diag(vec.shape, **FIELD_PEN, **KW, dtype=vec.dtype)
@@ -104,6 +125,7 @@ def test_field_precond_matches_sym_solve_with_field_diag():
 
 def test_flow_precond_matches_sym_solve_with_flow_diag():
     cupy = _require_gpu()
+    ff = _import_wrapper()
     hes, vec = _operands(cupy, NDIM)
     got = ff.flow_precond(hes, vec, **FLOW_PEN, **KW)
     diag = ff.flow_diag(vec.shape, **FLOW_PEN, **KW, dtype=vec.dtype)
@@ -114,6 +136,7 @@ def test_flow_precond_matches_sym_solve_with_flow_diag():
 def test_leading_batch_dims_still_broadcast(op):
     """The composition broadcast batch dims via sym_*; the kernel must too."""
     cupy = _require_gpu()
+    ff = _import_wrapper()
     hes, vec = _operands(cupy, 2)
     single = getattr(ff, f"field_{op}")(hes, vec, **FIELD_PEN, **KW)
     batched = getattr(ff, f"field_{op}")(
@@ -137,6 +160,7 @@ def test_leading_batch_dims_still_broadcast(op):
 )
 def test_precond_inplace_agrees_and_mutates(family, pen):
     cupy = _require_gpu()
+    ff = _import_wrapper()
     hes, vec = _operands(cupy, 2 if family == "field" else NDIM)
     expected = getattr(ff, f"{family}_precond")(hes, vec, **pen, **KW)
     sol = vec.copy()
@@ -147,6 +171,7 @@ def test_precond_inplace_agrees_and_mutates(family, pen):
 
 def test_out_of_place_precond_leaves_its_input_alone():
     cupy = _require_gpu()
+    ff = _import_wrapper()
     hes, vec = _operands(cupy, 2)
     before = vec.copy()
     ff.field_precond(hes, vec, **FIELD_PEN, **KW)
@@ -159,6 +184,7 @@ def test_out_of_place_precond_leaves_its_input_alone():
 
 
 def _kernel(family):
+    ff = _import_wrapper()
     if family == "field":
         return ff.field_kernel(
             NDIM, **FIELD_PEN, channels=2, voxel_size=VS, bound="dct2"
@@ -171,6 +197,7 @@ def _kernel(family):
 )
 def test_addkernel_on_zeros_is_the_kernel(family, pen):
     cupy = _require_gpu()
+    ff = _import_wrapper()
     k = _kernel(family)
     got = getattr(ff, f"{family}_addkernel")(cupy.zeros_like(k), **pen, **KW)
     _close(cupy, got, k)
@@ -181,6 +208,7 @@ def test_addkernel_on_zeros_is_the_kernel(family, pen):
 )
 def test_subkernel_on_zeros_is_minus_the_kernel(family, pen):
     cupy = _require_gpu()
+    ff = _import_wrapper()
     k = _kernel(family)
     got = getattr(ff, f"{family}_subkernel")(cupy.zeros_like(k), **pen, **KW)
     _close(cupy, got, -k)
@@ -192,6 +220,7 @@ def test_subkernel_on_zeros_is_minus_the_kernel(family, pen):
 @pytest.mark.parametrize("sign", ["add", "sub"])
 def test_inplace_kernel_mutates_and_matches_functional(family, pen, sign):
     cupy = _require_gpu()
+    ff = _import_wrapper()
     start = _kernel(family) * 0.25
     expected = getattr(ff, f"{family}_{sign}kernel")(start, **pen, **KW)
     buf = start.copy()
@@ -205,6 +234,7 @@ def test_inplace_kernel_mutates_and_matches_functional(family, pen, sign):
 )
 def test_functional_kernel_accumulate_leaves_input_alone(family, pen):
     cupy = _require_gpu()
+    ff = _import_wrapper()
     start = _kernel(family) * 0.25
     before = start.copy()
     getattr(ff, f"{family}_addkernel")(start, **pen, **KW)
@@ -212,7 +242,15 @@ def test_functional_kernel_accumulate_leaves_input_alone(family, pen):
 
 
 def test_there_is_no_field_cg_on_cupy():
-    """field_cg is CPU-only in fastfields-lib; see the package docstring."""
+    """field_cg is CPU-only in fastfields-lib; see the package docstring.
+
+    Skips on a CPU-only fastfields-dlpack along with the rest of this
+    module. The same fact is checked without importing anything, and so
+    everywhere, by ``test_api_coverage_cupy.py``: ``field_cg`` is in its
+    ``DELIBERATE`` map, and the coverage comparison fails if the wrapper
+    grows it without the map being updated.
+    """
+    ff = _import_wrapper()
     assert not hasattr(ff, "field_cg"), (
         "field_cg appeared on the cupy backend: either fastfields-lib#34 "
         "landed a CUDA path (good -- update the docstring and "

@@ -26,10 +26,69 @@ genuinely different operations and are matched exactly.
 
 from __future__ import annotations
 
+import ast
+import importlib.util
+import pathlib
+
 import fastfields.dlpack as ffb
 import pytest
 
-import fastfields.cupy as ffn
+
+# This module is read rather than imported, and that is load-bearing. It says
+# above that it must work "without a GPU" because the rest of the cupy suite
+# is GPU-gated -- but `import fastfields.cupy` now also *refuses* on a
+# CPU-only build of fastfields-dlpack (fastfields/cupy/_backend.py), which is
+# exactly what CI has. Importing here would therefore have skipped the one
+# coverage check CI can run, in the only environment where it is the only one
+# there is. Resolving the `fastfields` namespace package's search locations
+# executes none of its portions, so this works on any build.
+def _cupy_pkg_dir():
+    spec = importlib.util.find_spec("fastfields")
+    assert spec is not None, "the fastfields namespace is not installed"
+    for location in spec.submodule_search_locations:
+        candidate = pathlib.Path(location) / "cupy"
+        if (candidate / "__init__.py").is_file():
+            return candidate
+    raise AssertionError("fastfields/cupy/ not found in any namespace portion")
+
+
+def _cupy_init_ast():
+    return ast.parse((_cupy_pkg_dir() / "__init__.py").read_text())
+
+
+def _wrapper_all():
+    """``fastfields.cupy.__all__``, read statically."""
+    tree = _cupy_init_ast()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
+        ):
+            return {
+                elt.value
+                for elt in node.value.elts
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+            }
+    raise AssertionError("fastfields/cupy/__init__.py defines no __all__")
+
+
+def _wrapper_doc():
+    """The package docstring, read statically."""
+    return ast.get_docstring(_cupy_init_ast()) or ""
+
+
+def _wrapper_bound_names():
+    """Every name ``fastfields/cupy/__init__.py`` binds by import."""
+    names = set()
+    for node in ast.walk(_cupy_init_ast()):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    names.add(t.id)
+    return names
+
 
 #: Bindings this wrapper deliberately does not expose -> why.
 DELIBERATE = {
@@ -63,7 +122,7 @@ def _binding_ops() -> set[str]:
 
 def _covered(op: str) -> bool:
     """Does this wrapper expose ``op``, under either spelling?"""
-    names = set(ffn.__all__)
+    names = _wrapper_all()
     if op in names:
         return True
     # Alias only where the binding does not itself declare both spellings.
@@ -106,7 +165,7 @@ def test_deliberate_gaps_still_exist_in_the_binding():
 
 
 def test_docstring_lists_every_deliberate_gap():
-    doc = ffn.__doc__ or ""
+    doc = _wrapper_doc()
     for op in DELIBERATE:
         assert op in doc, (
             f"{op} is deliberately absent but the package docstring does not "
@@ -114,6 +173,8 @@ def test_docstring_lists_every_deliberate_gap():
         )
 
 
-@pytest.mark.parametrize("name", sorted(ffn.__all__))
+@pytest.mark.parametrize("name", sorted(_wrapper_all()))
 def test_dunder_all_resolves(name):
-    assert hasattr(ffn, name), f"__all__ names {name!r}, which does not exist"
+    assert name in _wrapper_bound_names(), (
+        f"__all__ names {name!r}, which the module never binds"
+    )
