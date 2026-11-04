@@ -36,7 +36,10 @@ and resampling).
 
 from __future__ import annotations
 
-from fastfields.helpers import Bound, Spline
+# `__version__` is the whole `fastfields` distribution's version, read from
+# the single `_version.py` that versioningit writes into fastfields.helpers;
+# the five merged subpackages all report the same string. See pyproject.toml.
+from fastfields.helpers import Bound, Spline, __version__
 
 from ._dt import (
     dt_euclidean,
@@ -99,6 +102,7 @@ from ._sym import (
 )
 
 __all__ = [
+    "__version__",
     "Spline",
     "Bound",
     "dt_euclidean",

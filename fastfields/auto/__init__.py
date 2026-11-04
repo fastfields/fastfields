@@ -21,6 +21,12 @@ names, and this module exposes one unified name per operation that maps to each
 backend's function. Arguments are forwarded unchanged, so each dispatched call
 shares the signature of the selected backend's function.
 
+This namespace requires no particular compute backend -- it runs against
+whatever is installed, and :func:`dlpack_backend` reports which lane that is
+(``"cpu"``, ``"cu126"``, ...). That is the whole of its backend handling, by
+contrast with :mod:`fastfields.cupy`, which refuses to import on a CPU-only
+build, and :mod:`fastfields.torch`, which refuses a CUDA tensor on one.
+
 The dispatchers are split by category into :mod:`._dt` (distance transforms),
 :mod:`._sym` (compact-symmetric ops) and :mod:`._resample` (resampling / spline
 coefficients), all built on the shared machinery in :mod:`._util`.
@@ -30,7 +36,10 @@ from __future__ import annotations
 
 # Enums are backend-independent (they live in fastfields.helpers, the
 # pure-Python dependency this package now uses -- see pyproject.toml).
-from fastfields.helpers import Bound, Spline
+# `__version__` is the whole `fastfields` distribution's version, read from
+# the single `_version.py` that versioningit writes into fastfields.helpers;
+# the five merged subpackages all report the same string. See pyproject.toml.
+from fastfields.helpers import Bound, Spline, __version__
 
 from ._dt import (
     dt_euclidean,
@@ -75,13 +84,13 @@ from ._reg import (
 )
 from ._resample import resample, restriction, spline_coeff
 from ._sym import sym_invert, sym_matvec, sym_matvec_backward, sym_solve
-
-__version__ = "0.1.0"
+from ._util import dlpack_backend
 
 __all__ = [
     "Spline",
     "Bound",
     "__version__",
+    "dlpack_backend",
     # distance transforms
     "dt_euclidean",
     "dt_l1",

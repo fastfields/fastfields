@@ -1,5 +1,15 @@
 """Shared helpers for the fastfields.torch wrappers.
 
+Compute backend
+---------------
+``fastfields.torch`` is the only one of the five namespaces that works on
+either compute backend: its CPU path is the tested one and runs against any
+build of ``fastfields-dlpack``, while a CUDA tensor needs a CUDA build. So,
+unlike :mod:`fastfields.cupy` (which refuses to import at all on a CPU-only
+build), this package imports cleanly everywhere and raises only when a CUDA
+tensor actually meets a CPU-only build. :func:`stream_ptr` is where that is
+enforced -- see its docstring for why that is the right place.
+
 Stream semantics
 ----------------
 The ``fastfields.dlpack`` bindings take a trailing ``stream`` argument (a CUDA
@@ -14,7 +24,10 @@ forwards ``cupy.cuda.get_current_stream().ptr``.
 
 from __future__ import annotations
 
+import fastfields.dlpack as _fb
+
 import torch
+from fastfields.helpers import cuda_backend_message, is_cuda_backend
 from torch import Tensor
 
 # The bindings only implement float32/float64 kernels.
@@ -111,6 +124,44 @@ def raise_not_differentiable(name: str, reason: str) -> None:
     )
 
 
+def _require_cuda_backend(t: Tensor) -> None:
+    """Reject a CUDA tensor when the compiled bindings are CPU-only.
+
+    ``fastfields-dlpack`` records the compute backend it was built for in its
+    version's PEP 440 local segment and exposes it as
+    ``fastfields.dlpack.backend`` (``"cpu"``, ``"cu126"``, ...). The lane is
+    chosen by the wheel-index folder the user installed from, not by the
+    dependency graph, so nothing in the metadata prevents a CUDA tensor from
+    being handed to CPU-only kernels; this is the check that does.
+
+    ``backend is None`` is let through: it means *unknown*, not *CPU* -- an
+    unversioned source checkout reports it, and every wheel from the index
+    carries a real label, so refusing it would block GPU work from a source
+    build without catching any real mistake.
+
+    Parameters
+    ----------
+    t : torch.Tensor
+        A CUDA tensor about to be passed to the bindings.
+
+    Raises
+    ------
+    RuntimeError
+        If the installed build is labelled as something other than CUDA.
+    """
+    backend = _fb.backend
+    if backend is None or is_cuda_backend(backend):
+        return
+    raise RuntimeError(
+        cuda_backend_message(
+            "fastfields.torch",
+            backend,
+            f"it was given a tensor on {t.device}, which needs the CUDA "
+            f"kernels (CPU tensors work on any build)",
+        )
+    )
+
+
 def stream_ptr(t: Tensor) -> int:
     """Return the CUDA stream handle to forward to the binding for ``t``.
 
@@ -119,12 +170,25 @@ def stream_ptr(t: Tensor) -> int:
     t : torch.Tensor
         The primary tensor of the operation; its device selects the stream.
 
+    This is also where the lazy compute-backend check lives, because it is
+    the one helper every wrapper in this package already calls with the
+    operation's primary tensor -- so a single call site covers every op, and
+    it covers it on the only branch that matters. A CPU tensor never reaches
+    the check; a CUDA tensor cannot reach the bindings without passing it.
+
     Returns
     -------
     int
         ``torch.cuda.current_stream(t.device).cuda_stream`` for a CUDA tensor,
         or ``0`` (the default/CPU stream) for a CPU tensor.
+
+    Raises
+    ------
+    RuntimeError
+        If ``t`` is a CUDA tensor but the installed ``fastfields-dlpack`` is a
+        CPU-only build.
     """
     if t.is_cuda:
+        _require_cuda_backend(t)
         return torch.cuda.current_stream(t.device).cuda_stream
     return 0

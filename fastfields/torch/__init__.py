@@ -40,7 +40,10 @@ and resampling/restriction).
 
 from __future__ import annotations
 
-from fastfields.helpers import Bound, Spline
+# `__version__` is the whole `fastfields` distribution's version, read from
+# the single `_version.py` that versioningit writes into fastfields.helpers;
+# the five merged subpackages all report the same string. See pyproject.toml.
+from fastfields.helpers import Bound, Spline, __version__
 
 from ._dt import dt_euclidean, dt_euclidean_, dt_l1, dt_l1_, dt_mesh
 from ._pushpull import count, grad, pull, push
@@ -84,6 +87,7 @@ from ._resample import resample, restriction, spline_coeff, spline_coeff_
 from ._sym import sym_invert, sym_invert_, sym_matvec, sym_solve, sym_solve_
 
 __all__ = [
+    "__version__",
     "sym_matvec",
     "sym_solve",
     "sym_solve_",

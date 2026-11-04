@@ -21,16 +21,35 @@ Conventions
   surrounding cupy operations. To run on a specific stream, wrap the call in a
   ``with my_stream:`` block.
 
-cupy is imported lazily, so ``import fastfields.cupy`` succeeds even where cupy
-or a GPU is unavailable; a clear ``ImportError`` is raised only when a wrapper
-is actually called.
+Availability
+------------
+Two different things can be missing, and they are treated differently.
+
+* **The cupy client library.** Imported lazily, so ``import fastfields.cupy``
+  succeeds where cupy itself is not installed or no GPU is present; a clear
+  ``ImportError`` is raised only when a wrapper is actually called. This is
+  what lets the static parts of this package (the enums, the argument
+  normalisation) be imported and tested anywhere.
+* **The CUDA kernels.** Checked eagerly: ``import fastfields.cupy`` raises
+  ``ImportError`` when the installed ``fastfields-dlpack`` is a CPU-only
+  build, naming the wheel-index lane to install instead. Unlike a missing
+  cupy, that is not a situation any part of this package can work in -- see
+  :mod:`fastfields.cupy._backend`.
 """
 
 from __future__ import annotations
 
 # Spline / Bound are plain IntEnums in fastfields.helpers (no cupy needed).
-from fastfields.helpers import Bound, Spline
+# `__version__` is the whole `fastfields` distribution's version, read from
+# the single `_version.py` that versioningit writes into fastfields.helpers;
+# the five merged subpackages all report the same string. See pyproject.toml.
+from fastfields.helpers import Bound, Spline, __version__
 
+# Import-time CUDA-build guard; first local import on purpose, so the failure
+# happens at `import fastfields.cupy` and not inside the first wrapper call.
+# See _backend.py for why this namespace refuses to load on a CPU-only build
+# while fastfields.torch imports cleanly and checks lazily.
+from . import _backend  # noqa: F401
 from ._dt import (
     dt_euclidean,
     dt_euclidean_,
@@ -90,8 +109,6 @@ from ._sym import (
     sym_submatvec_,
 )
 from ._util import current_stream_ptr
-
-__version__ = "0.1.0"
 
 __all__ = [
     # distance transforms

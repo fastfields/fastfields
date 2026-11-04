@@ -21,10 +21,12 @@ it -- neither package depends on the other.
 
 from __future__ import annotations
 
+import re as _re
 from enum import IntEnum
 from typing import Optional, Sequence
 
 __all__ = [
+    "__version__",
     "Spline",
     "Bound",
     "as_spline",
@@ -34,7 +36,118 @@ __all__ = [
     "check_ndim",
     "resolve_out_spatial",
     "anchor_scale_shift",
+    "is_cuda_backend",
+    "cuda_backend_message",
 ]
+
+# -- version ---------------------------------------------------------------
+# ``_version.py`` is generated at build time by versioningit; a bare source
+# tree that was never built has no such file.
+#
+# This is the whole `fastfields` distribution's version, not just this
+# subpackage's: the five merged subpackages used to be five distributions with
+# five separate `_version.py` files, and versioningit writes exactly one. It
+# lives here because `fastfields.helpers` is the bottom of this distribution's
+# internal stack -- the other four import it and it imports none of them, so
+# reading the version can never pull in an array library, and `auto` (which
+# imports this module) could not have held it without a cycle.
+try:
+    from ._version import __version__
+except ImportError:  # pragma: no cover - source tree without a build
+    __version__ = "0+unknown"
+
+
+# -- compute-backend requirement -------------------------------------------
+# ``fastfields-dlpack`` ships the compiled kernels and records which compute
+# backend it was built for in its version's PEP 440 *local* segment,
+# PyTorch-style: ``0.0.dev0+cpu``, ``+cu118``, ``+cu126``, ``+cu130``. It
+# exposes the leading component as ``fastfields.dlpack.backend``.
+#
+# Which lane a user gets is decided by the wheel-index folder they install
+# from, not by the dependency graph -- pip cannot express "any build with
+# CUDA" -- so no package in this distribution pins a lane, and the namespaces
+# that need one enforce it at runtime instead. The two predicates below are
+# the shared half of that: they are pure functions of the label, and
+# deliberately do NOT import ``fastfields.dlpack`` themselves, which is what
+# keeps this module stdlib-only. Each caller reads
+# ``fastfields.dlpack.backend`` itself and decides when to look (at import,
+# for fastfields.cupy; only on meeting a CUDA tensor, for fastfields.torch).
+
+#: Base URL of the fastfields wheel index; one folder per compute backend.
+WHEEL_INDEX_URL = "https://fastfields.github.io/whl"
+
+_CUDA_BACKEND_RE = _re.compile(r"\Acu[0-9]+\Z")
+
+
+def is_cuda_backend(backend: Optional[str]) -> bool:
+    """Return whether ``backend`` names a CUDA build of fastfields-dlpack.
+
+    Parameters
+    ----------
+    backend : str or None
+        A compute-backend label as exposed by ``fastfields.dlpack.backend``:
+        ``"cpu"``, ``"cu126"``, ... or ``None`` when the installed build
+        carries no label (an unversioned source checkout).
+
+    Returns
+    -------
+    bool
+        True for ``cu<digits>``, False for anything else -- ``None``
+        included. ``None`` means *unknown*, not *CPU*, so callers that reject
+        a non-CUDA build should test ``backend is not None and not
+        is_cuda_backend(backend)`` rather than negating this directly: a
+        source build is unverifiable, and refusing it would block GPU
+        development from a checkout for no safety gain.
+    """
+    return bool(backend) and bool(_CUDA_BACKEND_RE.match(backend))
+
+
+def cuda_backend_message(
+    namespace: str,
+    backend: Optional[str],
+    because: str,
+) -> str:
+    """Build the "this needs a CUDA build of fastfields-dlpack" message.
+
+    Shared by :mod:`fastfields.cupy` (which refuses at import) and
+    :mod:`fastfields.torch` (which refuses only when a CUDA tensor meets a
+    CPU-only build) so that one wording, naming both the index URL and the
+    command that fixes it, covers both.
+
+    Parameters
+    ----------
+    namespace : str
+        The importing namespace, e.g. ``"fastfields.cupy"``.
+    backend : str or None
+        The installed ``fastfields.dlpack.backend``.
+    because : str
+        A clause completing "... cannot work because ...", stating what in
+        the caller's situation requires CUDA kernels.
+
+    Returns
+    -------
+    str
+        The full multi-line message.
+    """
+    installed = (
+        f"a {backend!r} build" if backend else "a build with no backend label"
+    )
+    return (
+        f"{namespace} cannot work because {because}, but the installed "
+        f"fastfields-dlpack is {installed}. The compute backend is chosen by "
+        f"the wheel-index folder you install from, not by the dependency "
+        f"graph, so installing a CUDA build means pointing pip at a CUDA "
+        f"lane:\n"
+        f"\n"
+        f"    pip install --force-reinstall fastfields-dlpack \\\n"
+        f"        --extra-index-url {WHEEL_INDEX_URL}/cu126/\n"
+        f"\n"
+        f"Lanes live at {WHEEL_INDEX_URL}/ (cpu, cu118, cu126, cu130); pick "
+        f"the one matching your driver. Note that a CUDA lane may not be "
+        f"published yet -- the index lists the lanes that are actually "
+        f"available, and installing from an unpublished one resolves to "
+        f"nothing."
+    )
 
 
 class Spline(IntEnum):

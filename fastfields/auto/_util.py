@@ -144,7 +144,24 @@ def make_dispatcher(name: str, table: dict[str, str]) -> Callable[..., Any]:
                 f"backend (supported by: {', '.join(sorted(table))})."
             )
         backend = _load_backend(root)
-        return getattr(backend, attr)(*args, **kwargs)
+        # A blind `getattr(backend, attr)` here is how a version skew between
+        # this dispatch table and an installed backend wrapper surfaces as a
+        # bare AttributeError on a private-looking name, with nothing to say
+        # which op was wanted or what to do about it. Name all three things
+        # instead: the unified op, the backend that lacks it, and the fact
+        # that a mismatched install is the likely cause.
+        fn = getattr(backend, attr, None)
+        if fn is None:
+            raise AttributeError(
+                f"fastfields.auto.{name} maps to "
+                f"{_ARRAY_BACKENDS[root]}.{attr}, which the installed "
+                f"{_ARRAY_BACKENDS[root]} does not provide. This normally "
+                f"means fastfields.auto and that backend wrapper come from "
+                f"different versions; they ship in the same distribution, so "
+                f"reinstalling it (`pip install -U fastfields`) should "
+                f"realign them."
+            )
+        return fn(*args, **kwargs)
 
     _dispatch.__name__ = name
     _dispatch.__qualname__ = name
@@ -154,3 +171,34 @@ def make_dispatcher(name: str, table: dict[str, str]) -> Callable[..., Any]:
         f"forwarded unchanged."
     )
     return _dispatch
+
+
+def dlpack_backend() -> "str | None":
+    """Report the compute backend of the installed compiled bindings.
+
+    ``fastfields.auto`` works against whichever backend is installed and
+    never requires a particular one, so -- unlike
+    :mod:`fastfields.cupy` (which refuses to import on a CPU-only build) and
+    :mod:`fastfields.torch` (which refuses a CUDA tensor on one) -- it only
+    reports. This is the one place to ask "which lane did I end up on?"
+    without knowing which wrapper to interrogate.
+
+    It is a function rather than a module attribute mirroring
+    ``fastfields.dlpack.backend`` on purpose: ``fastfields.auto`` must not
+    import the compiled bindings at import time (it dispatches lazily and is
+    usable with no array backend at all), and a module attribute would have to
+    be computed at import.
+
+    Returns
+    -------
+    str or None
+        ``"cpu"``, ``"cu126"``, ... for a labelled build of
+        ``fastfields-dlpack``; ``None`` if the installed build carries no
+        label (an unversioned source checkout) or if ``fastfields.dlpack``
+        cannot be imported at all.
+    """
+    try:
+        import fastfields.dlpack as _ff
+    except ImportError:
+        return None
+    return getattr(_ff, "backend", None)
