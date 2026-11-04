@@ -144,22 +144,34 @@ def make_dispatcher(name: str, table: dict[str, str]) -> Callable[..., Any]:
                 f"backend (supported by: {', '.join(sorted(table))})."
             )
         backend = _load_backend(root)
-        # A blind `getattr(backend, attr)` here is how a version skew between
-        # this dispatch table and an installed backend wrapper surfaces as a
-        # bare AttributeError on a private-looking name, with nothing to say
-        # which op was wanted or what to do about it. Name all three things
-        # instead: the unified op, the backend that lacks it, and the fact
-        # that a mismatched install is the likely cause.
         fn = getattr(backend, attr, None)
         if fn is None:
-            raise AttributeError(
-                f"fastfields.auto.{name} maps to "
-                f"{_ARRAY_BACKENDS[root]}.{attr}, which the installed "
-                f"{_ARRAY_BACKENDS[root]} does not provide. This normally "
-                f"means fastfields.auto and that backend wrapper come from "
-                f"different versions; they ship in the same distribution, so "
-                f"reinstalling it (`pip install -U fastfields`) should "
-                f"realign them."
+            # The table said this backend has the op and it does not. A blind
+            # `getattr(backend, attr)` would surface that as a bare
+            # AttributeError on a module the caller never named, which says
+            # nothing about what to do. Name all three things: the unified op,
+            # the backend that lacks it, and the likely cause.
+            #
+            # Since the five namespaces were merged into one distribution,
+            # auto and the wrapper it dispatched to always ship together, so
+            # the remaining way to get here is a stale or partial install --
+            # typically a leftover copy of one of the retired
+            # fastfields-numpy / -torch / -cupy distributions shadowing this
+            # one in the same namespace. Reinstalling resolves it.
+            #
+            # NotImplementedError rather than AttributeError, to match the
+            # adjacent "this backend is not in the table" raise: from a
+            # caller's point of view both mean the same thing.
+            raise NotImplementedError(
+                f"fastfields.auto.{name} dispatched to the {root} backend, "
+                f"but {_ARRAY_BACKENDS[root]} has no {attr!r}. These ship in "
+                f"the same distribution, so they cannot normally disagree; "
+                f"the usual cause is a stale install of a retired "
+                f"fastfields-{root} distribution shadowing it in the "
+                f"fastfields namespace. Reinstall "
+                f"(`pip uninstall fastfields-{root} && pip install -U "
+                f"fastfields[{root}]`). Operations deliberately absent from a "
+                f"backend are listed in the fastfields.auto docstring."
             )
         return fn(*args, **kwargs)
 
