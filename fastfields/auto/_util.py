@@ -144,7 +144,25 @@ def make_dispatcher(name: str, table: dict[str, str]) -> Callable[..., Any]:
                 f"backend (supported by: {', '.join(sorted(table))})."
             )
         backend = _load_backend(root)
-        return getattr(backend, attr)(*args, **kwargs)
+        fn = getattr(backend, attr, None)
+        if fn is None:
+            # The table said this backend has the op and it does not. That
+            # happens when the installed wrapper is older than this
+            # dispatcher -- the distributions are versioned and released
+            # independently, so a mixed install is ordinary, not exotic.
+            # Forwarding blindly would surface it as a bare AttributeError on
+            # a module the caller never named, which says nothing about what
+            # to do; say what is missing and how to fix it instead.
+            raise NotImplementedError(
+                f"fastfields.auto.{name} dispatched to the {root} backend, "
+                f"but {_ARRAY_BACKENDS[root]} has no {attr!r}. The installed "
+                f"{_ARRAY_BACKENDS[root]} is probably older than this "
+                f"fastfields.auto; upgrade it "
+                f"(`pip install -U fastfields[{root}]`). Operations that are "
+                f"deliberately absent from a backend are listed in the "
+                f"fastfields.auto docstring."
+            )
+        return fn(*args, **kwargs)
 
     _dispatch.__name__ = name
     _dispatch.__qualname__ = name

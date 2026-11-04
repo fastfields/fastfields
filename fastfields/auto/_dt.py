@@ -3,6 +3,15 @@
 Each name here forwards to the matching backend function; every backend now
 exposes the canonical ``dt_*`` names, so the per-name tables below map each
 unified name onto the same attribute in each backend package.
+
+.. warning::
+   The three ``dt_spline_*`` operators return a 2-tuple, and the backends do
+   **not** agree on its order: ``fastfields.numpy`` and ``fastfields.torch``
+   return ``(dist, time)``, ``fastfields.cupy`` returns ``(time, dist)``.
+   A dispatcher that forwards arguments unchanged cannot paper over a
+   difference in the *result*, so a call through here means whatever the
+   selected backend means. Unpack by backend, or call the backend directly,
+   until that is reconciled.
 """
 
 from __future__ import annotations
@@ -16,21 +25,37 @@ _ALIASES = {
         "torch": "dt_euclidean",
         "cupy": "dt_euclidean",
     },
+    "dt_euclidean_": {
+        "numpy": "dt_euclidean_",
+        "torch": "dt_euclidean_",
+        "cupy": "dt_euclidean_",
+    },
     "dt_l1": {
         "numpy": "dt_l1",
         "torch": "dt_l1",
         "cupy": "dt_l1",
     },
+    "dt_l1_": {
+        "numpy": "dt_l1_",
+        "torch": "dt_l1_",
+        "cupy": "dt_l1_",
+    },
+    # torch gained these in fastfields-torch#35; the table lists it, and an
+    # older installed fastfields-torch raises the "upgrade it" message from
+    # _util rather than a bare AttributeError.
     "dt_spline_table": {
         "numpy": "dt_spline_table",
+        "torch": "dt_spline_table",
         "cupy": "dt_spline_table",
     },
     "dt_spline_brent": {
         "numpy": "dt_spline_brent",
+        "torch": "dt_spline_brent",
         "cupy": "dt_spline_brent",
     },
     "dt_spline_gaussnewton": {
         "numpy": "dt_spline_gaussnewton",
+        "torch": "dt_spline_gaussnewton",
         "cupy": "dt_spline_gaussnewton",
     },
     "dt_mesh": {

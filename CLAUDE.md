@@ -47,7 +47,27 @@ Prefer a regular install over editable (native-namespace merge).
   (`helpers`/`dlpack`/`numpy`/`torch`/`cupy`/`auto`) merge into one importable
   `fastfields` namespace. Do not add a top-level `__init__.py`.
 - Keep the unified→backend name mapping in sync when backend wrappers rename
-  functions.
+  functions. `tests/test_auto_surface.py` is the forcing function: it
+  parametrises over every `_ALIASES` entry in every category module and
+  asserts the named attribute exists on that backend, so a table that drifts
+  from the wrappers fails rather than waiting for a call.
+- **Dispatch failures must be intelligible.** `_util.make_dispatcher` used to
+  end in a bare `getattr(backend, attr)(*args, **kwargs)`, so a table that
+  over-promised produced an `AttributeError` naming a module the caller never
+  mentioned. A mixed install is ordinary here -- the five distributions are
+  versioned and released independently -- so a missing attribute now raises
+  `NotImplementedError` saying which package to upgrade, and an op a backend
+  genuinely lacks raises one naming the backends that do have it
+  (`_reg._PARTIAL`).
+- **Two kinds of op are deliberately not dispatchable**, and both are spelled
+  out in the package docstring (and checked by `test_auto_surface.py`):
+  shape-taking builders (`{field,flow}_{diag,kernel}` -- no array to dispatch
+  on) and the pushpull adjoints (`*_backward` -- autograd-only, wired into
+  torch's `autograd.Function`).
+- **Known cross-backend inconsistency**: the three `dt_spline_*` ops return
+  `(dist, time)` on numpy/torch and `(time, dist)` on cupy. A dispatcher
+  cannot normalise a *result*, so this is documented in `_dt.py` and
+  `docs/index.md` and needs a decision upstream.
 - Ruff: line-length 79, select B/E/F/I/W.
 
 ## Pointers
