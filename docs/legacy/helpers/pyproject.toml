@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=61.0", "versioningit>=3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastfields-helpers"
+description = "Shared enums and argument normalisation for the fastfields packages."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dynamic = ["version"]
+authors = [{ name = "Yaël Balbastre", email = "yael.bx@gmail.com" }]
+maintainers = [{ name = "Yaël Balbastre", email = "yael.bx@gmail.com" }]
+keywords = ["fastfields", "medical-imaging", "interpolation", "distance-transform", "gpu", "dlpack"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+]
+# Deliberately empty, and load-bearing. This package is the one piece of the
+# fastfields stack that depends on nothing at all: it imports only the standard
+# library, has no compiled component, and no build requirement beyond setuptools
+# and versioningit. That is the whole reason it was split out of
+# fastfields-dlpack -- a fix to a normaliser or an enum ships as an ordinary
+# pure-Python release instead of forcing a recompiled wheel on every platform.
+# Adding a dependency here would give that property away, so don't, and in
+# particular never add fastfields-dlpack: the two are independent siblings.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+# Ships only the ``fastfields.helpers`` subpackage; no ``fastfields/__init__.py``
+# is created, keeping ``fastfields`` a PEP 420 native namespace package.
+[tool.setuptools.packages.find]
+include = ["fastfields.helpers*"]
+namespaces = true
+
+[tool.ruff]
+line-length = 79
+extend-exclude = ["docs/examples"]
+
+[tool.ruff.format]
+quote-style = "preserve"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "W"]
+ignore = [
+    "B905",   # zip(strict=...) requires Python >= 3.10
+    "B007",   # allow unused loop variables
+    "E731",   # allow assigning lambdas to variables
+]
+
+[project.urls]
+Homepage = "https://github.com/fastfields/fastfields-helpers"
+Documentation = "https://fastfields.github.io/fastfields-helpers/"
+Issues = "https://github.com/fastfields/fastfields-helpers/issues"
+Repository = "https://github.com/fastfields/fastfields-helpers"
+
+[tool.versioningit]
+default-version = "0+unknown"
+
+[tool.versioningit.vcs]
+default-tag = "0.1"
+
+[tool.versioningit.format]
+distance = "{base_version}+{distance}.{vcs}{rev}"
+dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
+distance-dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
+
+[tool.versioningit.write]
+file = "fastfields/helpers/_version.py"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["fastfields.helpers"]
+omit = ["*/_version.py"]
+
+[tool.codespell]
+check-filenames = true
+skip = ".git,*.egg-info,build,dist,*.pdf,*.svg,docs/examples"
