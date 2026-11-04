@@ -1,0 +1,12 @@
+name: Test
+on:
+  push:
+    branches: [main]
+    paths: ["fastfields/**", "tests/**", "pyproject.toml", ".github/workflows/test.yaml"]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  pytest:
+    uses: fastfields/.github/.github/workflows/python-test.yml@main
+    secrets: inherit
