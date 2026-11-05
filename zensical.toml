@@ -2,10 +2,14 @@
 site_name = "fastfields"
 site_description = "The fastfields Python interface: numpy, torch, cupy and auto-dispatching wrappers over the fastfields.dlpack bindings."
 site_author = "Yaël Balbastre"
-site_url = "https://fastfields.github.io/fastfields/"
+site_url = "https://fastfields.github.io/python/"
 repo_url = "https://github.com/fastfields/fastfields"
 repo_name = "fastfields/fastfields"
 copyright = "Copyright &copy; 2026 The fastfields authors"
+# The shared theme. Served by the fastfields.github.io repo, referenced by
+# absolute URL so the four sections look alike from one source -- and so no
+# docs build has to fetch another repository.
+extra_css = ["https://fastfields.github.io/stylesheets/extra.css"]
 nav = [
   {"fastfields home" = "https://fastfields.github.io/"},
   {"Home" = "index.md"},
@@ -24,6 +28,9 @@ nav = [
     "api/cupy.md",
     "api/helpers.md",
   ]},
+  {"Raw DLPack binding" = "https://fastfields.github.io/dlpack/"},
+  {"C++/CUDA library" = "https://fastfields.github.io/lib/"},
+  {"Wheel index" = "https://fastfields.github.io/whl/"},
 ]
 [project.theme]
 language = "en"
@@ -37,7 +44,7 @@ scheme = "slate"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
 [project.theme.icon]
-logo = "material/waves"
+logo = "fontawesome/solid/spiral"
 repo = "fontawesome/brands/github"
 [project.plugins.mkdocstrings.handlers.python]
 inventories = [

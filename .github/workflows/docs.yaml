@@ -2,23 +2,22 @@ name: Docs
 on:
   push:
     branches: [main]
-    paths: ["docs/**", "fastfields/**", "zensical.toml", ".github/workflows/docs.yaml"]
+    paths: ["docs/**", "fastfields/**", "zensical.toml", "tools/publish-docs.sh", ".github/workflows/docs.yaml"]
   workflow_dispatch:
 permissions:
   contents: read
-  pages: write
-  id-token: write
+
+# Stops THIS repo racing itself. It is NOT the cross-repo guard: concurrency
+# groups are per-repository, so they cannot serialize this job against the
+# publishers in fastfields.github.io / fastfields-lib / fastfields-dlpack.
+# Those races are handled by the retry loop in tools/publish-docs.sh.
 concurrency:
-  group: pages
+  group: publish-docs
   cancel-in-progress: false
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/configure-pages@v5
       - uses: actions/checkout@v5
         with:
           # versioningit derives the version from `git describe`, which needs
@@ -42,8 +41,18 @@ jobs:
       # a compiled wheel it does not read.
       - run: pip install --no-deps .
       - run: zensical build --clean
-      - uses: actions/upload-pages-artifact@v4
-        with:
-          path: site
-      - uses: actions/deploy-pages@v4
-        id: deployment
+
+      # This section is served at fastfields.github.io/python/, which is a
+      # subtree of the fastfields.github.io Pages site rather than a site of
+      # its own -- the wanted path differs from this repo's name, so
+      # actions/deploy-pages (which can only deploy to the repo it runs in)
+      # cannot put it there. The script writes ONLY `python/` and cannot reach
+      # the landing page or the other sections.
+      #
+      # DOCS_DEPLOY_TOKEN needs `contents: write` on fastfields.github.io and
+      # nothing else. The default GITHUB_TOKEN is scoped to this repo, so it
+      # cannot be used.
+      - name: Publish the Python section into fastfields.github.io
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+        run: ./tools/publish-docs.sh --subdir python --site site
