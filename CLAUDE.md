@@ -150,10 +150,15 @@ each caller reads `backend` itself and passes it in.
   builders (`{field,flow}_{diag,kernel}` — no array to dispatch on) and the
   pushpull adjoints (`*_backward` — autograd-only, wired into torch's
   `autograd.Function`).
-  **Known cross-backend inconsistency**: the three `dt_spline_*` ops return
-  `(dist, time)` on numpy/torch and `(time, dist)` on cupy. A dispatcher
-  cannot normalise a *result*, so it is documented in `_dt.py` and
-  `docs/index.md` and needs a decision upstream.
+  **The three `dt_spline_*` ops return `(dist, time)` in every namespace.**
+  cupy returned `(time, dist)` until fastfields#38, and a dispatcher that
+  forwards arguments unchanged cannot normalise a *result*, so the meaning of
+  a dispatched return value depended on the input's backend. The family is in
+  `test_conformance.py`'s `CANONICAL` list now -- it was not, which is exactly
+  why the divergence survived. The *order itself* is not checkable from there:
+  `import fastfields.cupy` refuses a CPU-only `fastfields-dlpack`, so every
+  cupy parametrisation of that suite skips wherever CI runs. It is pinned
+  statically instead, in `tests/test_dt_spline_return_order_cupy.py`.
 
 ## Op naming
 
