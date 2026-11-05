@@ -1,0 +1,2242 @@
+"""Spatial regularisers — torch.
+
+* **field** — multi-channel field ``(*batch, *spatial, C)``; per-channel
+  ``absolute`` / ``membrane`` / ``bending`` (a scalar broadcasts to ``C``).
+* **flow** — vector flow field; scalar penalties.
+
+The ``*_matvec`` operators are symmetric, so they are differentiable wrt the
+input field via the same (self-adjoint) operator. The ``*_diag``
+preconditioners have no differentiable input.
+
+Why ``*_forward`` / ``*_precond`` stay compositions here
+--------------------------------------------------------
+``fastfields-lib`` has fused kernels for ``(H + L) x`` and
+``(H + diag(L))^-1 g``, bound as ``fastfields.dlpack.{field,flow}_forward``
+and ``...precond``, and :mod:`fastfields.numpy` / :mod:`fastfields.cupy` call
+them directly -- one kernel instead of a temporary and two traversals.
+
+This backend deliberately does **not**. Here ``field_forward`` is
+``sym_matvec`` + ``field_matvec`` and ``field_precond`` is ``field_diag`` +
+``sym_solve``, and every one of those is an ``autograd.Function``: the
+composition is what makes these two differentiable wrt ``mat`` and ``vec``.
+Calling the raw fused binding instead would be faster and would silently
+drop the gradient -- the forward would still run, the graph would just end
+there. Trading autograd for a saved allocation is not a trade this wrapper
+should make on the caller's behalf.
+
+A fused *and* differentiable version is possible (a ``Function`` whose
+``forward`` calls ``field_forward`` and whose ``backward`` calls it again,
+the operator being self-adjoint), and is the right follow-up; it is a
+different change from exposing the op. Until then, reach for
+``fastfields.dlpack.field_forward`` directly if you want the fused kernel
+and have no use for gradients.
+"""
+
+from __future__ import annotations
+
+from typing import Optional, Sequence
+
+import fastfields.dlpack as _fb
+
+import torch
+from fastfields.helpers import as_bound
+from torch import Tensor
+
+from ._sym import sym_matvec, sym_solve
+from ._util import check_dtype, stream_ptr
+
+__all__ = [
+    "field_matvec",
+    "field_addmatvec",
+    "field_addmatvec_",
+    "field_submatvec",
+    "field_submatvec_",
+    "field_diag",
+    "field_adddiag",
+    "field_adddiag_",
+    "field_subdiag",
+    "field_subdiag_",
+    "field_kernel",
+    "field_addkernel",
+    "field_addkernel_",
+    "field_subkernel",
+    "field_subkernel_",
+    "field_relax",
+    "field_matvec_rls",
+    "field_diag_rls",
+    "field_relax_rls",
+    "field_precond",
+    "field_forward",
+    "flow_matvec",
+    "flow_addmatvec",
+    "flow_addmatvec_",
+    "flow_submatvec",
+    "flow_submatvec_",
+    "flow_diag",
+    "flow_adddiag",
+    "flow_adddiag_",
+    "flow_subdiag",
+    "flow_subdiag_",
+    "flow_kernel",
+    "flow_addkernel",
+    "flow_addkernel_",
+    "flow_subkernel",
+    "flow_subkernel_",
+    "flow_relax",
+    "flow_matvec_rls",
+    "flow_diag_rls",
+    "flow_relax_rls",
+    "flow_precond",
+    "flow_forward",
+]
+
+
+def _per_channel(value, channels: int, name: str) -> Optional[list]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return [float(value)] * channels
+    out = [float(v) for v in value]
+    if len(out) != channels:
+        raise ValueError(
+            f"{name} must be a scalar or a length-C={channels} sequence"
+        )
+    return out
+
+
+def _voxel(value, ndim: int) -> Optional[list]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return [float(value)] * ndim
+    out = [float(v) for v in value]
+    if len(out) != ndim:
+        raise ValueError(
+            f"voxel_size must be a scalar or a length-ndim={ndim} sequence"
+        )
+    return out
+
+
+class _FieldMatvec(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx, inp, voxel_size, absolute, membrane, bending, bound, ndim
+    ):
+        out = inp.new_zeros(inp.shape)
+        _fb.field_matvec(
+            out,
+            inp,
+            voxel_size=voxel_size,
+            absolute=absolute,
+            membrane=membrane,
+            bending=bending,
+            bound=bound,
+            ndim=ndim,
+            stream=stream_ptr(out),
+        )
+        ctx.args = (voxel_size, absolute, membrane, bending, bound, ndim)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        ginp = None
+        if ctx.needs_input_grad[0]:
+            vs, ab, mem, ben, bnd, ndim = ctx.args
+            ginp = grad_out.new_zeros(grad_out.shape)
+            _fb.field_matvec(
+                ginp,
+                grad_out.contiguous(),
+                voxel_size=vs,
+                absolute=ab,
+                membrane=mem,
+                bending=ben,
+                bound=bnd,
+                ndim=ndim,
+                stream=stream_ptr(ginp),
+            )
+        return ginp, None, None, None, None, None, None
+
+
+class _FlowMatvec(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        inp,
+        voxel_size,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        bound,
+        ndim,
+    ):
+        out = inp.new_zeros(inp.shape)
+        _fb.flow_matvec(
+            out,
+            inp,
+            voxel_size=voxel_size,
+            absolute=absolute,
+            membrane=membrane,
+            bending=bending,
+            shears=shears,
+            div=div,
+            bound=bound,
+            ndim=ndim,
+            stream=stream_ptr(out),
+        )
+        ctx.args = (
+            voxel_size,
+            absolute,
+            membrane,
+            bending,
+            shears,
+            div,
+            bound,
+            ndim,
+        )
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        # The flow regulariser operator is self-adjoint, so the adjoint of the
+        # forward matvec is the same matvec applied to grad_out.
+        ginp = None
+        if ctx.needs_input_grad[0]:
+            vs, ab, mem, ben, sh, dv, bnd, ndim = ctx.args
+            ginp = grad_out.new_zeros(grad_out.shape)
+            _fb.flow_matvec(
+                ginp,
+                grad_out.contiguous(),
+                voxel_size=vs,
+                absolute=ab,
+                membrane=mem,
+                bending=ben,
+                shears=sh,
+                div=dv,
+                bound=bnd,
+                ndim=ndim,
+                stream=stream_ptr(ginp),
+            )
+        return ginp, None, None, None, None, None, None, None, None
+
+
+class _FieldMatvecRLS(torch.autograd.Function):
+    """RLS/JRLS-weighted variant of ``_FieldMatvec``.
+
+    Differentiable wrt ``inp`` only -- ``wgt`` is treated as a fixed
+    coefficient field (like ``bound``/``ndim``), exactly as ``field_diag``
+    has no differentiable input. For a *fixed* weight map, ``L(w)`` is still
+    self-adjoint, so the backward pass is the same weighted matvec applied to
+    ``grad_out``.
+    """
+
+    @staticmethod
+    def forward(
+        ctx, inp, wgt, voxel_size, absolute, membrane, bending, bound, ndim
+    ):
+        out = inp.new_zeros(inp.shape)
+        _fb.field_matvec_rls(
+            out,
+            inp,
+            wgt,
+            voxel_size=voxel_size,
+            absolute=absolute,
+            membrane=membrane,
+            bending=bending,
+            bound=bound,
+            ndim=ndim,
+            stream=stream_ptr(out),
+        )
+        ctx.save_for_backward(wgt)
+        ctx.args = (voxel_size, absolute, membrane, bending, bound, ndim)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        ginp = None
+        if ctx.needs_input_grad[0]:
+            (wgt,) = ctx.saved_tensors
+            vs, ab, mem, ben, bnd, ndim = ctx.args
+            ginp = grad_out.new_zeros(grad_out.shape)
+            _fb.field_matvec_rls(
+                ginp,
+                grad_out.contiguous(),
+                wgt,
+                voxel_size=vs,
+                absolute=ab,
+                membrane=mem,
+                bending=ben,
+                bound=bnd,
+                ndim=ndim,
+                stream=stream_ptr(ginp),
+            )
+        return ginp, None, None, None, None, None, None, None
+
+
+class _FlowMatvecRLS(torch.autograd.Function):
+    """JRLS-weighted variant of ``_FlowMatvec``.
+
+    Differentiable wrt ``inp`` only -- ``wgt`` is treated as a fixed
+    coefficient field, exactly as in ``_FieldMatvecRLS``. For a *fixed*
+    weight map ``L(w)`` is still self-adjoint, so the backward pass is the
+    same weighted matvec applied to ``grad_out``.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        inp,
+        wgt,
+        voxel_size,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        bound,
+        ndim,
+    ):
+        out = inp.new_zeros(inp.shape)
+        _fb.flow_matvec_rls(
+            out,
+            inp,
+            wgt,
+            voxel_size=voxel_size,
+            absolute=absolute,
+            membrane=membrane,
+            bending=bending,
+            shears=shears,
+            div=div,
+            bound=bound,
+            ndim=ndim,
+            stream=stream_ptr(out),
+        )
+        ctx.save_for_backward(wgt)
+        ctx.args = (
+            voxel_size,
+            absolute,
+            membrane,
+            bending,
+            shears,
+            div,
+            bound,
+            ndim,
+        )
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        ginp = None
+        if ctx.needs_input_grad[0]:
+            (wgt,) = ctx.saved_tensors
+            vs, ab, mem, ben, sh, dv, bnd, ndim = ctx.args
+            ginp = grad_out.new_zeros(grad_out.shape)
+            _fb.flow_matvec_rls(
+                ginp,
+                grad_out.contiguous(),
+                wgt,
+                voxel_size=vs,
+                absolute=ab,
+                membrane=mem,
+                bending=ben,
+                shears=sh,
+                div=dv,
+                bound=bnd,
+                ndim=ndim,
+                stream=stream_ptr(ginp),
+            )
+        return ginp, None, None, None, None, None, None, None, None, None
+
+
+# ---------------------------------------------------------------------------
+# In-place accumulate ops (`out (+/-)= ...`)
+# ---------------------------------------------------------------------------
+#
+# These wrap the *in-place-only* C primitives `ff::{field,flow}_{matvec,diag}_
+# {add,sub}_`, which read-modify-write the caller's buffer. The out-of-place
+# spelling here is a `.clone()` followed by that very same primitive --
+# there is only one kernel, exactly as in jitfields.
+#
+# Autograd safety (see API_CONTRACT.md "In-place policy"):
+#
+#   The operation is `acc <- acc (+/-) g(...)`, i.e. *additive* in the
+#   tensor it mutates. Therefore
+#       d(acc +/- g)/d(acc) = I          (identity -- independent of acc)
+#       d(acc +/- g)/d(inp) = +/- L      (L linear & self-adjoint)
+#   Neither partial derivative depends on the *pre-mutation* value of `acc`, so
+#   nothing has to be saved for backward and overwriting `acc` destroys no
+#   information the backward pass needs. This is precisely why PyTorch itself
+#   ships `Tensor.add_` as a fully autograd-safe in-place op.
+#
+#   Note what is (deliberately) absent below: no `ctx.save_for_backward`. That
+#   absence *is* the safety argument, structurally. What IS required is
+#   `ctx.mark_dirty(acc)`, which bumps `acc`'s version counter so that if any
+#   other op had saved `acc` for *its* backward, autograd raises instead of
+#   silently returning a wrong gradient.
+#
+#   Torch's ordinary leaf rule still applies: a leaf tensor with
+#   `requires_grad=True` cannot be mutated in place (identically to
+#   `x.add_(y)`); use the out-of-place spelling for those.
+
+
+class _FieldMatvecAcc(torch.autograd.Function):
+    """``acc (+/-)= L @ inp`` in place; diff'able wrt ``acc``/``inp``."""
+
+    @staticmethod
+    def forward(
+        ctx,
+        acc,
+        inp,
+        voxel_size,
+        absolute,
+        membrane,
+        bending,
+        bound,
+        ndim,
+        sub,
+    ):
+        fn = _fb.field_submatvec_ if sub else _fb.field_addmatvec_
+        fn(
+            acc,
+            inp,
+            voxel_size=voxel_size,
+            absolute=absolute,
+            membrane=membrane,
+            bending=bending,
+            bound=bound,
+            ndim=ndim,
+            stream=stream_ptr(acc),
+        )
+        # Required for in-place autograd bookkeeping (version counter).
+        ctx.mark_dirty(acc)
+        ctx.args = (voxel_size, absolute, membrane, bending, bound, ndim)
+        ctx.sub = sub
+        return acc
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        # d/d(acc) is the identity, so the incoming gradient passes straight
+        # through -- no pre-mutation value of `acc` is involved.
+        gacc = grad_out if ctx.needs_input_grad[0] else None
+
+        ginp = None
+        if ctx.needs_input_grad[1]:
+            vs, ab, mem, ben, bnd, ndim = ctx.args
+            ginp = grad_out.new_zeros(grad_out.shape)
+            # L is self-adjoint, so the adjoint of `inp -> L @ inp` is itself.
+            _fb.field_matvec(
+                ginp,
+                grad_out.contiguous(),
+                voxel_size=vs,
+                absolute=ab,
+                membrane=mem,
+                bending=ben,
+                bound=bnd,
+                ndim=ndim,
+                stream=stream_ptr(ginp),
+            )
+            if ctx.sub:
+                ginp = ginp.neg()
+
+        return gacc, ginp, None, None, None, None, None, None, None
+
+
+class _FlowMatvecAcc(torch.autograd.Function):
+    """``acc (+/-)= L @ inp`` in place, flow; diff'able wrt acc/inp."""
+
+    @staticmethod
+    def forward(
+        ctx,
+        acc,
+        inp,
+        voxel_size,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        bound,
+        ndim,
+        sub,
+    ):
+        fn = _fb.flow_submatvec_ if sub else _fb.flow_addmatvec_
+        fn(
+            acc,
+            inp,
+            voxel_size=voxel_size,
+            absolute=absolute,
+            membrane=membrane,
+            bending=bending,
+            shears=shears,
+            div=div,
+            bound=bound,
+            ndim=ndim,
+            stream=stream_ptr(acc),
+        )
+        ctx.mark_dirty(acc)
+        ctx.args = (
+            voxel_size,
+            absolute,
+            membrane,
+            bending,
+            shears,
+            div,
+            bound,
+            ndim,
+        )
+        ctx.sub = sub
+        return acc
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        gacc = grad_out if ctx.needs_input_grad[0] else None
+
+        ginp = None
+        if ctx.needs_input_grad[1]:
+            vs, ab, mem, ben, sh, dv, bnd, ndim = ctx.args
+            ginp = grad_out.new_zeros(grad_out.shape)
+            _fb.flow_matvec(
+                ginp,
+                grad_out.contiguous(),
+                voxel_size=vs,
+                absolute=ab,
+                membrane=mem,
+                bending=ben,
+                shears=sh,
+                div=dv,
+                bound=bnd,
+                ndim=ndim,
+                stream=stream_ptr(ginp),
+            )
+            if ctx.sub:
+                ginp = ginp.neg()
+
+        return (
+            gacc,
+            ginp,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+
+
+class _FieldDiagAcc(torch.autograd.Function):
+    """``acc (+/-)= diag(L)`` in place; differentiable wrt ``acc``.
+
+    ``diag(L)`` is a function of the shape and the penalty weights only -- it
+    has no tensor input at all -- so the only gradient is the identity
+    pass-through wrt ``acc``.
+    """
+
+    @staticmethod
+    def forward(
+        ctx, acc, voxel_size, absolute, membrane, bending, bound, ndim, sub
+    ):
+        fn = _fb.field_subdiag_ if sub else _fb.field_adddiag_
+        fn(
+            acc,
+            voxel_size=voxel_size,
+            absolute=absolute,
+            membrane=membrane,
+            bending=bending,
+            bound=bound,
+            ndim=ndim,
+            stream=stream_ptr(acc),
+        )
+        ctx.mark_dirty(acc)
+        return acc
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        gacc = grad_out if ctx.needs_input_grad[0] else None
+        return gacc, None, None, None, None, None, None, None
+
+
+class _FieldKernelAcc(torch.autograd.Function):
+    """``acc (+/-)= K`` in place; differentiable wrt ``acc``.
+
+    ``K`` is the materialised Toeplitz stencil of the field regulariser: like
+    ``diag(L)`` it is a function of the penalty weights and the voxel size
+    only, with no tensor input, so the only gradient is the identity
+    pass-through wrt ``acc``. Same shape as :func:`field_kernel`'s output.
+    """
+
+    @staticmethod
+    def forward(
+        ctx, acc, voxel_size, absolute, membrane, bending, bound, ndim, sub
+    ):
+        fn = _fb.field_subkernel_ if sub else _fb.field_addkernel_
+        fn(
+            acc,
+            voxel_size=voxel_size,
+            absolute=absolute,
+            membrane=membrane,
+            bending=bending,
+            bound=bound,
+            ndim=ndim,
+            stream=stream_ptr(acc),
+        )
+        ctx.mark_dirty(acc)
+        return acc
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        gacc = grad_out if ctx.needs_input_grad[0] else None
+        return gacc, None, None, None, None, None, None, None
+
+
+class _FlowKernelAcc(torch.autograd.Function):
+    """``acc (+/-)= K`` in place (flow); differentiable wrt ``acc``."""
+
+    @staticmethod
+    def forward(
+        ctx,
+        acc,
+        voxel_size,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        bound,
+        ndim,
+        sub,
+    ):
+        fn = _fb.flow_subkernel_ if sub else _fb.flow_addkernel_
+        fn(
+            acc,
+            voxel_size=voxel_size,
+            absolute=absolute,
+            membrane=membrane,
+            bending=bending,
+            shears=shears,
+            div=div,
+            bound=bound,
+            ndim=ndim,
+            stream=stream_ptr(acc),
+        )
+        ctx.mark_dirty(acc)
+        return acc
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        gacc = grad_out if ctx.needs_input_grad[0] else None
+        return (gacc,) + (None,) * 9
+
+
+class _FlowDiagAcc(torch.autograd.Function):
+    """``acc (+/-)= diag(L)`` in place (flow); differentiable wrt ``acc``."""
+
+    @staticmethod
+    def forward(
+        ctx,
+        acc,
+        voxel_size,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        bound,
+        ndim,
+        sub,
+    ):
+        fn = _fb.flow_subdiag_ if sub else _fb.flow_adddiag_
+        fn(
+            acc,
+            voxel_size=voxel_size,
+            absolute=absolute,
+            membrane=membrane,
+            bending=bending,
+            shears=shears,
+            div=div,
+            bound=bound,
+            ndim=ndim,
+            stream=stream_ptr(acc),
+        )
+        ctx.mark_dirty(acc)
+        return acc
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        gacc = grad_out if ctx.needs_input_grad[0] else None
+        return gacc, None, None, None, None, None, None, None, None, None
+
+
+def _field_matvec_acc(
+    inp,
+    field,
+    absolute,
+    membrane,
+    bending,
+    voxel_size,
+    bound,
+    ndim,
+    sub,
+    inplace,
+):
+    """Single entry point behind the four field-matvec accumulate spellings."""
+    check_dtype(inp)
+    check_dtype(field)
+    channels = field.shape[-1]
+    acc = inp if inplace else inp.clone()
+    return _FieldMatvecAcc.apply(
+        acc,
+        field,
+        _voxel(voxel_size, ndim),
+        _per_channel(absolute, channels, "absolute"),
+        _per_channel(membrane, channels, "membrane"),
+        _per_channel(bending, channels, "bending"),
+        as_bound(bound),
+        ndim,
+        sub,
+    )
+
+
+def _flow_matvec_acc(
+    inp,
+    flow,
+    absolute,
+    membrane,
+    bending,
+    shears,
+    div,
+    voxel_size,
+    bound,
+    ndim,
+    sub,
+    inplace,
+):
+    """Single entry point behind the four flow-matvec accumulate spellings."""
+    check_dtype(inp)
+    check_dtype(flow)
+    acc = inp if inplace else inp.clone()
+    return _FlowMatvecAcc.apply(
+        acc,
+        flow,
+        _voxel(voxel_size, ndim),
+        float(absolute),
+        float(membrane),
+        float(bending),
+        float(shears),
+        float(div),
+        as_bound(bound),
+        ndim,
+        sub,
+    )
+
+
+def _field_diag_acc(
+    inp, absolute, membrane, bending, voxel_size, bound, ndim, sub, inplace
+):
+    """Single entry point behind the four field-diag accumulate spellings."""
+    check_dtype(inp)
+    channels = inp.shape[-1]
+    acc = inp if inplace else inp.clone()
+    return _FieldDiagAcc.apply(
+        acc,
+        _voxel(voxel_size, ndim),
+        _per_channel(absolute, channels, "absolute"),
+        _per_channel(membrane, channels, "membrane"),
+        _per_channel(bending, channels, "bending"),
+        as_bound(bound),
+        ndim,
+        sub,
+    )
+
+
+def _flow_diag_acc(
+    inp,
+    absolute,
+    membrane,
+    bending,
+    shears,
+    div,
+    voxel_size,
+    bound,
+    ndim,
+    sub,
+    inplace,
+):
+    """Single entry point behind the four flow-diag accumulate spellings."""
+    check_dtype(inp)
+    acc = inp if inplace else inp.clone()
+    return _FlowDiagAcc.apply(
+        acc,
+        _voxel(voxel_size, ndim),
+        float(absolute),
+        float(membrane),
+        float(bending),
+        float(shears),
+        float(div),
+        as_bound(bound),
+        ndim,
+        sub,
+    )
+
+
+def _field_kernel_acc(
+    inp, absolute, membrane, bending, voxel_size, bound, ndim, sub, inplace
+):
+    """Single entry point behind the four field-kernel accumulate spellings."""
+    check_dtype(inp)
+    channels = inp.shape[-1]
+    acc = inp if inplace else inp.clone()
+    return _FieldKernelAcc.apply(
+        acc,
+        _voxel(voxel_size, ndim),
+        _per_channel(absolute, channels, "absolute"),
+        _per_channel(membrane, channels, "membrane"),
+        _per_channel(bending, channels, "bending"),
+        as_bound(bound),
+        ndim,
+        sub,
+    )
+
+
+def _flow_kernel_acc(
+    inp,
+    absolute,
+    membrane,
+    bending,
+    shears,
+    div,
+    voxel_size,
+    bound,
+    ndim,
+    sub,
+    inplace,
+):
+    """Single entry point behind the four flow-kernel accumulate spellings."""
+    check_dtype(inp)
+    acc = inp if inplace else inp.clone()
+    return _FlowKernelAcc.apply(
+        acc,
+        _voxel(voxel_size, ndim),
+        float(absolute),
+        float(membrane),
+        float(bending),
+        float(shears),
+        float(div),
+        as_bound(bound),
+        ndim,
+        sub,
+    )
+
+
+def field_matvec(
+    inp: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Apply the field regulariser (differentiable wrt ``inp``)."""
+    check_dtype(inp)
+    channels = inp.shape[-1]
+    return _FieldMatvec.apply(
+        inp,
+        _voxel(voxel_size, ndim),
+        _per_channel(absolute, channels, "absolute"),
+        _per_channel(membrane, channels, "membrane"),
+        _per_channel(bending, channels, "bending"),
+        as_bound(bound),
+        ndim,
+    )
+
+
+def flow_matvec(
+    inp: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Apply the flow regulariser (scalar penalties; diff'able wrt inp).
+
+    ``shears`` (Lamé mu) and ``div`` (Lamé lambda) add the linear-elastic
+    penalty coupling the flow channels.
+    """
+    check_dtype(inp)
+    return _FlowMatvec.apply(
+        inp,
+        _voxel(voxel_size, ndim),
+        float(absolute),
+        float(membrane),
+        float(bending),
+        float(shears),
+        float(div),
+        as_bound(bound),
+        ndim,
+    )
+
+
+def _field_channels(channels, *penalties) -> int:
+    """Infer C from an explicit value or the per-channel penalty lengths."""
+    if channels is not None:
+        return int(channels)
+    for p in penalties:
+        if p is not None and not isinstance(p, (int, float)):
+            return len(p)
+    return 1
+
+
+def field_kernel(
+    ndim: int,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    channels: int | None = None,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    dtype: torch.dtype = torch.float64,
+    device=None,
+) -> Tensor:
+    """Materialise the field regulariser's per-channel Toeplitz stencil.
+
+    Returns the small centred kernel that, convolved with a field, reproduces
+    :func:`field_matvec`. The shape is ``(*k, C)`` (channels are independent),
+    with ``k`` the stencil width per spatial dim: 1 (absolute), 3 (membrane) or
+    5 (bending). ``C`` is ``channels`` if given, else inferred from the
+    per-channel penalty lengths (default 1). Not differentiable.
+    """
+    ndim = int(ndim)
+    channels = _field_channels(channels, absolute, membrane, bending)
+    if bending is not None:
+        width = 5
+    elif membrane is not None:
+        width = 3
+    else:
+        width = 1
+    out = torch.zeros(
+        tuple([width] * ndim + [channels]), dtype=dtype, device=device
+    )
+    _fb.field_kernel(
+        out,
+        voxel_size=_voxel(voxel_size, ndim),
+        absolute=_per_channel(absolute, channels, "absolute"),
+        membrane=_per_channel(membrane, channels, "membrane"),
+        bending=_per_channel(bending, channels, "bending"),
+        bound=as_bound(bound),
+        ndim=ndim,
+        stream=stream_ptr(out),
+    )
+    return out
+
+
+def field_diag(
+    shape: Sequence[int],
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+    dtype: torch.dtype = torch.float64,
+    device=None,
+) -> Tensor:
+    """Diagonal (preconditioner) of the field regulariser, shaped ``shape``."""
+    out = torch.zeros(tuple(int(s) for s in shape), dtype=dtype, device=device)
+    channels = out.shape[-1]
+    _fb.field_diag(
+        out,
+        voxel_size=_voxel(voxel_size, ndim),
+        absolute=_per_channel(absolute, channels, "absolute"),
+        membrane=_per_channel(membrane, channels, "membrane"),
+        bending=_per_channel(bending, channels, "bending"),
+        bound=as_bound(bound),
+        ndim=ndim,
+        stream=stream_ptr(out),
+    )
+    return out
+
+
+def field_relax(
+    field: Tensor,
+    hes: Tensor,
+    grd: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+    nb_iter: int = 1,
+) -> Tensor:
+    """Refine ``field`` in place with ``nb_iter`` relaxation sweeps.
+
+    Solves ``(H + L) x = g`` with per-voxel compact-symmetric Hessian ``hes``
+    (packed ``C*(C+1)/2`` last axis), the per-channel field regulariser ``L``
+    (same penalties as :func:`field_matvec`) and gradient ``grd``. Not
+    differentiable (an in-place iterative solver); ``field`` is the warm
+    start, mutated and returned.
+    """
+    check_dtype(field)
+    channels = field.shape[-1]
+    _fb.field_relax(
+        field,
+        hes.contiguous(),
+        grd.contiguous(),
+        voxel_size=_voxel(voxel_size, ndim),
+        absolute=_per_channel(absolute, channels, "absolute"),
+        membrane=_per_channel(membrane, channels, "membrane"),
+        bending=_per_channel(bending, channels, "bending"),
+        bound=as_bound(bound),
+        ndim=ndim,
+        nb_iter=int(nb_iter),
+        stream=stream_ptr(field),
+    )
+    return field
+
+
+def field_matvec_rls(
+    inp: Tensor,
+    wgt: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """RLS/JRLS-weighted variant of :func:`field_matvec`.
+
+    ``wgt`` has shape ``(*batch, *spatial, 1)`` for a single weight shared
+    across all channels (JRLS), or ``(*batch, *spatial, C)`` for a genuine
+    per-channel weight (RLS, ``C`` matching ``inp``'s channel count) --
+    the trailing dimension of ``wgt`` selects which mode is used.
+    Differentiable wrt ``inp`` (``wgt`` is treated as fixed).
+    """
+    check_dtype(inp)
+    channels = inp.shape[-1]
+    return _FieldMatvecRLS.apply(
+        inp,
+        wgt,
+        _voxel(voxel_size, ndim),
+        _per_channel(absolute, channels, "absolute"),
+        _per_channel(membrane, channels, "membrane"),
+        _per_channel(bending, channels, "bending"),
+        as_bound(bound),
+        ndim,
+    )
+
+
+def field_diag_rls(
+    wgt: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    channels: int | None = None,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+    dtype: torch.dtype = torch.float64,
+    device=None,
+) -> Tensor:
+    """Diagonal (preconditioner) of :func:`field_matvec_rls`.
+
+    ``wgt`` selects JRLS (trailing dim 1) vs RLS (trailing dim ``C``), same
+    as :func:`field_matvec_rls`. The output channel count ``C`` is taken
+    from ``channels`` if given, else from ``wgt``'s trailing dimension when
+    it is not 1 (RLS), else inferred from the per-channel penalty lengths
+    (default 1), exactly as :func:`field_kernel` does. Not differentiable.
+    """
+    if channels is None:
+        channels = (
+            wgt.shape[-1]
+            if wgt.shape[-1] != 1
+            else _field_channels(None, absolute, membrane, bending)
+        )
+    out = torch.zeros(
+        tuple(wgt.shape[:-1]) + (channels,),
+        dtype=dtype,
+        device=device if device is not None else wgt.device,
+    )
+    _fb.field_diag_rls(
+        out,
+        wgt,
+        voxel_size=_voxel(voxel_size, ndim),
+        absolute=_per_channel(absolute, channels, "absolute"),
+        membrane=_per_channel(membrane, channels, "membrane"),
+        bending=_per_channel(bending, channels, "bending"),
+        bound=as_bound(bound),
+        ndim=ndim,
+        stream=stream_ptr(out),
+    )
+    return out
+
+
+def field_relax_rls(
+    field: Tensor,
+    hes: Tensor,
+    grd: Tensor,
+    wgt: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+    nb_iter: int = 1,
+) -> Tensor:
+    """RLS/JRLS-weighted variant of :func:`field_relax`.
+
+    Refines ``field`` in place with ``nb_iter`` relaxation sweeps of
+    ``(H + L(w)) x = g``, same ``wgt`` conventions as
+    :func:`field_matvec_rls`. Not differentiable (an in-place iterative
+    solver); ``field`` is the warm start, mutated and returned.
+    """
+    check_dtype(field)
+    channels = field.shape[-1]
+    _fb.field_relax_rls(
+        field,
+        hes.contiguous(),
+        grd.contiguous(),
+        wgt.contiguous(),
+        voxel_size=_voxel(voxel_size, ndim),
+        absolute=_per_channel(absolute, channels, "absolute"),
+        membrane=_per_channel(membrane, channels, "membrane"),
+        bending=_per_channel(bending, channels, "bending"),
+        bound=as_bound(bound),
+        ndim=ndim,
+        nb_iter=int(nb_iter),
+        stream=stream_ptr(field),
+    )
+    return field
+
+
+def flow_diag(
+    shape: Sequence[int],
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+    dtype: torch.dtype = torch.float64,
+    device=None,
+) -> Tensor:
+    """Diagonal (preconditioner) of the flow regulariser, shaped ``shape``."""
+    out = torch.zeros(tuple(int(s) for s in shape), dtype=dtype, device=device)
+    _fb.flow_diag(
+        out,
+        voxel_size=_voxel(voxel_size, ndim),
+        absolute=float(absolute),
+        membrane=float(membrane),
+        bending=float(bending),
+        shears=float(shears),
+        div=float(div),
+        bound=as_bound(bound),
+        ndim=ndim,
+        stream=stream_ptr(out),
+    )
+    return out
+
+
+def flow_kernel(
+    ndim: int,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    dtype: torch.dtype = torch.float64,
+    device=None,
+) -> Tensor:
+    """Materialise the flow regulariser's Toeplitz convolution stencil.
+
+    Returns the small centred kernel that, convolved with a flow field,
+    reproduces :func:`flow_matvec`. The shape is ``(*k, ndim)`` for the
+    per-channel vector stencil, or ``(*k, ndim, ndim)`` when ``shears``/``div``
+    select the cross-channel (Lamé) matrix stencil, where ``k`` is the stencil
+    width per spatial dim: 1 (absolute only), 3 (membrane/Lamé) or 5 (bending).
+    Not differentiable (it builds from a shape descriptor, not an input field).
+    """
+    ndim = int(ndim)
+    is_matrix = shears != 0.0 or div != 0.0
+    if shears == div == membrane == bending == 0.0:
+        width = 1
+    elif bending == 0.0:
+        width = 3
+    else:
+        width = 5
+    shape = [width] * ndim + [ndim]
+    if is_matrix:
+        shape += [ndim]
+    out = torch.zeros(tuple(shape), dtype=dtype, device=device)
+    _fb.flow_kernel(
+        out,
+        voxel_size=_voxel(voxel_size, ndim),
+        absolute=float(absolute),
+        membrane=float(membrane),
+        bending=float(bending),
+        shears=float(shears),
+        div=float(div),
+        bound=as_bound(bound),
+        ndim=ndim,
+        stream=stream_ptr(out),
+    )
+    return out
+
+
+def flow_relax(
+    flow: Tensor,
+    hes: Tensor,
+    grd: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+    nb_iter: int = 1,
+) -> Tensor:
+    """Refine ``flow`` in place with ``nb_iter`` relaxation sweeps.
+
+    Solves ``(H + L) x = g`` with per-voxel symmetric Hessian ``hes`` and
+    gradient ``grd``. Not differentiable (an in-place iterative solver);
+    ``flow`` is the warm start, mutated and returned.
+    """
+    check_dtype(flow)
+    _fb.flow_relax(
+        flow,
+        hes.contiguous(),
+        grd.contiguous(),
+        voxel_size=_voxel(voxel_size, ndim),
+        absolute=float(absolute),
+        membrane=float(membrane),
+        bending=float(bending),
+        shears=float(shears),
+        div=float(div),
+        bound=as_bound(bound),
+        ndim=ndim,
+        nb_iter=int(nb_iter),
+        stream=stream_ptr(flow),
+    )
+    return flow
+
+
+def flow_matvec_rls(
+    inp: Tensor,
+    wgt: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """RLS/JRLS-weighted variant of :func:`flow_matvec`.
+
+    ``wgt`` has shape ``(*batch, *spatial, 1)``: unlike the field family, the
+    flow weighting is always *joint* -- the trailing axis of a flow field
+    holds the components of one displacement vector, so a single weight is
+    shared across them. Differentiable wrt ``inp`` (``wgt`` is treated as
+    fixed).
+
+    ``bending`` is **not supported** with weighting (no weighted bending
+    kernel exists, as in ``jitfields``); a non-zero value raises.
+    """
+    check_dtype(inp)
+    return _FlowMatvecRLS.apply(
+        inp,
+        wgt,
+        _voxel(voxel_size, ndim),
+        float(absolute),
+        float(membrane),
+        float(bending),
+        float(shears),
+        float(div),
+        as_bound(bound),
+        ndim,
+    )
+
+
+def flow_diag_rls(
+    wgt: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+    dtype: torch.dtype = torch.float64,
+    device=None,
+) -> Tensor:
+    """Diagonal (preconditioner) of :func:`flow_matvec_rls`.
+
+    Unlike plain :func:`flow_diag`, which builds from a *shape*, this one is
+    driven by the weight map: the output is ``wgt.shape[:-1] + (ndim,)``,
+    since a flow field's channel count is ``ndim``. Same ``wgt`` conventions
+    as :func:`flow_matvec_rls`. Not differentiable.
+    """
+    out = torch.zeros(
+        tuple(wgt.shape[:-1]) + (int(ndim),),
+        dtype=dtype,
+        device=device if device is not None else wgt.device,
+    )
+    _fb.flow_diag_rls(
+        out,
+        wgt,
+        voxel_size=_voxel(voxel_size, ndim),
+        absolute=float(absolute),
+        membrane=float(membrane),
+        bending=float(bending),
+        shears=float(shears),
+        div=float(div),
+        bound=as_bound(bound),
+        ndim=ndim,
+        stream=stream_ptr(out),
+    )
+    return out
+
+
+def flow_relax_rls(
+    flow: Tensor,
+    hes: Tensor,
+    grd: Tensor,
+    wgt: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+    nb_iter: int = 1,
+) -> Tensor:
+    """RLS/JRLS-weighted variant of :func:`flow_relax`.
+
+    Refines ``flow`` in place with ``nb_iter`` relaxation sweeps of
+    ``(H + L(w)) x = g``, same ``wgt`` conventions as
+    :func:`flow_matvec_rls`. Not differentiable (an in-place iterative
+    solver); ``flow`` is the warm start, mutated and returned.
+    """
+    check_dtype(flow)
+    _fb.flow_relax_rls(
+        flow,
+        hes.contiguous(),
+        grd.contiguous(),
+        wgt.contiguous(),
+        voxel_size=_voxel(voxel_size, ndim),
+        absolute=float(absolute),
+        membrane=float(membrane),
+        bending=float(bending),
+        shears=float(shears),
+        div=float(div),
+        bound=as_bound(bound),
+        ndim=ndim,
+        nb_iter=int(nb_iter),
+        stream=stream_ptr(flow),
+    )
+    return flow
+
+
+def flow_precond(
+    mat: Tensor,
+    vec: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Apply the preconditioner ``(M + diag(R)) \\ vec``.
+
+    ``M`` is the per-voxel compact-symmetric matrix ``mat``; ``diag(R)`` is the
+    diagonal of the flow regulariser (same penalties as :func:`flow_matvec`).
+    A composition of :func:`flow_diag` and :func:`sym_solve` — no new kernel;
+    differentiable wrt ``vec`` (through the self-adjoint solve).
+    """
+    check_dtype(vec)
+    diag = flow_diag(
+        vec.shape,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size=voxel_size,
+        bound=bound,
+        ndim=ndim,
+        dtype=vec.dtype,
+        device=vec.device,
+    )
+    return sym_solve(mat, vec, diag)
+
+
+def flow_forward(
+    mat: Tensor,
+    vec: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Apply the forward matrix-vector product ``(M + R) @ vec``.
+
+    ``M`` is the per-voxel compact-symmetric matrix ``mat`` and ``R`` the flow
+    regulariser operator. A composition of :func:`sym_matvec` and
+    :func:`flow_matvec` — no new kernel; differentiable wrt ``mat``/``vec``.
+    """
+    check_dtype(vec)
+    out = sym_matvec(mat, vec)
+    out = out + flow_matvec(
+        vec,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size=voxel_size,
+        bound=bound,
+        ndim=ndim,
+    )
+    return out
+
+
+# --- accumulate variants -------------------------------------------------
+#
+# jitfields' ``_add`` / ``_sub`` (fresh array) and trailing-underscore in-place
+# forms, as thin compositions ``inp ± op(...)``. The fresh forms compose the
+# autograd flow_matvec, so they stay differentiable; the in-place forms use
+# augmented assignment (``add_``/``sub_``), intended for non-autograd use.
+
+
+def flow_addmatvec(
+    inp: Tensor,
+    flow: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp + L @ flow`` as a **new** tensor.
+
+    Clones ``inp`` and applies the in-place accumulate primitive to the
+    clone -- one kernel, no temporary for the regulariser result.
+    Differentiable wrt both ``inp`` and ``flow``.
+    """
+    return _flow_matvec_acc(
+        inp,
+        flow,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=False,
+    )
+
+
+def flow_submatvec(
+    inp: Tensor,
+    flow: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp - L @ flow`` as a **new** tensor.
+
+    Clones ``inp`` and applies the in-place accumulate primitive to the
+    clone -- one kernel, no temporary for the regulariser result.
+    Differentiable wrt both ``inp`` and ``flow``.
+    """
+    return _flow_matvec_acc(
+        inp,
+        flow,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=False,
+    )
+
+
+def flow_addmatvec_(
+    inp: Tensor,
+    flow: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place ``inp += L @ flow``; returns ``inp``.
+
+    Calls the fused in-place C primitive directly. Autograd-safe (the op
+    is additive in ``inp``, so backward needs no pre-mutation value); a
+    leaf tensor requiring grad still cannot be mutated, as with
+    ``Tensor.add_``.
+    """
+    return _flow_matvec_acc(
+        inp,
+        flow,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=True,
+    )
+
+
+def flow_submatvec_(
+    inp: Tensor,
+    flow: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place ``inp -= L @ flow``; returns ``inp``.
+
+    Calls the fused in-place C primitive directly. Autograd-safe (the op
+    is additive in ``inp``, so backward needs no pre-mutation value); a
+    leaf tensor requiring grad still cannot be mutated, as with
+    ``Tensor.add_``.
+    """
+    return _flow_matvec_acc(
+        inp,
+        flow,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=True,
+    )
+
+
+def flow_adddiag(
+    inp: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp + diag(L)`` as a **new** tensor, shaped like ``inp``.
+
+    Clones ``inp`` and applies the in-place accumulate primitive to the
+    clone. Differentiable wrt ``inp``.
+    """
+    return _flow_diag_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=False,
+    )
+
+
+def flow_subdiag(
+    inp: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp - diag(L)`` as a **new** tensor, shaped like ``inp``.
+
+    Clones ``inp`` and applies the in-place accumulate primitive to the
+    clone. Differentiable wrt ``inp``.
+    """
+    return _flow_diag_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=False,
+    )
+
+
+def flow_adddiag_(
+    inp: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place ``inp += diag(L)``; returns ``inp``.
+
+    Calls the fused in-place C primitive directly. Autograd-safe (the op
+    is additive in ``inp``); a leaf tensor requiring grad still cannot be
+    mutated, as with ``Tensor.add_``.
+    """
+    return _flow_diag_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=True,
+    )
+
+
+def flow_subdiag_(
+    inp: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place ``inp -= diag(L)``; returns ``inp``.
+
+    Calls the fused in-place C primitive directly. Autograd-safe (the op
+    is additive in ``inp``); a leaf tensor requiring grad still cannot be
+    mutated, as with ``Tensor.add_``.
+    """
+    return _flow_diag_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=True,
+    )
+
+
+def field_precond(
+    mat: Tensor,
+    vec: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Apply the preconditioner ``(M + diag(R)) \\ vec`` (diff wrt vec)."""
+    check_dtype(vec)
+    diag = field_diag(
+        vec.shape,
+        absolute,
+        membrane,
+        bending,
+        voxel_size=voxel_size,
+        bound=bound,
+        ndim=ndim,
+        dtype=vec.dtype,
+        device=vec.device,
+    )
+    return sym_solve(mat, vec, diag)
+
+
+def field_forward(
+    mat: Tensor,
+    vec: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Apply ``(M + R) @ vec`` (differentiable wrt ``mat`` and ``vec``)."""
+    check_dtype(vec)
+    out = sym_matvec(mat, vec)
+    out = out + field_matvec(
+        vec,
+        absolute,
+        membrane,
+        bending,
+        voxel_size=voxel_size,
+        bound=bound,
+        ndim=ndim,
+    )
+    return out
+
+
+def field_addmatvec(
+    inp: Tensor,
+    field: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp + L @ field`` as a **new** tensor.
+
+    Clones ``inp`` and applies the in-place accumulate primitive to the
+    clone -- one kernel, no temporary for the regulariser result.
+    Differentiable wrt both ``inp`` and ``field``.
+    """
+    return _field_matvec_acc(
+        inp,
+        field,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=False,
+    )
+
+
+def field_submatvec(
+    inp: Tensor,
+    field: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp - L @ field`` as a **new** tensor.
+
+    Clones ``inp`` and applies the in-place accumulate primitive to the
+    clone -- one kernel, no temporary for the regulariser result.
+    Differentiable wrt both ``inp`` and ``field``.
+    """
+    return _field_matvec_acc(
+        inp,
+        field,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=False,
+    )
+
+
+def field_addmatvec_(
+    inp: Tensor,
+    field: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place ``inp += L @ field``; returns ``inp``.
+
+    Calls the fused in-place C primitive directly. Autograd-safe (the op
+    is additive in ``inp``, so backward needs no pre-mutation value); a
+    leaf tensor requiring grad still cannot be mutated, as with
+    ``Tensor.add_``.
+    """
+    return _field_matvec_acc(
+        inp,
+        field,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=True,
+    )
+
+
+def field_submatvec_(
+    inp: Tensor,
+    field: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place ``inp -= L @ field``; returns ``inp``.
+
+    Calls the fused in-place C primitive directly. Autograd-safe (the op
+    is additive in ``inp``, so backward needs no pre-mutation value); a
+    leaf tensor requiring grad still cannot be mutated, as with
+    ``Tensor.add_``.
+    """
+    return _field_matvec_acc(
+        inp,
+        field,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=True,
+    )
+
+
+def field_adddiag(
+    inp: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp + diag(L)`` as a **new** tensor, shaped like ``inp``.
+
+    Clones ``inp`` and applies the in-place accumulate primitive to the
+    clone. Differentiable wrt ``inp``.
+    """
+    return _field_diag_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=False,
+    )
+
+
+def field_subdiag(
+    inp: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp - diag(L)`` as a **new** tensor, shaped like ``inp``.
+
+    Clones ``inp`` and applies the in-place accumulate primitive to the
+    clone. Differentiable wrt ``inp``.
+    """
+    return _field_diag_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=False,
+    )
+
+
+def field_adddiag_(
+    inp: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place ``inp += diag(L)``; returns ``inp``.
+
+    Calls the fused in-place C primitive directly. Autograd-safe (the op
+    is additive in ``inp``); a leaf tensor requiring grad still cannot be
+    mutated, as with ``Tensor.add_``.
+    """
+    return _field_diag_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=True,
+    )
+
+
+def field_subdiag_(
+    inp: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place ``inp -= diag(L)``; returns ``inp``.
+
+    Calls the fused in-place C primitive directly. Autograd-safe (the op
+    is additive in ``inp``); a leaf tensor requiring grad still cannot be
+    mutated, as with ``Tensor.add_``.
+    """
+    return _field_diag_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stencil (kernel) accumulate variants
+# ---------------------------------------------------------------------------
+#
+# The same `inp +/- op(...)` pattern as the *_adddiag / *_subdiag family, for
+# the materialised Toeplitz stencil rather than the diagonal. `inp` is shaped
+# like :func:`field_kernel` / :func:`flow_kernel`'s output, and the stencil
+# depends on no tensor input, so these are differentiable wrt `inp` by
+# identity pass-through -- exactly like the diag forms.
+
+
+def field_addkernel(
+    inp: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp + K`` as a **new** tensor, shaped like ``inp``.
+
+    ``K`` is the field regulariser's stencil (see :func:`field_kernel`, whose
+    output shape ``inp`` must match). Differentiable wrt ``inp``.
+    """
+    return _field_kernel_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=False,
+    )
+
+
+def field_subkernel(
+    inp: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp - K`` as a **new** tensor. Differentiable wrt ``inp``."""
+    return _field_kernel_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=False,
+    )
+
+
+def field_addkernel_(
+    inp: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place: ``inp += K``. Mutates and returns ``inp``."""
+    return _field_kernel_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=True,
+    )
+
+
+def field_subkernel_(
+    inp: Tensor,
+    absolute=None,
+    membrane=None,
+    bending=None,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place: ``inp -= K``. Mutates and returns ``inp``."""
+    return _field_kernel_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=True,
+    )
+
+
+def flow_addkernel(
+    inp: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp + K`` as a **new** tensor, shaped like ``inp``.
+
+    ``K`` is the flow regulariser's stencil (see :func:`flow_kernel`, whose
+    output shape ``inp`` must match). Differentiable wrt ``inp``.
+    """
+    return _flow_kernel_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=False,
+    )
+
+
+def flow_subkernel(
+    inp: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """Return ``inp - K`` as a **new** tensor. Differentiable wrt ``inp``."""
+    return _flow_kernel_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=False,
+    )
+
+
+def flow_addkernel_(
+    inp: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place: ``inp += K``. Mutates and returns ``inp``."""
+    return _flow_kernel_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=False,
+        inplace=True,
+    )
+
+
+def flow_subkernel_(
+    inp: Tensor,
+    absolute: float = 0.0,
+    membrane: float = 0.0,
+    bending: float = 0.0,
+    shears: float = 0.0,
+    div: float = 0.0,
+    *,
+    voxel_size=None,
+    bound: int | str = "dct2",
+    ndim: int = 1,
+) -> Tensor:
+    """In place: ``inp -= K``. Mutates and returns ``inp``."""
+    return _flow_kernel_acc(
+        inp,
+        absolute,
+        membrane,
+        bending,
+        shears,
+        div,
+        voxel_size,
+        bound,
+        ndim,
+        sub=True,
+        inplace=True,
+    )

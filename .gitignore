@@ -129,4 +129,4 @@ dmypy.json
 .pyre/
 
 # versioningit-generated version file
-fastfields/auto/_version.py
+fastfields/helpers/_version.py

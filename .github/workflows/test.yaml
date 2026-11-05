@@ -7,63 +7,53 @@ on:
 permissions:
   contents: read
 jobs:
+  # This repo used to carry its own ~60-line copy of this job: a matrix, three
+  # per-OS clang toolchain steps, and `git+https://...@main` installs of the
+  # sibling wrapper repos, because `tests/test_auto.py` imports
+  # fastfields.numpy and fastfields.torch and they lived elsewhere. All five
+  # wrappers now ship from this repo, so the sibling installs are gone -- the
+  # suites exercise each other's *source* rather than each other's last
+  # release, which is the cross-repo version-skew window fastfields#3 was
+  # opened about -- and what is left is identical to what numpy, torch, cupy
+  # and helpers each called. So call it, instead of keeping a fifth copy.
+  #
+  # The matrix, the non-shallow checkout that versioningit needs, the clang
+  # toolchain and the fastfields-dlpack install all live in the reusable
+  # workflow. The array backends come from this distribution's `test` extra
+  # (pytest + numpy + torch), which the reusable workflow's
+  # `pip install ".[test]"` picks up; cupy is deliberately absent, so its
+  # runtime tests skip and `import fastfields.cupy` is expected to refuse the
+  # CPU-lane dlpack build (tests/test_cupy.py asserts exactly that).
   pytest:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]  # windows red-by-design -> fastfields-dlpack#8
-        python-version: ["3.9", "3.11", "3.12"]
-    # The C++ build that fastfields-dlpack needs is driven by clang++ on every
-    # OS; the per-OS steps below make sure a clang++ is on PATH.
-    env:
-      CXX: clang++
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          # versioningit derives the version from `git describe`, which needs
-          # the tags -- a shallow (depth 1) checkout hides them and the version
-          # silently falls back to "0+unknown".
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install build toolchain (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y clang
-      - name: Install build toolchain (macOS)
-        if: runner.os == 'macOS'
-        # clang++ ships with the Xcode Command Line Tools, already present on
-        # the macOS runners, so there is nothing to install here.
-        run: clang++ --version
-      - name: Install build toolchain (Windows)
-        if: runner.os == 'Windows'
-        # The C++ Makefiles are now Windows-portable: clang++ builds a .dll
-        # with no -fPIC/-soname, and the recipes run under git bash (shell:
-        # bash). LLVM provides clang++; make drives the Makefiles. This leg was
-        # red by design before that work landed; it may still need a live-CI
-        # iteration on the first real Windows run (DLL-search / import-library
-        # specifics can only be confirmed on the runner).
-        run: choco install -y llvm make
-      # pip *does* run `git submodule update --init --recursive` for a git+
-      # install, so this works as long as the pinned submodule chain on
-      # fastfields-dlpack@main is healthy. Once the wheel index carries a
-      # release, prefer installing from there instead.
-      - name: Install fastfields-dlpack from source
-        run: pip install "fastfields-dlpack @ git+https://github.com/fastfields/fastfields-dlpack@main"
-      - name: Install sibling wrapper packages (numpy, torch)
-        # test_auto.py imports fastfields.numpy / fastfields.torch, so the meta
-        # package needs the sibling wrappers installed. They resolve over public
-        # HTTPS now that the submodule URLs are HTTPS (fastfields-lib#13). cupy is
-        # not installed (needs a CUDA GPU); tests that need it should skip.
-        run: |
-          pip install "fastfields-numpy @ git+https://github.com/fastfields/fastfields-numpy@main"
-          pip install "fastfields-torch @ git+https://github.com/fastfields/fastfields-torch@main"
-      - name: Install package + test deps
-        run: pip install ".[test]"
-      - name: Run pytest
-        run: cd /tmp && python -m pytest ${{ github.workspace }}/tests -q
+    uses: fastfields/.github/.github/workflows/python-test.yml@main
+    with:
+      # The shared defaults are '["ubuntu-latest", "macos-latest"]' x
+      # '["3.9", "3.11", "3.12"]'. Both axes are overridden here, for reasons
+      # that are about the runner images rather than about this repo -- stated
+      # in full because an unexplained matrix override is the kind of thing
+      # that gets "tidied" back to the default:
+      #
+      # * `ubuntu-latest` has moved to Ubuntu 26.04, and
+      #   actions/python-versions publishes no 3.9 build for it (3.9.25 exists
+      #   for linux-22.04 and linux-24.04 only). The 3.9 leg therefore fails
+      #   in `actions/setup-python` before it can install a Python at all.
+      #   24.04 is the newest image this distribution's declared floor
+      #   (`requires-python = ">=3.9"`) can actually be tested on.
+      # * macOS is dropped. The org's macOS runners did not pick these jobs
+      #   up -- three legs sat queued and were cancelled after 15 minutes --
+      #   and the 3.9 x macOS cell could not have run regardless, since
+      #   actions/python-versions ships darwin 3.9 for x64 only while
+      #   `macos-latest` is arm64. It also buys the least here: this
+      #   distribution is a single `py3-none-any` wheel with no compiled
+      #   content, so the Python-version axis is the one that finds bugs. The
+      #   platform axis matters for `fastfields-dlpack`, which is where the
+      #   compiled artifacts live and where that leg belongs; its own release
+      #   workflow already excludes macOS for a separate reason
+      #   (fastfields-dlpack#8).
+      #
+      # Both are overrides of shared defaults that are stale for every
+      # caller, not just this one. Fixing the defaults is a separate call
+      # about which Pythons and platforms the project supports.
+      os: '["ubuntu-24.04"]'
+      python-versions: '["3.9", "3.11", "3.12"]'
+    secrets: inherit

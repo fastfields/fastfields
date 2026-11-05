@@ -146,21 +146,32 @@ def make_dispatcher(name: str, table: dict[str, str]) -> Callable[..., Any]:
         backend = _load_backend(root)
         fn = getattr(backend, attr, None)
         if fn is None:
-            # The table said this backend has the op and it does not. That
-            # happens when the installed wrapper is older than this
-            # dispatcher -- the distributions are versioned and released
-            # independently, so a mixed install is ordinary, not exotic.
-            # Forwarding blindly would surface it as a bare AttributeError on
-            # a module the caller never named, which says nothing about what
-            # to do; say what is missing and how to fix it instead.
+            # The table said this backend has the op and it does not. A blind
+            # `getattr(backend, attr)` would surface that as a bare
+            # AttributeError on a module the caller never named, which says
+            # nothing about what to do. Name all three things: the unified op,
+            # the backend that lacks it, and the likely cause.
+            #
+            # Since the five namespaces were merged into one distribution,
+            # auto and the wrapper it dispatched to always ship together, so
+            # the remaining way to get here is a stale or partial install --
+            # typically a leftover copy of one of the retired
+            # fastfields-numpy / -torch / -cupy distributions shadowing this
+            # one in the same namespace. Reinstalling resolves it.
+            #
+            # NotImplementedError rather than AttributeError, to match the
+            # adjacent "this backend is not in the table" raise: from a
+            # caller's point of view both mean the same thing.
             raise NotImplementedError(
                 f"fastfields.auto.{name} dispatched to the {root} backend, "
-                f"but {_ARRAY_BACKENDS[root]} has no {attr!r}. The installed "
-                f"{_ARRAY_BACKENDS[root]} is probably older than this "
-                f"fastfields.auto; upgrade it "
-                f"(`pip install -U fastfields[{root}]`). Operations that are "
-                f"deliberately absent from a backend are listed in the "
-                f"fastfields.auto docstring."
+                f"but {_ARRAY_BACKENDS[root]} has no {attr!r}. These ship in "
+                f"the same distribution, so they cannot normally disagree; "
+                f"the usual cause is a stale install of a retired "
+                f"fastfields-{root} distribution shadowing it in the "
+                f"fastfields namespace. Reinstall "
+                f"(`pip uninstall fastfields-{root} && pip install -U "
+                f"fastfields[{root}]`). Operations deliberately absent from a "
+                f"backend are listed in the fastfields.auto docstring."
             )
         return fn(*args, **kwargs)
 
@@ -172,3 +183,34 @@ def make_dispatcher(name: str, table: dict[str, str]) -> Callable[..., Any]:
         f"forwarded unchanged."
     )
     return _dispatch
+
+
+def dlpack_backend() -> "str | None":
+    """Report the compute backend of the installed compiled bindings.
+
+    ``fastfields.auto`` works against whichever backend is installed and
+    never requires a particular one, so -- unlike
+    :mod:`fastfields.cupy` (which refuses to import on a CPU-only build) and
+    :mod:`fastfields.torch` (which refuses a CUDA tensor on one) -- it only
+    reports. This is the one place to ask "which lane did I end up on?"
+    without knowing which wrapper to interrogate.
+
+    It is a function rather than a module attribute mirroring
+    ``fastfields.dlpack.backend`` on purpose: ``fastfields.auto`` must not
+    import the compiled bindings at import time (it dispatches lazily and is
+    usable with no array backend at all), and a module attribute would have to
+    be computed at import.
+
+    Returns
+    -------
+    str or None
+        ``"cpu"``, ``"cu126"``, ... for a labelled build of
+        ``fastfields-dlpack``; ``None`` if the installed build carries no
+        label (an unversioned source checkout) or if ``fastfields.dlpack``
+        cannot be imported at all.
+    """
+    try:
+        import fastfields.dlpack as _ff
+    except ImportError:
+        return None
+    return getattr(_ff, "backend", None)

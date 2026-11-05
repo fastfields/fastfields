@@ -1,0 +1,558 @@
+"""Tests for fastfields.cupy.
+
+Two groups:
+
+1. Environment-independent tests that always run: they verify that
+   ``import fastfields.cupy`` succeeds *without* cupy installed (the
+   lazy-import requirement) and that calling a wrapper without cupy raises a
+   clear error.
+
+2. GPU correctness tests that require cupy *and* a CUDA device. They mirror the
+   numpy-package checks (Euclidean DT vs brute force, sym_matvec vs dense) and
+   are cleanly skipped when cupy/GPU is unavailable.
+
+Two *different* things can make this package unusable, and the suite keeps
+them apart because the package does:
+
+* **cupy, or a GPU, is missing.** ``import fastfields.cupy`` still succeeds --
+  the client library is imported lazily -- so group 1 runs anywhere.
+* **``fastfields-dlpack`` is a CPU-only build.** Then the import itself
+  raises, by design (``fastfields/cupy/_backend.py``): CUDA kernels that were
+  never compiled cannot be made to appear, and every operation here needs
+  them. That is the normal state of CI, so every test that imports the package
+  goes through :func:`_import_wrapper`, which turns that refusal into a skip.
+  :func:`test_import_guard_matches_installed_backend` is the one test that
+  asserts the refusal itself rather than skipping on it.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from fastfields.helpers import is_cuda_backend
+
+
+def _dlpack_backend():
+    """The installed ``fastfields-dlpack``'s compute-backend label."""
+    import fastfields.dlpack as ff
+
+    return ff.backend
+
+
+def _import_wrapper():
+    """Import ``fastfields.cupy``, or skip if it refuses to load.
+
+    It refuses on a CPU-only build of ``fastfields-dlpack``; see the module
+    docstring. ``pytest.importorskip`` is deliberately not used: as of pytest
+    9 it only swallows a ``ModuleNotFoundError`` for the requested module and
+    re-raises an ``ImportError`` raised *by* the module -- which is exactly
+    what this guard is.
+    """
+    try:
+        import fastfields.cupy
+    except ImportError as exc:
+        pytest.skip(f"fastfields.cupy is unusable here: {exc.args[0][:80]}...")
+    return fastfields.cupy
+
+
+# --------------------------------------------------------------------------- #
+# 1. Always-on tests (must pass even where cupy / GPU is absent)              #
+# --------------------------------------------------------------------------- #
+def test_import_guard_matches_installed_backend():
+    """The import must succeed, or refuse *usefully*, per the build installed.
+
+    A missing cupy must never block the import (the client library is lazy).
+    A CPU-only ``fastfields-dlpack`` must block it, and the message has to be
+    actionable on its own: a user who ran ``pip install fastfields[cupy]`` and
+    got a working install has no reason to suspect that the wheel *lane* is a
+    separate axis from the extra, so the error is the only thing that can tell
+    them. It therefore has to name the index and the command.
+    """
+    backend = _dlpack_backend()
+
+    if backend is not None and not is_cuda_backend(backend):
+        with pytest.raises(ImportError) as excinfo:
+            import fastfields.cupy  # noqa: F401
+        message = str(excinfo.value)
+        assert "fastfields.cupy" in message
+        assert backend in message
+        assert "https://fastfields.github.io/whl" in message
+        assert "pip install" in message
+        return
+
+    # A CUDA build, or an unlabelled source build (which is unverifiable and
+    # therefore let through): the import must work with no cupy installed.
+    ffc = _import_wrapper()
+    # Enums come straight from fastfields.helpers (no cupy needed).
+    assert int(ffc.Spline.Cubic) == 3
+    assert int(ffc.Bound.DCT2) == 3
+    for name in ("dt_euclidean", "sym_matvec", "resample", "spline_coeff"):
+        assert callable(getattr(ffc, name))
+
+
+def test_anchor_scale_shift_mapping():
+    """The anchor->(scale, shift) mapping is pure Python (no cupy needed)."""
+    from fastfields.helpers import anchor_scale_shift as _anchor_scale_shift
+
+    for name, abbr, exp_scale, exp_shift in [
+        ("centers", "c", 7 / 3, 0.0),
+        ("edges", "e", 2.0, 0.5),
+        ("first", "f", 2.0, 0.0),
+        ("last", "l", 2.0, 1.0),
+    ]:
+        scale, shift = _anchor_scale_shift(name, (8,), (4,), 1)
+        assert shift == exp_shift
+        assert scale == pytest.approx([exp_scale])
+        # the abbreviation resolves to the same mapping
+        assert _anchor_scale_shift(abbr, (8,), (4,), 1) == (scale, shift)
+
+
+def test_anchor_unknown_raises():
+    from fastfields.helpers import anchor_scale_shift as _anchor_scale_shift
+
+    with pytest.raises(ValueError, match="anchor"):
+        _anchor_scale_shift("nope", (8,), (4,), 1)
+
+
+def test_factor_shape_resolution_no_cupy():
+    """factor/shape/ndim resolution is pure Python (no cupy needed)."""
+    from fastfields.helpers import (
+        infer_ndim as _infer_ndim,
+    )
+    from fastfields.helpers import (
+        resolve_out_spatial as _resolve_out_spatial,
+    )
+
+    assert _infer_ndim(None, None, [4, 4]) == 2
+    assert _infer_ndim(None, 2.0, None) == 1
+    assert _infer_ndim(3, None, None) == 3
+    # shape wins; scalar broadcasts to ndim
+    assert _resolve_out_spatial((5, 5), 2, None, 10) == (10, 10)
+    # factor rounds per-dim
+    assert _resolve_out_spatial((5,), 1, 2, None) == (10,)
+    # neither -> identity
+    assert _resolve_out_spatial((7,), 1, None, None) == (7,)
+
+
+def test_order_bound_aliases_no_cupy():
+    """order/bound accept int, enum or name (no cupy needed)."""
+    from fastfields.helpers import Bound, as_bound, as_spline
+
+    assert as_spline("linear") == 1
+    assert as_spline(3) == 3
+    assert as_bound("dct2") == 3
+    assert as_bound("wrap") == int(Bound.DFT)
+    with pytest.raises(ValueError, match="spline order"):
+        as_spline("nope")
+    with pytest.raises(ValueError, match="boundary"):
+        as_bound("nope")
+
+
+def _cupy_missing() -> bool:
+    try:
+        import cupy  # noqa: F401
+    except ImportError:
+        return True
+    return False
+
+
+@pytest.mark.skipif(not _cupy_missing(), reason="cupy is installed")
+def test_call_without_cupy_raises():
+    """Calling a wrapper without cupy raises a clear ImportError."""
+    ffc = _import_wrapper()
+
+    with pytest.raises(ImportError, match="cupy"):
+        ffc.current_stream_ptr()
+
+
+# --------------------------------------------------------------------------- #
+# 2. GPU correctness tests (skipped without cupy + CUDA device)              #
+# --------------------------------------------------------------------------- #
+def _require_gpu():
+    """Skip unless cupy imports and at least one CUDA device is present."""
+    cupy = pytest.importorskip("cupy")
+    try:
+        ndev = cupy.cuda.runtime.getDeviceCount()
+    except Exception as exc:  # pragma: no cover - depends on driver
+        pytest.skip(f"cupy present but CUDA runtime unavailable: {exc}")
+    if ndev < 1:
+        pytest.skip("no CUDA device available")
+    return cupy
+
+
+def _edt_reference(inp, voxel_spacing, cost):
+    """Brute-force distance transform along the last axis (numpy)."""
+    n = inp.shape[-1]
+    flat = inp.reshape(-1, n)
+    ref = np.full_like(flat, np.inf)
+    for r in range(flat.shape[0]):
+        for i in range(n):
+            best = np.inf
+            for j in range(n):
+                best = min(best, flat[r, j] + cost(voxel_spacing * (i - j)))
+            ref[r, i] = best
+    return ref.reshape(inp.shape)
+
+
+def _pack_symmetric(mats):
+    """Dense (B,C,C) symmetric -> compact (B, C*(C+1)/2) diagonal-then-rows."""
+    B, C, _ = mats.shape
+    packed = np.zeros((B, C * (C + 1) // 2), dtype=mats.dtype)
+    for b in range(B):
+        idx = 0
+        for k in range(C):
+            packed[b, idx] = mats[b, k, k]
+            idx += 1
+        for i in range(C):
+            for j in range(i + 1, C):
+                packed[b, idx] = mats[b, i, j]
+                idx += 1
+    return packed
+
+
+def test_dt_euclidean_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    inp = np.array(
+        [
+            [0, np.inf, np.inf, 0, np.inf, np.inf, np.inf],
+            [np.inf, np.inf, 0, np.inf, np.inf, 0, np.inf],
+        ],
+        dtype=np.float32,
+    )
+    ref = _edt_reference(inp, 1.0, lambda d: d * d)
+    out = ffc.dt_euclidean(cupy.asarray(inp), 1.0)
+    np.testing.assert_allclose(cupy.asnumpy(out), ref, rtol=1e-5, atol=1e-5)
+
+
+def test_dt_euclidean_inplace_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    inp = np.array(
+        [[0, np.inf, np.inf, 0, np.inf, np.inf, np.inf]],
+        dtype=np.float32,
+    )
+    ref = _edt_reference(inp, 1.0, lambda d: d * d)
+    gpu = cupy.asarray(inp)
+    ret = ffc.dt_euclidean_(gpu)
+    assert ret is gpu  # written in place
+    np.testing.assert_allclose(cupy.asnumpy(gpu), ref, rtol=1e-5, atol=1e-5)
+
+
+def test_sym_matvec_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    for C in (2, 3):
+        B = 4
+        rng = np.random.default_rng(C)
+        mats = rng.standard_normal((B, C, C))
+        mats = mats + np.transpose(mats, (0, 2, 1))
+        vec = rng.standard_normal((B, C))
+
+        hessian = _pack_symmetric(mats)
+        ref = np.einsum("bij,bj->bi", mats, vec)
+        out = ffc.sym_matvec(cupy.asarray(hessian), cupy.asarray(vec))
+        np.testing.assert_allclose(
+            cupy.asnumpy(out), ref, rtol=1e-8, atol=1e-8
+        )
+
+
+def test_sym_matvec_broadcasts_batch_dims_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    # hessian batch (1,) vs vec batch (5,): must broadcast (zero-copy) and
+    # match the manually-broadcast dense product.
+    C, B = 3, 5
+    rng = np.random.default_rng(0)
+    mats = rng.standard_normal((1, C, C))
+    mats = mats + np.transpose(mats, (0, 2, 1))  # batch (1,)
+    vec = rng.standard_normal((B, C))  # batch (5,)
+    hessian = _pack_symmetric(mats)
+
+    out = ffc.sym_matvec(cupy.asarray(hessian), cupy.asarray(vec))
+    assert out.shape == (B, C)
+    ref = np.einsum("bij,bj->bi", np.broadcast_to(mats, (B, C, C)), vec)
+    np.testing.assert_allclose(cupy.asnumpy(out), ref, rtol=1e-8, atol=1e-8)
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(pytest.main([__file__, "-v"]))
+
+
+# --------------------------------------------------------------------------- #
+# pushpull + regularisers                                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_pushpull_reg_surface_present():
+    ffc = _import_wrapper()
+
+    for name in [
+        "pull",
+        "push",
+        "count",
+        "grad",
+        "field_matvec",
+        "field_addmatvec",
+        "field_submatvec",
+        "field_diag",
+        "field_adddiag",
+        "field_subdiag",
+        "field_kernel",
+        "field_relax",
+        "field_precond",
+        "field_forward",
+        "flow_matvec",
+        "flow_addmatvec",
+        "flow_addmatvec_",
+        "flow_submatvec",
+        "flow_submatvec_",
+        "flow_diag",
+        "flow_adddiag",
+        "flow_adddiag_",
+        "flow_subdiag",
+        "flow_subdiag_",
+        "flow_kernel",
+        "flow_relax",
+        "flow_precond",
+        "flow_forward",
+    ]:
+        assert hasattr(ffc, name), name
+
+
+def test_pull_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    inp = cupy.asarray([[0.0], [10.0], [20.0], [30.0]], dtype=cupy.float64)
+    grid = cupy.asarray([[0.5], [1.5], [2.5]], dtype=cupy.float64)
+    out = ffc.pull(inp, grid, order=1)
+    assert cupy.allclose(out.ravel(), cupy.asarray([5.0, 15.0, 25.0]))
+
+
+def test_push_is_pull_adjoint_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    grid = cupy.linspace(0, 5, 4, dtype=cupy.float64).reshape(4, 1)
+    x = cupy.random.standard_normal((6, 1)).astype(cupy.float64)
+    y = cupy.random.standard_normal((4, 1)).astype(cupy.float64)
+    px = ffc.pull(x, grid, order=2)
+    py = ffc.push(y, grid, shape=6, order=2)
+    assert cupy.allclose((px * y).sum(), (x * py).sum())
+
+
+def test_field_matvec_absolute_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    f = cupy.random.standard_normal((8, 2)).astype(cupy.float64)
+    out = ffc.field_matvec(f, absolute=[2.0, 3.0], ndim=1)
+    assert cupy.allclose(out[:, 0], 2.0 * f[:, 0])
+    assert cupy.allclose(out[:, 1], 3.0 * f[:, 1])
+
+
+def _flow_hessian_2d_gpu(cupy, H, W, seed):
+    """Per-voxel SPD 2x2 Hessian, packed compact-symmetric -> (H, W, 3)."""
+    rng = np.random.default_rng(seed)
+    A = rng.standard_normal((H * W, 2, 2))
+    mats = np.einsum("bij,bkj->bik", A, A) + 3.0 * np.eye(2)
+    packed = _pack_symmetric(mats).reshape(H, W, 3)
+    return cupy.asarray(packed)
+
+
+def test_flow_kernel_is_matvec_impulse_response_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    cases = [
+        (dict(absolute=2.5), False, 1),
+        (dict(membrane=1.0), False, 3),
+        (dict(bending=1.0), False, 5),
+        (dict(shears=1.3, div=0.7), True, 3),
+        (
+            dict(absolute=0.3, membrane=0.5, bending=0.4, shears=1.3, div=0.7),
+            True,
+            5,
+        ),
+    ]
+    C = 2
+    for kw, is_matrix, width in cases:
+        K = ffc.flow_kernel(2, **kw)
+        assert K.shape == (
+            (width, width, C, C) if is_matrix else (width, width, C)
+        )
+        kd = width
+        N, cc, half = 2 * kd + 1, kd, kd // 2
+        for j0 in range(C):
+            x = cupy.zeros((N, N, C))
+            x[cc, cc, j0] = 1.0
+            o = ffc.flow_matvec(x, ndim=2, **kw)
+            for a in range(kd):
+                for b in range(kd):
+                    for i in range(C):
+                        got = float(o[cc + a - half, cc + b - half, i])
+                        kern = (
+                            float(K[a, b, i, j0])
+                            if is_matrix
+                            else (float(K[a, b, i]) if i == j0 else 0.0)
+                        )
+                        assert abs(got - kern) < 1e-10
+
+
+def test_flow_forward_is_sym_matvec_plus_flow_matvec_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    H, W = 5, 6
+    mat = _flow_hessian_2d_gpu(cupy, H, W, 11)
+    vec = cupy.asarray(np.random.default_rng(11).standard_normal((H, W, 2)))
+    kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5)
+    fwd = ffc.flow_forward(mat, vec, ndim=2, **kw)
+    expect = ffc.sym_matvec(mat, vec) + ffc.flow_matvec(vec, ndim=2, **kw)
+    assert cupy.allclose(fwd, expect, atol=1e-10)
+
+
+def test_flow_precond_solves_diagonal_system_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    H, W = 5, 6
+    mat = _flow_hessian_2d_gpu(cupy, H, W, 12)
+    vec = cupy.asarray(np.random.default_rng(12).standard_normal((H, W, 2)))
+    kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5)
+    x = ffc.flow_precond(mat, vec, ndim=2, **kw)
+    diag = ffc.flow_diag(vec.shape, ndim=2, **kw)
+    residual = ffc.sym_matvec(mat, x) + diag * x - vec
+    assert cupy.allclose(residual, cupy.zeros_like(residual), atol=1e-5)
+
+
+def test_flow_accumulate_variants_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    H, W = 5, 6
+    rng = cupy.random.RandomState(21)
+    flow = rng.standard_normal((H, W, 2))
+    base = rng.standard_normal((H, W, 2))
+    kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5, ndim=2)
+    L = ffc.flow_matvec(flow, **kw)
+    d = ffc.flow_diag(base.shape, **kw)
+    assert cupy.allclose(ffc.flow_addmatvec(base, flow, **kw), base + L)
+    assert cupy.allclose(ffc.flow_submatvec(base, flow, **kw), base - L)
+    assert cupy.allclose(ffc.flow_adddiag(base, **kw), base + d)
+    assert cupy.allclose(ffc.flow_subdiag(base, **kw), base - d)
+    a = base.copy()
+    assert ffc.flow_addmatvec_(a, flow, **kw) is a
+    assert cupy.allclose(a, base + L)
+    s = base.copy()
+    assert ffc.flow_subdiag_(s, **kw) is s
+    assert cupy.allclose(s, base - d)
+
+
+def test_field_precond_forward_accumulate_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    H, W, C = 5, 6, 2
+    rng = np.random.default_rng(31)
+    A = rng.standard_normal((H * W, C, C))
+    mats = np.einsum("bij,bkj->bik", A, A) + (C + 1) * np.eye(C)
+    mat = cupy.asarray(_pack_symmetric(mats).reshape(H, W, C * (C + 1) // 2))
+    vec = cupy.asarray(rng.standard_normal((H, W, C)))
+    kw = dict(absolute=[0.3, 0.4], membrane=[0.7, 0.5], ndim=2)
+    fwd = ffc.field_forward(mat, vec, **kw)
+    assert cupy.allclose(
+        fwd, ffc.sym_matvec(mat, vec) + ffc.field_matvec(vec, **kw), atol=1e-10
+    )
+    x = ffc.field_precond(mat, vec, **kw)
+    diag = ffc.field_diag(vec.shape, **kw)
+    residual = ffc.sym_matvec(mat, x) + diag * x - vec
+    assert cupy.allclose(residual, cupy.zeros_like(residual), atol=1e-5)
+    base = cupy.asarray(rng.standard_normal((H, W, C)))
+    L = ffc.field_matvec(vec, **kw)
+    assert cupy.allclose(ffc.field_addmatvec(base, vec, **kw), base + L)
+
+
+def test_field_kernel_is_matvec_impulse_response_gpu():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    cases = [
+        (1, dict(absolute=[2.5, 1.5])),
+        (3, dict(absolute=[0.3, 0.4], membrane=[1.0, 0.7])),
+        (
+            5,
+            dict(absolute=[0.3, 0.4], membrane=[0.5, 0.6], bending=[1.0, 0.8]),
+        ),
+    ]
+    C = 2
+    for width, kw in cases:
+        K = ffc.field_kernel(2, **kw)
+        assert K.shape == (width, width, C)
+        kd = width
+        N, cc, half = 2 * kd + 1, kd, kd // 2
+        for c0 in range(C):
+            x = cupy.zeros((N, N, C))
+            x[cc, cc, c0] = 1.0
+            o = ffc.field_matvec(x, ndim=2, **kw)
+            for a in range(kd):
+                for b in range(kd):
+                    for c in range(C):
+                        got = float(o[cc + a - half, cc + b - half, c])
+                        kern = float(K[a, b, c]) if c == c0 else 0.0
+                        assert abs(got - kern) < 1e-10
+
+
+# --------------------------------------------------------------------------- #
+# Accumulate ops: one in-place kernel, two spellings                          #
+#                                                                             #
+# The C primitive is in-place only; the out-of-place spelling copies       #
+# first and runs that same primitive. GPU-gated, as every test here.       #
+# --------------------------------------------------------------------------- #
+def test_accumulate_inplace_and_out_of_place():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    kw = dict(absolute=[0.3, 0.4], membrane=[0.7, 0.5], ndim=2)
+    H, W, C = 4, 5, 2
+    rng = np.random.default_rng(21)
+    field = cupy.asarray(rng.standard_normal((H, W, C)))
+    base = cupy.asarray(rng.standard_normal((H, W, C)))
+    before = base.copy()
+
+    # out-of-place must not touch the caller's array
+    out = ffc.field_addmatvec(base, field, **kw)
+    assert bool((base == before).all())
+    assert out is not base
+
+    # in-place mutates and returns the same array
+    a = base.copy()
+    assert ffc.field_addmatvec_(a, field, **kw) is a
+    assert not bool((a == base).all())
+
+    # and both spellings agree exactly (same single kernel)
+    assert bool((a == out).all())
+
+
+def test_accumulate_matches_reference_composition():
+    cupy = _require_gpu()
+    ffc = _import_wrapper()
+
+    kw = dict(absolute=0.3, membrane=0.7, shears=1.0, div=0.5, ndim=2)
+    H, W = 5, 6
+    rng = np.random.default_rng(23)
+    flow = cupy.asarray(rng.standard_normal((H, W, 2)))
+    base = cupy.asarray(rng.standard_normal((H, W, 2)))
+    L = ffc.flow_matvec(flow, **kw)
+    got = ffc.flow_addmatvec(base, flow, **kw)
+    assert float(abs(got - (base + L)).max()) < 1e-12
+    got = ffc.flow_submatvec(base, flow, **kw)
+    assert float(abs(got - (base - L)).max()) < 1e-12

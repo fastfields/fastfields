@@ -21,12 +21,26 @@ jobs:
       - uses: actions/configure-pages@v5
       - uses: actions/checkout@v5
         with:
-          submodules: recursive
+          # versioningit derives the version from `git describe`, which needs
+          # the tags; a shallow checkout hides them and the build below falls
+          # back to "0+unknown".
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
       - run: pip install -r docs/requirements.txt
-      - run: pip install .
+      # --no-deps, and this job has been RED ON MAIN since the helpers split
+      # without it: a plain `pip install .` resolves this distribution's
+      # dependency, which has never been on PyPI (it was fastfields-helpers,
+      # it is now fastfields-dlpack), so the step fails with "No matching
+      # distribution found" before zensical ever runs. Nothing here needs the
+      # dependency: mkdocstrings reads the API statically with griffe -- it
+      # parses `paths = ["."]` from zensical.toml and imports nothing -- so
+      # the install exists only to run versioningit and write
+      # fastfields/helpers/_version.py. Pulling fastfields-dlpack from the
+      # wheel index would work too, but it would make the docs build wait on
+      # a compiled wheel it does not read.
+      - run: pip install --no-deps .
       - run: zensical build --clean
       - uses: actions/upload-pages-artifact@v4
         with:

@@ -4,10 +4,13 @@
 at whatever array you hand it — NumPy or PyTorch — and runs the operation on the
 matching backend. Write your code once and it works across frameworks.
 
-Only the backends you install are loaded, so `fastfields[numpy]` alone is a
-perfectly good setup. Today the tested, working path is **CPU** (NumPy and
-PyTorch); the CuPy/GPU path is implemented but not yet published as a wheel or
-validated on hardware — see [Status](#status) below.
+One `pip install fastfields` gives you all of it: `fastfields.auto` plus the
+per-framework modules `fastfields.numpy`, `fastfields.torch` and
+`fastfields.cupy`, and the shared `fastfields.helpers`. Only the backends you
+install are *loaded*, so `fastfields[numpy]` alone is a perfectly good setup.
+Today the tested, working path is **CPU** (NumPy and PyTorch); the CuPy/GPU
+path is implemented but not yet published as a wheel or validated on hardware
+— see [Status](#status) below.
 
 ## Install
 
@@ -17,8 +20,13 @@ pip install "fastfields[numpy]" \
     --extra-index-url https://fastfields.github.io/whl/cpu/
 ```
 
-Use `fastfields[torch]` for PyTorch. A GPU (CuPy / CUDA) wheel lane is planned
-but **not published yet** — see [Status](#status).
+Use `fastfields[torch]` for PyTorch, or `fastfields[all]` for all three.
+
+The extra picks the array library; the `--extra-index-url` picks the compiled
+`fastfields-dlpack` lane. Those are two separate choices, and the second one
+is the one that matters for GPU work — see [the monorepo
+note](monorepo.md#the-one-wrinkle-an-extra-is-not-a-lane). A GPU (CuPy / CUDA)
+wheel lane is planned but **not published yet** — see [Status](#status).
 
 ## Use it
 
@@ -49,8 +57,9 @@ tdist = ff.dt_euclidean(tmask)    # same call, dispatched to PyTorch
 
 Each call forwards straight to the selected backend, so it shares that backend's
 signature and behaviour (autograd on PyTorch, CUDA streams on CuPy). Prefer a
-single framework? Use `fastfields.numpy`, `fastfields.torch` or `fastfields.cupy`
-directly.
+single framework? Use [`fastfields.numpy`](numpy.md),
+[`fastfields.torch`](torch.md) or [`fastfields.cupy`](cupy.md) directly — they
+are in the same install.
 
 In-place spellings are dispatched too (`dt_euclidean_`, `sym_solve_`,
 `spline_coeff_`, the `*_add…_`/`*_sub…_` accumulate forms): they mutate their
@@ -128,4 +137,6 @@ What "planned" means here:
 
 Everything marked ✅ is exercised by a brute-force reference test on CPU.
 
-See the [API reference](api/index.md) for full signatures and options.
+See the [API reference](api/index.md) for full signatures and options, and
+[one distribution, five namespaces](monorepo.md) for how the packaging fits
+together.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastfields"
-description = "Backend-dispatching interface (fastfields.auto) over the fastfields wrappers."
+description = "The fastfields Python interface: numpy, torch, cupy and auto-dispatching wrappers over the fastfields.dlpack bindings."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -26,48 +26,84 @@ classifiers = [
     "Topic :: Scientific/Engineering",
     "Typing :: Typed",
 ]
-# fastfields-helpers -- the pure-Python Spline/Bound enums and argument
-# normalisers, no compiled extension -- is the only hard dependency. It used
-# to be fastfields-dlpack (needed then because that was the only place the
-# shared enums lived), but fastfields.auto never actually touches the
-# compiled dlpack bindings itself -- dispatch works by lazily importing
-# whichever backend wrapper (fastfields.numpy/.torch/.cupy) matches the
-# array type passed, and each of those wrappers carries its own dlpack
-# dependency independently. Depending on fastfields-helpers instead means
-# `pip install fastfields` no longer pulls in a compiled wheel at all.
-# The array backends are optional extras so that `fastfields.auto` works
-# with whatever subset of numpy/torch/cupy is installed.
-# `==0.*` is a bare wildcard, not a range: it allows any 0.x.y — including
-# 0.0.x and any dev/alpha/beta/rc, e.g. `0.1.0.dev1` or `0.0.dev0` — while
-# still blocking a future 1.x whose ABI/enums no longer match this wrapper.
-# The fastfields distributions are versioned and released together off the
-# same 0.x line (versioningit `default-tag = "0.1"`), so the upper bound is
-# the only bound doing real work here. This is the first release of these
-# packages, so there is no earlier version to guard against with a floor —
-# an earlier fix pinned `>=0.1.dev0` to admit 0.1.0 pre-releases, but that
-# floor was protecting against nothing real and has been dropped for a
-# simpler bare wildcard.
+# This distribution ships five PEP 420 subpackages of the `fastfields`
+# namespace -- fastfields.{helpers,numpy,cupy,torch,auto} -- and is itself
+# pure Python (py3-none-any, no compiled content). It used to be five separate
+# distributions; see docs/monorepo.md for what the merge did and did not
+# change.
+#
+# `fastfields-dlpack` -- the compiled nanobind bindings, which stay a separate
+# distribution and a separate repo because they need a per-platform wheel
+# matrix -- is the only hard dependency. A pure-Python fix still ships as an
+# ordinary universal wheel of *this* distribution with no recompilation
+# anywhere, which is the property `fastfields-helpers` was originally split out
+# to get, and the reason dlpack is not folded in here.
+#
+# The requirement is DELIBERATELY UNQUALIFIED with respect to the compute
+# backend. fastfields-dlpack encodes its backend in the PEP 440 *local*
+# segment, PyTorch-style (`0.0.dev0+cpu`, `+cu118`, `+cu126`, `+cu130`), and
+# which lane you get is decided by the index folder you install from, not by
+# the dependency graph -- pip cannot express "any build with CUDA", and a pin
+# here would fight the user's `--extra-index-url` choice. Each namespace
+# enforces its own backend requirement at runtime instead: see
+# fastfields/cupy/__init__.py (fails at import on a non-CUDA build) and
+# fastfields/torch/_util.py (fails only when a CUDA tensor meets a CPU-only
+# build).
+#
+# `==0.*` is a bare wildcard, not a range: it allows any 0.x.y -- including
+# 0.0.x and any dev/alpha/beta/rc, e.g. `0.1.0.dev1` or `0.0.dev0` -- while
+# still blocking a future 1.x whose ABI/enums no longer match. It says nothing
+# about the local segment, so every lane satisfies it.
 #
 # Accepted risk: versioningit's `default-version = "0+unknown"` fallback
 # (fires when `git describe` can't find a tag, e.g. a shallow-clone CI
 # misconfiguration) would also satisfy `==0.*` if it were ever accidentally
 # published. That's an accepted risk, not something this pin tries to solve.
-dependencies = ["fastfields-helpers==0.*"]
+dependencies = ["fastfields-dlpack==0.*"]
 
-# The sibling wrappers move on the same 0.x line and are constrained the same
-# bare-wildcard way as fastfields-dlpack above.
+# The array libraries are extras, so `pip install fastfields` works with
+# whatever subset of numpy/torch/cupy you have, and `fastfields.auto`
+# dispatches over exactly that subset.
+#
+# NOTE, and this is the one genuinely awkward consequence of folding the
+# wrappers together: AN EXTRA SELECTS THE CLIENT LIBRARY, NOT THE WHEEL LANE.
+# `pip install fastfields[cupy]` installs cupy and resolves perfectly happily
+# against a `+cpu` fastfields-dlpack, and then `import fastfields.cupy` fails
+# -- because a CUDA client on top of CPU-only compiled kernels cannot work.
+# That is not fixable in metadata (see the unqualified-dependency note above);
+# the import-time error message is what makes it acceptable, and it names both
+# the CUDA index URL and the command to fix it. Documented in docs/monorepo.md.
 [project.optional-dependencies]
-numpy = ["fastfields-numpy==0.*"]
-torch = ["fastfields-torch==0.*"]
-cupy = ["fastfields-cupy==0.*"]
-all = ["fastfields-numpy==0.*", "fastfields-torch==0.*", "fastfields-cupy==0.*"]
-test = ["pytest", "numpy"]
+numpy = ["numpy"]
+torch = ["torch"]
+# Pulls a prebuilt CUDA 12.x cupy wheel. Pick the build matching your CUDA
+# toolkit (e.g. cupy-cuda11x) if 12.x is not appropriate. cupy is deliberately
+# not a hard dependency for exactly that reason: the correct wheel depends on
+# the host CUDA version.
+cupy = ["cupy-cuda12x"]
+all = ["numpy", "torch", "cupy-cuda12x"]
+# numpy is needed by more than its own suite: the torch and cupy suites build
+# reference arrays with it, and the cupy suite feeds the wrappers through the
+# array protocol. cupy itself is not a test dependency -- its runtime tests are
+# GPU-gated and skip without a device.
+test = ["pytest", "numpy", "torch"]
 
-# Ships only the ``fastfields.auto`` subpackage; no ``fastfields/__init__.py`` is
-# created, keeping ``fastfields`` a PEP 420 native namespace package that merges
-# with fastfields.helpers / .dlpack / .numpy / .torch / .cupy.
+# Ships the five ``fastfields.*`` subpackages and -- crucially -- NO
+# ``fastfields/__init__.py``. That absence is what keeps ``fastfields`` a PEP
+# 420 native namespace package, so this distribution merges at import time with
+# ``fastfields.dlpack`` from the separately-released fastfields-dlpack wheel.
+# Creating a top-level ``__init__.py`` here would turn ``fastfields`` into a
+# regular package and make ``fastfields.dlpack`` unimportable. `namespaces =
+# true` is what lets setuptools find subpackages that have no parent
+# ``__init__.py``; without it this find directive returns nothing at all.
 [tool.setuptools.packages.find]
-include = ["fastfields.auto*"]
+include = [
+    "fastfields.helpers*",
+    "fastfields.numpy*",
+    "fastfields.cupy*",
+    "fastfields.torch*",
+    "fastfields.auto*",
+]
 namespaces = true
 
 [tool.ruff]
@@ -102,14 +138,36 @@ distance = "{base_version}+{distance}.{vcs}{rev}"
 dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
 distance-dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
 
+# One distribution, one version. The five merged packages each used to carry
+# their own versioningit `write` target; versioningit writes exactly one file,
+# so the merged distribution needs a single home for it.
+#
+# It is ``fastfields/helpers/_version.py`` because helpers is the bottom of
+# this distribution's internal stack -- numpy, cupy, torch and auto all import
+# fastfields.helpers, and it imports none of them. Putting it in any of the
+# other four would make reading the version import that subpackage (and, for
+# the three array wrappers, their array library), and putting it in `auto`
+# specifically would be circular: `fastfields.auto` imports
+# `fastfields.helpers`, so `fastfields.helpers` cannot reach into
+# `fastfields.auto` to find its own version.
+#
+# `fastfields.{helpers,numpy,cupy,torch,auto}.__version__` all resolve to this
+# one string; `fastfields.dlpack.__version__` belongs to a separate
+# distribution and may legitimately differ.
 [tool.versioningit.write]
-file = "fastfields/auto/_version.py"
+file = "fastfields/helpers/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["fastfields.auto"]
+source = [
+    "fastfields.helpers",
+    "fastfields.numpy",
+    "fastfields.cupy",
+    "fastfields.torch",
+    "fastfields.auto",
+]
 omit = ["*/_version.py"]
 
 [tool.codespell]

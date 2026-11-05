@@ -1,6 +1,6 @@
 [project]
 site_name = "fastfields"
-site_description = "Backend-dispatching interface (fastfields.auto) over the fastfields wrappers."
+site_description = "The fastfields Python interface: numpy, torch, cupy and auto-dispatching wrappers over the fastfields.dlpack bindings."
 site_author = "Yaël Balbastre"
 site_url = "https://fastfields.github.io/fastfields/"
 repo_url = "https://github.com/fastfields/fastfields"
@@ -9,7 +9,21 @@ copyright = "Copyright &copy; 2026 The fastfields authors"
 nav = [
   {"fastfields home" = "https://fastfields.github.io/"},
   {"Home" = "index.md"},
-  {"API" = "api/index.md"},
+  {"Backends" = [
+    "numpy.md",
+    "torch.md",
+    "cupy.md",
+    "helpers.md",
+  ]},
+  {"Packaging" = "monorepo.md"},
+  {"API" = [
+    "api/index.md",
+    "api/auto.md",
+    "api/numpy.md",
+    "api/torch.md",
+    "api/cupy.md",
+    "api/helpers.md",
+  ]},
 ]
 [project.theme]
 language = "en"
@@ -29,6 +43,8 @@ repo = "fontawesome/brands/github"
 inventories = [
   "https://docs.python.org/3/objects.inv",
   "https://numpy.org/doc/stable/objects.inv",
+  "https://pytorch.org/docs/stable/objects.inv",
+  "https://docs.cupy.dev/en/stable/objects.inv",
 ]
 paths = ["."]
 [project.plugins.mkdocstrings.handlers.python.options]
