@@ -22,6 +22,9 @@ an `int`, a `Spline`/`Bound` enum, or a friendly string (`"cubic"`, `"dct2"`, �
 | `dt_euclidean` | `(x, voxel_spacing=1.0, *, ...)` | Euclidean distance transform along the last axis. |
 | `dt_l1` | `(x, voxel_spacing=1.0, *, ...)` | L1 distance transform. |
 | `dt_mesh` | `(points, vertices, faces, signed=True, naive=False, return_nearest=False, ...)` | Point-to-triangular-mesh distance. `faces` is normalized to int64. `signed`/`naive`/`return_nearest` are positional-or-keyword on every backend (not keyword-only) — see fastfields#4. |
+| `dt_spline_table` | `(loc, coeff, times, *, order=3, bound="dct2")` | Point-to-spline distance over a dictionary of candidate times. Returns **`(dist, time)`** — see below. |
+| `dt_spline_brent` | `(loc, coeff, *, max_iter=64, tol=1e-6, step=0.1, order=3, bound="dct2")` | Same, by Brent's method. Returns **`(dist, time)`**. |
+| `dt_spline_gaussnewton` | `(loc, coeff, *, max_iter=64, tol=1e-6, order=3, bound="dct2")` | Same, by Gauss-Newton. Returns **`(dist, time)`**. |
 | `sym_matvec` | `(mat, vec)` | Compact-symmetric matrix-vector product. |
 | `sym_solve` | `(mat, vec, weight=None)` | Solve `(mat + diag(weight)) x = vec`. |
 | `sym_invert` | `(mat)` | Invert a compact-symmetric matrix. |
@@ -40,6 +43,39 @@ backend**. `dt_mesh`'s `signed`/`naive`/`return_nearest` used to be
 keyword-only on numpy only, which meant a positional call worked on
 torch/cupy and raised `TypeError` on numpy — an accidental divergence with no
 technical justification, fixed in `fastfields-numpy` PR #24 (fastfields#4).
+
+### `dt_spline_*` returns `(dist, time)`
+
+The three point-to-spline ops are the one canonical operation that returns a
+*tuple*, so the contract has to cover its order, and it is **`(dist, time)`**
+in every namespace. `fastfields.cupy` returned `(time, dist)` until
+fastfields#38.
+
+That mattered more than an inconsistency: `fastfields.auto` forwards both
+arguments and result unchanged, so it has nowhere to normalise a *result*
+tuple, and the meaning of `fastfields.auto.dt_spline_table(...)`'s return
+value depended on which array type the caller passed.
+
+Two things worth being exact about:
+
+- **The raw `fastfields.dlpack` binding takes `(time, dist, ...)`** as its two
+  output buffers — the order the C++ hub declares, and not changing (same
+  output-first reasoning as the next section). So in every wrapper the binding
+  call and the `return` are deliberately in opposite orders, within adjacent
+  lines of the same function. Aligning them would silently report distance as
+  time, so `tests/test_dt_spline_return_order_cupy.py` pins both.
+- **`tests/test_conformance.py` checks the names, not the order.** `import
+  fastfields.cupy` refuses a CPU-only `fastfields-dlpack`, so the cupy
+  parametrisations of that suite skip wherever CI runs; the order is pinned
+  statically instead. The names are nonetheless canonical now — their absence
+  from `CANONICAL` is how the divergence survived to need an issue.
+
+**Signatures do not yet agree, and that is a separate open divergence.** numpy
+and torch spell these as in the table; `fastfields.cupy` spells them
+`(loc, coeff, times, spline=3, bound=3)` with `max_iter`/`tol`/`step`
+*required and positional*. The canonical signature above is the numpy/torch
+one; cupy does not conform to it yet. That needs its own decision rather than
+being quietly papered over here.
 
 ## Why the raw `fastfields.dlpack` binding signature differs from the wrappers
 
@@ -221,8 +257,8 @@ undocumented.
 
 Beyond the canonical set, backends may add:
 
-- **numpy** — `sym_matvec_backward`, `sym_channels_from_packed`,
-  `dt_spline_{table,brent,gaussnewton}`, and the in-place set
+- **numpy** — `sym_matvec_backward`, `sym_channels_from_packed`, and the
+  in-place set
   `dt_euclidean_`/`dt_l1_`/`spline_coeff_`/`sym_solve_`/`sym_invert_`/
   `sym_addmatvec_`/`sym_submatvec_`.
 - **torch** — the regulariser accumulate set
@@ -235,8 +271,8 @@ Beyond the canonical set, backends may add:
   ops" above). Nothing else beyond the canonical set.
 - **cupy** — the regulariser accumulate set above, plus
   `dt_euclidean_`/`dt_l1_`/`spline_coeff_`/`sym_solve_`/`sym_invert_`/
-  `sym_addmatvec_`/`sym_submatvec_` (identical to numpy's in-place set),
-  `current_stream_ptr`, and the `dt_spline_*` variants.
+  `sym_addmatvec_`/`sym_submatvec_` (identical to numpy's in-place set) and
+  `current_stream_ptr`.
 
 These are not part of the `auto` contract; code that relies on them targets a
 specific backend on purpose. In particular, `fastfields.auto` never routes to

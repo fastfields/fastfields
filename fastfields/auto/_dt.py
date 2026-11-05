@@ -4,14 +4,13 @@ Each name here forwards to the matching backend function; every backend now
 exposes the canonical ``dt_*`` names, so the per-name tables below map each
 unified name onto the same attribute in each backend package.
 
-.. warning::
-   The three ``dt_spline_*`` operators return a 2-tuple, and the backends do
-   **not** agree on its order: ``fastfields.numpy`` and ``fastfields.torch``
-   return ``(dist, time)``, ``fastfields.cupy`` returns ``(time, dist)``.
-   A dispatcher that forwards arguments unchanged cannot paper over a
-   difference in the *result*, so a call through here means whatever the
-   selected backend means. Unpack by backend, or call the backend directly,
-   until that is reconciled.
+The three ``dt_spline_*`` operators return a 2-tuple, and every backend
+returns it as ``(dist, time)``. ``fastfields.cupy`` used to return
+``(time, dist)``, which made the meaning of a dispatched result depend on
+which array type was passed -- a dispatcher that forwards arguments unchanged
+has nowhere to normalise a *result*. Resolved in favour of ``(dist, time)``
+(fastfields#38). The three names are in ``tests/test_conformance.py``'s
+canonical list now; their absence from it is how the divergence got in.
 """
 
 from __future__ import annotations

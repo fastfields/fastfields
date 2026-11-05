@@ -10,6 +10,16 @@ clear ``RuntimeError`` from ``.backward()`` rather than being omitted or
 silently wrong; and a canonical call dispatched through ``fastfields.auto``
 gives the same result on numpy and torch.
 
+The canonical surface includes the three ``dt_spline_*`` ops as of
+fastfields#38. It did not, and that is precisely how the family came to return
+``(dist, time)`` on two backends and ``(time, dist)`` on the third without
+anything here failing. The return *order* is not something this suite can
+check for cupy -- ``import fastfields.cupy`` refuses a CPU-only
+``fastfields-dlpack``, so every cupy parametrisation below skips wherever CI
+runs -- so the order is pinned statically in
+``test_dt_spline_return_order_cupy.py``. What belongs here is that the names
+are part of the contract rather than beside it.
+
 numpy is a hard test dependency; torch is imported via ``importorskip`` so the
 suite still runs where torch is absent; cupy is skipped (needs a CUDA GPU).
 """
@@ -31,6 +41,15 @@ CANONICAL = [
     "dt_euclidean",
     "dt_l1",
     "dt_mesh",
+    # The dt_spline_* family was NOT in this list, and that absence is why
+    # fastfields#38 survived: the three ops returned (dist, time) on numpy and
+    # torch and (time, dist) on cupy, and the suite that exists to catch
+    # cross-backend disagreement did not cover them at all. cupy has since
+    # moved to (dist, time); they are listed here so the family is inside the
+    # canonical surface rather than beside it.
+    "dt_spline_table",
+    "dt_spline_brent",
+    "dt_spline_gaussnewton",
     "sym_matvec",
     "sym_solve",
     "sym_invert",
@@ -237,7 +256,12 @@ def test_torch_does_not_claim_the_inplace_preconditioners():
 
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_every_backend_exposes_the_point_to_spline_distances(backend):
-    """fastfields-torch#35: torch no longer omits the dt_spline_* family."""
+    """fastfields-torch#35: torch no longer omits the dt_spline_* family.
+
+    Subsumed by ``CANONICAL`` since fastfields#38 put the family there; kept
+    because it names the whole missing set in one message, and because the
+    regression it was written for is worth staying spelled out.
+    """
     mod = _import_backend(backend)
     missing = sorted(
         {"dt_spline_table", "dt_spline_brent", "dt_spline_gaussnewton"}

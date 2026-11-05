@@ -96,14 +96,16 @@ And if a backend turns out not to have an operation this module says it does
 call raises `NotImplementedError` saying which package to upgrade, not a bare
 `AttributeError` from a module you never named.
 
-!!! warning "`dt_spline_*` return order differs by backend"
-    The three point-to-spline operators return a 2-tuple, and the backends do
-    not agree on its order: `fastfields.numpy` and `fastfields.torch` return
-    `(dist, time)`, `fastfields.cupy` returns `(time, dist)`. A dispatcher
-    that forwards arguments unchanged cannot paper over a difference in the
-    *result*, so a call through here means whatever the selected backend
-    means. Unpack by backend, or call the backend directly, until that is
-    reconciled.
+!!! note "`dt_spline_*` returns `(dist, time)` on every backend"
+    The three point-to-spline operators return a 2-tuple, and all three
+    namespaces return it in that order. `fastfields.cupy` returned
+    `(time, dist)` until [fastfields#38][ff38]: a dispatcher that forwards
+    arguments unchanged has nowhere to normalise a *result*, so the meaning of
+    a dispatched return value depended on which array type you passed. The
+    three names are part of the canonical surface the cross-backend
+    conformance suite checks, so a namespace cannot quietly drift again.
+
+    [ff38]: https://github.com/fastfields/fastfields/issues/38
 
 ## Status
 
