@@ -1,4 +1,5 @@
-"""Backend-dispatching distance-transform wrappers (:mod:`fastfields.auto`).
+"""Backend-dispatching distance-transform wrappers
+([`fastfields.auto`][fastfields.auto]).
 
 Each name here forwards to the matching backend function; every backend now
 exposes the canonical ``dt_*`` names, so the per-name tables below map each

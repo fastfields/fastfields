@@ -9,7 +9,7 @@ to-mesh distance have no meaningful gradient. They are still exposed on torch
 (for API parity with ``fastfields.numpy``/``fastfields.cupy``): forward always
 runs, including when an input requires grad, so the output can sit inside a
 larger graph; only calling ``.backward()`` through that output raises a clear
-``RuntimeError`` (see :func:`fastfields.torch._util.raise_not_differentiable`).
+``RuntimeError`` (see `fastfields.torch._util.raise_not_differentiable`).
 This mirrors how ``jitfields`` guards these ops, but the guard now lives in
 ``backward`` instead of at call time -- see ``API_CONTRACT.md``, "In-place
 policy", and fastfields#4.
@@ -18,7 +18,7 @@ The underlying bindings mutate their input in place. The out-of-place
 functions (``dt_euclidean``, ``dt_l1``) clone first; the in-place variants
 (``dt_euclidean_``, ``dt_l1_``) write through the caller's tensor, exactly
 like the numpy/cupy ``_``-suffixed forms. On CUDA tensors the current stream
-is forwarded to the binding (see :mod:`fastfields.torch._util`).
+is forwarded to the binding (see `fastfields.torch._util`).
 """
 
 from __future__ import annotations
@@ -101,9 +101,9 @@ def dt_euclidean(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
     Returns
     -------
     torch.Tensor
-        The distance transform (a new tensor with ``inp``'s layout); ``inp``
-        is left untouched. See :func:`dt_euclidean_` for the in-place
-        variant.
+        The distance transform (a new tensor with ``inp``'s layout); ``inp`` is
+        left untouched. See [`dt_euclidean_`][fastfields.torch.dt_euclidean_]
+        for the in-place variant.
 
     Raises
     ------
@@ -185,7 +185,8 @@ def dt_l1(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
     """L1 distance transform along the last axis.
 
     Not differentiable -- calling ``.backward()`` through this raises
-    ``RuntimeError``. See :func:`dt_euclidean` for the input convention.
+    ``RuntimeError``. See [`dt_euclidean`][fastfields.torch.dt_euclidean] for
+    the input convention.
 
     Parameters
     ----------
@@ -197,8 +198,9 @@ def dt_l1(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
     Returns
     -------
     torch.Tensor
-        The distance transform (a new tensor with ``inp``'s layout); ``inp``
-        is left untouched. See :func:`dt_l1_` for the in-place variant.
+        The distance transform (a new tensor with ``inp``'s layout); ``inp`` is
+        left untouched. See [`dt_l1_`][fastfields.torch.dt_l1_] for the
+        in-place variant.
 
     Raises
     ------
@@ -297,6 +299,16 @@ def dt_mesh(
     ``RuntimeError``. Forward still runs normally (including when ``loc``/
     ``vertices`` require grad); only an actual backward call fails.
 
+    !!! note
+        A **single** mesh is queried by an arbitrarily batched point set: only
+        ``loc`` carries batch dims, and ``dist`` (and ``nearest_vertex``) are
+        allocated with ``loc.shape[:-1]``. The mesh operands are *not*
+        broadcast against that batch -- ``vertices`` and ``faces`` must be
+        exactly ``(V, D)`` / ``(F, D)``, matching jitfields' ``mesh_distance``
+        and the ``ff::dt_mesh`` contract. (An earlier revision broadcast them
+        to ``(*B, V, D)``, which the binding rejects outright; see
+        fastfields#32.)
+
     Parameters
     ----------
     loc : torch.Tensor
@@ -329,16 +341,6 @@ def dt_mesh(
         If ``vertices`` or ``faces`` is not 2D.
     RuntimeError
         If ``.backward()`` is called through ``dist``.
-
-    Notes
-    -----
-    A **single** mesh is queried by an arbitrarily batched point set: only
-    ``loc`` carries batch dims, and ``dist`` (and ``nearest_vertex``) are
-    allocated with ``loc.shape[:-1]``. The mesh operands are *not* broadcast
-    against that batch -- ``vertices`` and ``faces`` must be exactly
-    ``(V, D)`` / ``(F, D)``, matching jitfields' ``mesh_distance`` and the
-    ``ff::dt_mesh`` contract. (An earlier revision broadcast them to
-    ``(*B, V, D)``, which the binding rejects outright; see fastfields#32.)
     """
     check_dtype(loc, vertices)
     # faces holds integer vertex indices: the binding reads them at int64
@@ -419,7 +421,7 @@ class _DtSpline(torch.autograd.Function):
     ``loc`` / ``coeff`` / ``times`` are passed as real ``Function`` inputs,
     not captured in a closure, so that autograd records the edge: if one of
     them requires grad the outputs do too, and a ``.backward()`` through them
-    reaches :meth:`backward` and gets the op-specific message rather than
+    reaches `backward` and gets the op-specific message rather than
     torch's generic "does not require grad". That is the contract the other
     non-differentiable ops in this module follow.
     """
@@ -488,6 +490,12 @@ def dt_spline_table(
     Not differentiable -- calling ``.backward()`` through either output raises
     ``RuntimeError``. Forward still runs normally.
 
+    !!! note
+        Batch dims of ``loc`` / ``coeff`` / ``times`` are broadcast together
+        with ``Tensor.expand`` (0-stride views, no copy), which the
+        stride-aware binding consumes directly. The return order matches
+        ``fastfields.numpy.dt_spline_table``: ``(dist, time)``.
+
     Parameters
     ----------
     loc : `(*B, D) tensor`
@@ -507,13 +515,6 @@ def dt_spline_table(
         Squared distance per query point.
     time : `(*B,) tensor`
         Best time per query point.
-
-    Notes
-    -----
-    Batch dims of ``loc`` / ``coeff`` / ``times`` are broadcast together with
-    ``Tensor.expand`` (0-stride views, no copy), which the stride-aware
-    binding consumes directly. The return order matches
-    ``fastfields.numpy.dt_spline_table``: ``(dist, time)``.
     """
     batch, (loc, coeff, times) = _spline_operands(loc, coeff, times)
     time, dist = _spline_outputs(loc, batch, seed=False)
@@ -540,7 +541,8 @@ def dt_spline_brent(
 ) -> Tuple[Tensor, Tensor]:
     """Point-to-spline (squared) distance via Brent's method.
 
-    Not differentiable (see :func:`dt_spline_table`).
+    Not differentiable (see
+    [`dt_spline_table`][fastfields.torch.dt_spline_table]).
 
     Parameters
     ----------
@@ -597,7 +599,8 @@ def dt_spline_gaussnewton(
 ) -> Tuple[Tensor, Tensor]:
     """Point-to-spline (squared) distance via Gauss-Newton optimization.
 
-    Not differentiable (see :func:`dt_spline_table`).
+    Not differentiable (see
+    [`dt_spline_table`][fastfields.torch.dt_spline_table]).
 
     Parameters
     ----------

@@ -19,7 +19,7 @@ as their first argument, so they dispatch here too; the ``*_kernel``
 *builders* they accumulate over do not, for the same reason ``*_diag`` does
 not -- they are given a rank and penalty weights, not an array.
 
-Not every operator exists on every backend. Those are in :data:`_PARTIAL`
+Not every operator exists on every backend. Those are in `_PARTIAL`
 with the reason, and a call that lands on a backend without one raises
 ``NotImplementedError`` naming the backends that do have it -- rather than
 being silently missing from this module, which would make the omission

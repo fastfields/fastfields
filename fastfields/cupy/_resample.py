@@ -42,9 +42,9 @@ def _resolve(
     """Resolve (full output shape, per-dim scale, scalar shift) for a call.
 
     The order/bound normalisation and the anchor/factor/shape resolution come
-    from :mod:`fastfields.helpers` so every backend shares one implementation.
-    Raises ``ValueError`` if ``ndim`` is outside ``1..inp.ndim`` or an explicit
-    ``scale`` has the wrong length.
+    from [`fastfields.helpers`][fastfields.helpers] so every backend shares one
+    implementation. Raises ``ValueError`` if ``ndim`` is outside
+    ``1..inp.ndim`` or an explicit ``scale`` has the wrong length.
     """
     ndim = infer_ndim(ndim, factor, shape)
     check_ndim(ndim, inp.ndim)
@@ -93,17 +93,17 @@ def resample(
     shape : int or sequence of int, optional
         Explicit output spatial size (the last ``ndim`` axes of the result).
     order : int or str, default=2
-        Spline order (int ``0..7``, a :class:`Spline` enum, or a name such as
-        ``"cubic"``).
+        Spline order (int ``0..7``, a [`Spline`][fastfields.cupy.Spline] enum,
+        or a name such as ``"cubic"``).
     bound : int or str, default="dct2"
-        Boundary condition (int, a :class:`Bound` enum, or a name such as
-        ``"dct2"``/``"wrap"``).
+        Boundary condition (int, a [`Bound`][fastfields.cupy.Bound] enum, or a
+        name such as ``"dct2"``/``"wrap"``).
     ndim : int, optional
         Number of trailing spatial dimensions (inferred when omitted).
     anchor : {"centers", "edges", "first", "last"}, default="centers"
         Sampling-grid convention, matching ``interpol.resize`` (see
-        :func:`fastfields.helpers.anchor_scale_shift`). Abbreviations
-        accepted.
+        [`fastfields.helpers.anchor_scale_shift`][fastfields.helpers.anchor_scale_shift]).
+        Abbreviations accepted.
     shift : float, optional
         Sampling-shift override (default: the shift implied by ``anchor``).
     scale : sequence of float, optional
@@ -141,13 +141,15 @@ def restriction(
     shift: Optional[float] = None,
     scale: Optional[Sequence[float]] = None,
 ) -> Any:
-    """Restriction (adjoint of :func:`resample`) of the last ``ndim`` axes.
+    """Restriction (adjoint of [`resample`][fastfields.cupy.resample]) of the last
+    ``ndim`` axes.
 
     The binding *accumulates* into the output, so the freshly allocated array
-    is zero-initialised here. Shares :func:`resample`'s ``factor``/``shape``/
-    ``order`` signature; because the scale is derived from this call's own
-    (input, output) shapes, a ``resample`` and a matching ``restriction`` use
-    reciprocal scales and the same shift -- the adjoint the binding expects.
+    is zero-initialised here. Shares [`resample`][fastfields.cupy.resample]'s
+    ``factor``/``shape``/ ``order`` signature; because the scale is derived
+    from this call's own (input, output) shapes, a ``resample`` and a matching
+    ``restriction`` use reciprocal scales and the same shift -- the adjoint the
+    binding expects.
 
     Parameters
     ----------
@@ -158,17 +160,17 @@ def restriction(
     shape : int or sequence of int, optional
         Explicit output spatial size.
     order : int or str, default=2
-        Spline order (see :func:`resample`).
+        Spline order (see [`resample`][fastfields.cupy.resample]).
     bound : int or str, default="dct2"
-        Boundary condition (see :func:`resample`).
+        Boundary condition (see [`resample`][fastfields.cupy.resample]).
     ndim : int, optional
         Number of trailing spatial dimensions (inferred when omitted).
     anchor : {"centers", "edges", "first", "last"}, default="centers"
-        Sampling-grid convention (see :func:`resample`).
+        Sampling-grid convention (see [`resample`][fastfields.cupy.resample]).
     shift : float, optional
-        Sampling-shift override (see :func:`resample`).
+        Sampling-shift override (see [`resample`][fastfields.cupy.resample]).
     scale : sequence of float, optional
-        Per-dim scale override (see :func:`resample`).
+        Per-dim scale override (see [`resample`][fastfields.cupy.resample]).
     """
     cp = cupy()
     inp = as_gpu_array(inp, name="inp")

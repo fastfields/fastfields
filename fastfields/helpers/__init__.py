@@ -2,11 +2,12 @@
 
 The ``fastfields.numpy`` / ``fastfields.torch`` / ``fastfields.cupy`` wrappers
 and the ``fastfields.auto`` dispatcher all need the same backend-agnostic
-logic: the :class:`Spline` / :class:`Bound` enums, the ``order``/``bound``
-normalisers, and the resolution of ``factor``/``shape``/``anchor`` into the
-per-dim ``scale`` + scalar ``shift`` that the resize binding consumes. It lives
-here, in one dependency-free package, so each consumer imports it instead of
-carrying its own copy.
+logic: the [`Spline`][fastfields.helpers.Spline] /
+[`Bound`][fastfields.helpers.Bound] enums, the ``order``/``bound`` normalisers,
+and the resolution of ``factor``/``shape``/``anchor`` into the per-dim
+``scale`` + scalar ``shift`` that the resize binding consumes. It lives here,
+in one dependency-free package, so each consumer imports it instead of carrying
+its own copy.
 
 This package is **pure Python and dependency-free** -- it imports nothing but
 the standard library, and in particular no numpy/torch/cupy and none of the
@@ -109,10 +110,10 @@ def cuda_backend_message(
 ) -> str:
     """Build the "this needs a CUDA build of fastfields-dlpack" message.
 
-    Shared by :mod:`fastfields.cupy` (which refuses at import) and
-    :mod:`fastfields.torch` (which refuses only when a CUDA tensor meets a
-    CPU-only build) so that one wording, naming both the index URL and the
-    command that fixes it, covers both.
+    Shared by [`fastfields.cupy`][fastfields.cupy] (which refuses at import)
+    and [`fastfields.torch`][fastfields.torch] (which refuses only when a CUDA
+    tensor meets a CPU-only build) so that one wording, naming both the index
+    URL and the command that fixes it, covers both.
 
     Parameters
     ----------
@@ -214,9 +215,9 @@ _BOUND_ALIASES = {
 def as_spline(value: int | str | Spline) -> int:
     """Normalise a spline-order argument to an ``int`` in ``0..7``.
 
-    Accepts an integer, a :class:`Spline` enum, or a friendly string alias
-    (e.g. ``"cubic"``). Raises ``ValueError`` for an unknown alias or an
-    out-of-range integer.
+    Accepts an integer, a [`Spline`][fastfields.helpers.Spline] enum, or a
+    friendly string alias (e.g. ``"cubic"``). Raises ``ValueError`` for an
+    unknown alias or an out-of-range integer.
     """
     if isinstance(value, str):
         key = value.strip().lower()
@@ -235,9 +236,9 @@ def as_spline(value: int | str | Spline) -> int:
 def as_bound(value: int | str | Bound) -> int:
     """Normalise a boundary-condition argument to an ``int`` in ``0..7``.
 
-    Accepts an integer, a :class:`Bound` enum, or a friendly string alias
-    (e.g. ``"dct2"``, ``"wrap"``). Raises ``ValueError`` for an unknown alias
-    or an out-of-range integer.
+    Accepts an integer, a [`Bound`][fastfields.helpers.Bound] enum, or a
+    friendly string alias (e.g. ``"dct2"``, ``"wrap"``). Raises ``ValueError``
+    for an unknown alias or an out-of-range integer.
     """
     if isinstance(value, str):
         key = value.strip().lower()

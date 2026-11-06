@@ -18,20 +18,21 @@ the out-of-place ``sym_solve(mat, vec, weight=None)``). Whether an in-place
 form is differentiable follows the per-op rule in ``API_CONTRACT.md``
 ("In-place policy"):
 
-* :func:`sym_solve_` **is** differentiable (w.r.t. the mutated right-hand
-  side): the backward of :func:`sym_solve` never reads the pre-mutation
+* [`sym_solve_`][fastfields.torch.sym_solve_] **is** differentiable (w.r.t. the
+  mutated right-hand side): the backward of
+  [`sym_solve`][fastfields.torch.sym_solve] never reads the pre-mutation
   right-hand side, only the saved ``mat``/``weight``, so overwriting it in
   place destroys no information backward needs.
-* :func:`sym_invert_` is **not** differentiable -- for the same reason as
-  :func:`sym_invert`: no gradient is implemented for the packed inverse on
-  this backend at all, mirroring ``jitfields`` (which rejects a
-  grad-requiring ``mat`` outright). This is an *implementation gap*, not a
-  mathematical obstruction: the matrix inverse is perfectly differentiable
-  (``dL/dA = -B (dL/dB) B`` for ``B = A^-1``, symmetric), and note that
-  formula needs only the **inverse** -- i.e. the value this op leaves
-  behind -- so even the in-place form could support a gradient if one were
-  implemented. Calling ``.backward()`` through either form's output raises
-  ``RuntimeError``.
+* [`sym_invert_`][fastfields.torch.sym_invert_] is **not** differentiable --
+  for the same reason as [`sym_invert`][fastfields.torch.sym_invert]: no
+  gradient is implemented for the packed inverse on this backend at all,
+  mirroring ``jitfields`` (which rejects a grad-requiring ``mat`` outright).
+  This is an *implementation gap*, not a mathematical obstruction: the matrix
+  inverse is perfectly differentiable (``dL/dA = -B (dL/dB) B`` for ``B =
+  A^-1``, symmetric), and note that formula needs only the **inverse** -- i.e.
+  the value this op leaves behind -- so even the in-place form could support a
+  gradient if one were implemented. Calling ``.backward()`` through either
+  form's output raises ``RuntimeError``.
 """
 
 from __future__ import annotations
@@ -144,7 +145,9 @@ def sym_matvec(mat: Tensor, vec: Tensor) -> Tensor:
 
 
 def _matvec_acc(out0: Tensor, mat: Tensor, vec: Tensor, sub: bool) -> Tensor:
-    """Shared body of :func:`sym_addmatvec_` / :func:`sym_submatvec_`."""
+    """Shared body of [`sym_addmatvec_`][fastfields.torch.sym_addmatvec_] /
+    [`sym_submatvec_`][fastfields.torch.sym_submatvec_].
+    """
     name = "sym_submatvec_" if sub else "sym_addmatvec_"
     check_dtype(out0, mat, vec)
     _check_sym(mat, vec)
@@ -168,12 +171,12 @@ def sym_addmatvec_(out0: Tensor, mat: Tensor, vec: Tensor) -> Tensor:
 
     Argument order matches ``fastfields.numpy`` / ``fastfields.cupy``
     exactly -- accumulator first -- which is *not* the order of the
-    out-of-place :func:`sym_matvec`.
+    out-of-place [`sym_matvec`][fastfields.torch.sym_matvec].
 
     Differentiable wrt ``out0`` (identity pass-through). A ``.backward()``
     that needs a gradient wrt ``mat`` or ``vec`` raises ``RuntimeError``
     naming the differentiable alternative, ``out0 + sym_matvec(mat, vec)``;
-    see :class:`_MatVecAcc` for why.
+    see `_MatVecAcc` for why.
 
     Parameters
     ----------
@@ -195,7 +198,8 @@ def sym_addmatvec_(out0: Tensor, mat: Tensor, vec: Tensor) -> Tensor:
 def sym_submatvec_(out0: Tensor, mat: Tensor, vec: Tensor) -> Tensor:
     """Accumulate ``out0 -= mat @ vec`` **in place**; returns ``out0``.
 
-    The subtracting twin of :func:`sym_addmatvec_`; same contract.
+    The subtracting twin of
+    [`sym_addmatvec_`][fastfields.torch.sym_addmatvec_]; same contract.
     """
     return _matvec_acc(out0, mat, vec, sub=True)
 
@@ -208,7 +212,7 @@ def sym_solve(
     Differentiable with respect to ``vec`` (and ``weight`` is treated as a
     constant). As in ``jitfields``, the solve does **not** backpropagate
     through ``mat``: pass a matrix that does not require grad (detach it).
-    See :func:`sym_solve_` for the in-place variant.
+    See [`sym_solve_`][fastfields.torch.sym_solve_] for the in-place variant.
 
     Parameters
     ----------
@@ -250,17 +254,19 @@ def sym_solve_(
     """In-place solve: ``inp_out <- (mat + diag(weight)) \\ inp_out``.
 
     Note the argument order -- ``inp_out`` first, then ``mat`` -- matches the
-    numpy/cupy ``sym_solve_`` convention, not :func:`sym_solve`'s
-    ``(mat, vec, ...)`` order.
+    numpy/cupy ``sym_solve_`` convention, not
+    [`sym_solve`][fastfields.torch.sym_solve]'s ``(mat, vec, ...)`` order.
 
-    Differentiable with respect to ``inp_out`` (mirrors :func:`sym_solve`);
-    ``weight`` is a constant and ``mat`` must not require grad (as in
-    :func:`sym_solve`). Safe under autograd: the backward of
-    :func:`sym_solve` never reads the pre-mutation right-hand side -- only
-    the saved ``mat``/``weight`` -- so overwriting ``inp_out`` in place
-    destroys no information backward needs (see ``API_CONTRACT.md``,
-    "In-place policy"). As with any in-place op, a leaf tensor with
-    ``requires_grad=True`` cannot be mutated (torch's ordinary leaf rule).
+    Differentiable with respect to ``inp_out`` (mirrors
+    [`sym_solve`][fastfields.torch.sym_solve]); ``weight`` is a constant and
+    ``mat`` must not require grad (as in
+    [`sym_solve`][fastfields.torch.sym_solve]). Safe under autograd: the
+    backward of [`sym_solve`][fastfields.torch.sym_solve] never reads the
+    pre-mutation right-hand side -- only the saved ``mat``/``weight`` -- so
+    overwriting ``inp_out`` in place destroys no information backward needs
+    (see ``API_CONTRACT.md``, "In-place policy"). As with any in-place op, a
+    leaf tensor with ``requires_grad=True`` cannot be mutated (torch's ordinary
+    leaf rule).
 
     Parameters
     ----------
@@ -307,7 +313,7 @@ def sym_invert(mat: Tensor) -> Tensor:
     Not differentiable -- calling ``.backward()`` through this raises
     ``RuntimeError``. Forward still runs normally (including when ``mat``
     requires grad); only an actual backward call fails. See
-    :func:`sym_invert_` for the in-place variant.
+    [`sym_invert_`][fastfields.torch.sym_invert_] for the in-place variant.
 
     Parameters
     ----------
@@ -332,14 +338,14 @@ def sym_invert_(mat: Tensor) -> Tensor:
     """In-place invert a compact-symmetric matrix (``mat <- inv(mat)``).
 
     Not differentiable -- calling ``.backward()`` through this raises
-    ``RuntimeError`` (mirrors :func:`sym_invert`: no gradient is implemented
-    for the packed inverse on this backend). That is an implementation gap
-    rather than a mathematical one -- the inverse is differentiable, and its
-    backward ``-B (dL/dB) B`` needs only ``B``, the value this op leaves
-    behind. As with any in-place op, a leaf tensor with
-    ``requires_grad=True`` cannot be mutated (torch's ordinary leaf rule);
-    that is checked before ``mat`` is touched, so the call raises without
-    corrupting it.
+    ``RuntimeError`` (mirrors [`sym_invert`][fastfields.torch.sym_invert]: no
+    gradient is implemented for the packed inverse on this backend). That is an
+    implementation gap rather than a mathematical one -- the inverse is
+    differentiable, and its backward ``-B (dL/dB) B`` needs only ``B``, the
+    value this op leaves behind. As with any in-place op, a leaf tensor with
+    ``requires_grad=True`` cannot be mutated (torch's ordinary leaf rule); that
+    is checked before ``mat`` is touched, so the call raises without corrupting
+    it.
 
     Parameters
     ----------
@@ -397,7 +403,7 @@ class _MatVecAcc(torch.autograd.Function):
     The gradient wrt the accumulator is the identity pass-through, so the
     useful case -- accumulating into a tensor that is itself part of a graph
     -- works. Gradients wrt ``mat``/``vec`` are *not* implemented here even
-    though :class:`_MatVec` has them: an in-place accumulate consumes
+    though `_MatVec` has them: an in-place accumulate consumes
     ``out0``'s storage, and plumbing the matvec adjoints through a
     ``mark_dirty`` node correctly (so that ``out0``'s own history and the
     matvec's contribution are both honoured) is a separate piece of work
@@ -408,7 +414,7 @@ class _MatVecAcc(torch.autograd.Function):
 
     Not a mathematical obstruction: for ``y = out0 +/- M v`` the gradients are
     ``dL/dout0 = g``, ``dL/dv = +/- M g`` (M self-adjoint) and ``dL/dM`` the
-    usual outer product, i.e. exactly what :class:`_MatVec` already computes.
+    usual outer product, i.e. exactly what `_MatVec` already computes.
     The out-of-place spelling is ``out0 +/- sym_matvec(mat, vec)``, which is
     fully differentiable today.
     """
@@ -479,7 +485,7 @@ class _Solve(torch.autograd.Function):
 class _SolveInPlace(torch.autograd.Function):
     """``inp_out <- (mat + diag(weight)) \\ inp_out`` in place.
 
-    Autograd-safe: the backward below is identical to :class:`_Solve`'s and
+    Autograd-safe: the backward below is identical to `_Solve`'s and
     never reads the pre-mutation ``inp_out`` -- only the saved ``mat``/
     ``weight`` -- so mutating ``inp_out`` in place loses nothing backward
     needs. ``ctx.mark_dirty(inp_out)`` bumps its version counter so that if

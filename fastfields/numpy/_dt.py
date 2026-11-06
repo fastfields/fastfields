@@ -57,7 +57,8 @@ def dt_euclidean(inp: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
     -------
     numpy.ndarray
         The distance transform, a newly allocated array; ``inp`` is left
-        untouched. See :func:`dt_euclidean_` for the in-place variant.
+        untouched. See [`dt_euclidean_`][fastfields.numpy.dt_euclidean_] for
+        the in-place variant.
     """
     out = _as_float_array(inp, "inp", copy=True)
     _ff.dt_euclidean(out, float(voxel_spacing))
@@ -92,8 +93,8 @@ def dt_euclidean_(
 def dt_l1(inp: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
     """L1 distance transform along the **last** axis.
 
-    See :func:`dt_euclidean` for the input convention and the meaning of the
-    parameters.
+    See [`dt_euclidean`][fastfields.numpy.dt_euclidean] for the input
+    convention and the meaning of the parameters.
 
     Parameters
     ----------
@@ -106,7 +107,8 @@ def dt_l1(inp: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
     -------
     numpy.ndarray
         The distance transform, a newly allocated array; ``inp`` is left
-        untouched. See :func:`dt_l1_` for the in-place variant.
+        untouched. See [`dt_l1_`][fastfields.numpy.dt_l1_] for the in-place
+        variant.
     """
     out = _as_float_array(inp, "inp", copy=True)
     _ff.dt_l1(out, float(voxel_spacing))
@@ -155,6 +157,10 @@ def dt_spline_table(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Point-to-spline (squared) distance via a dictionary of candidate times.
 
+    !!! note
+        Batch dims of ``loc``/``coeff``/``times`` (core dims ``(D,)``, ``(N,
+        D)``, ``(K,)``) are broadcast; outputs use the broadcast batch shape.
+
     Parameters
     ----------
     loc : numpy.ndarray
@@ -174,11 +180,6 @@ def dt_spline_table(
         Squared distance per query point, shape ``(*B,)``.
     time : numpy.ndarray
         Best time per query point, shape ``(*B,)``.
-
-    Notes
-    -----
-    Batch dims of ``loc``/``coeff``/``times`` (core dims ``(D,)``, ``(N, D)``,
-    ``(K,)``) are broadcast; outputs use the broadcast batch shape.
     """
     loc = _as_float_array(loc, "loc")
     coeff = _as_float_array(coeff, "coeff", dtype=loc.dtype)
@@ -212,6 +213,10 @@ def dt_spline_brent(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Point-to-spline (squared) distance via Brent's method.
 
+    !!! note
+        Batch dims of ``loc`` (core ``(D,)``) and ``coeff`` (core ``(N, D)``)
+        are broadcast together.
+
     Parameters
     ----------
     loc : numpy.ndarray
@@ -235,11 +240,6 @@ def dt_spline_brent(
         Squared distance per query point, shape ``(*B,)``.
     time : numpy.ndarray
         Best time per query point, shape ``(*B,)``.
-
-    Notes
-    -----
-    Batch dims of ``loc`` (core ``(D,)``) and ``coeff`` (core ``(N, D)``) are
-    broadcast together.
     """
     loc = _as_float_array(loc, "loc")
     coeff = _as_float_array(coeff, "coeff", dtype=loc.dtype)
@@ -271,6 +271,10 @@ def dt_spline_gaussnewton(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Point-to-spline (squared) distance via Gauss-Newton.
 
+    !!! note
+        Batch dims of ``loc`` (core ``(D,)``) and ``coeff`` (core ``(N, D)``)
+        are broadcast together.
+
     Parameters
     ----------
     loc : numpy.ndarray
@@ -292,11 +296,6 @@ def dt_spline_gaussnewton(
         Squared distance per query point, shape ``(*B,)``.
     time : numpy.ndarray
         Best time per query point, shape ``(*B,)``.
-
-    Notes
-    -----
-    Batch dims of ``loc`` (core ``(D,)``) and ``coeff`` (core ``(N, D)``) are
-    broadcast together.
     """
     loc = _as_float_array(loc, "loc")
     coeff = _as_float_array(coeff, "coeff", dtype=loc.dtype)
@@ -331,6 +330,15 @@ def dt_mesh(
     made them keyword-only here only, which meant a positional call worked on
     two backends and raised a ``TypeError`` on the third. See fastfields#4.
 
+    !!! note
+        A **single** mesh is queried by an arbitrarily batched point set: only
+        ``loc`` carries batch dims, and the outputs take ``loc.shape[:-1]``.
+        The mesh operands are *not* broadcast against that batch --
+        ``vertices`` and ``faces`` must be exactly ``(N, D)`` / ``(M, D)``,
+        matching jitfields' ``mesh_distance`` and the ``ff::dt_mesh`` contract.
+        (An earlier revision broadcast them to ``(*B, N, D)``, which the
+        binding rejects outright; see fastfields#32.)
+
     Parameters
     ----------
     loc : numpy.ndarray
@@ -358,16 +366,6 @@ def dt_mesh(
     ------
     ValueError
         If ``vertices`` or ``faces`` is not 2D.
-
-    Notes
-    -----
-    A **single** mesh is queried by an arbitrarily batched point set: only
-    ``loc`` carries batch dims, and the outputs take ``loc.shape[:-1]``. The
-    mesh operands are *not* broadcast against that batch -- ``vertices`` and
-    ``faces`` must be exactly ``(N, D)`` / ``(M, D)``, matching jitfields'
-    ``mesh_distance`` and the ``ff::dt_mesh`` contract. (An earlier revision
-    broadcast them to ``(*B, N, D)``, which the binding rejects outright; see
-    fastfields#32.)
     """
     loc = _as_float_array(loc, "loc")
     vertices = _as_float_array(vertices, "vertices", dtype=loc.dtype)

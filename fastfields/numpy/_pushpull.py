@@ -75,7 +75,7 @@ def push(
 ) -> np.ndarray:
     """Splat (push) ``inp`` into a volume of spatial size ``shape``.
 
-    The adjoint of :func:`pull`. ``inp``/``grid`` are
+    The adjoint of [`pull`][fastfields.numpy.pull]. ``inp``/``grid`` are
     ``(*B, *outshape, {C,D})``; the result is ``(*B, *shape, C)`` (``shape``
     gives the ``D`` spatial sizes of the target volume). Values are accumulated
     (the buffer is pre-zeroed here).

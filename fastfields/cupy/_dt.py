@@ -96,10 +96,11 @@ def dt_spline_table(
     times : cupy.ndarray
         Candidate times, shape ``(*B, K)``.
     order : int or str, default=3
-        Spline order. Accepts an int, a :class:`Spline` enum, or a name such
-        as ``"cubic"``.
+        Spline order. Accepts an int, a [`Spline`][fastfields.cupy.Spline]
+        enum, or a name such as ``"cubic"``.
     bound : int or str, default="dct2"
-        Boundary condition (int, a :class:`Bound` enum, or a name).
+        Boundary condition (int, a [`Bound`][fastfields.cupy.Bound] enum, or a
+        name).
 
     Returns
     -------
@@ -157,10 +158,11 @@ def dt_spline_brent(
     step : float, default=0.1
         Initial bracketing step.
     order : int or str, default=3
-        Spline order. Accepts an int, a :class:`Spline` enum, or a name such
-        as ``"cubic"``.
+        Spline order. Accepts an int, a [`Spline`][fastfields.cupy.Spline]
+        enum, or a name such as ``"cubic"``.
     bound : int or str, default="dct2"
-        Boundary condition (int, a :class:`Bound` enum, or a name).
+        Boundary condition (int, a [`Bound`][fastfields.cupy.Bound] enum, or a
+        name).
 
     Returns
     -------
@@ -214,10 +216,11 @@ def dt_spline_gaussnewton(
     tol : float, default=1e-6
         Convergence tolerance.
     order : int or str, default=3
-        Spline order. Accepts an int, a :class:`Spline` enum, or a name such
-        as ``"cubic"``.
+        Spline order. Accepts an int, a [`Spline`][fastfields.cupy.Spline]
+        enum, or a name such as ``"cubic"``.
     bound : int or str, default="dct2"
-        Boundary condition (int, a :class:`Bound` enum, or a name).
+        Boundary condition (int, a [`Bound`][fastfields.cupy.Bound] enum, or a
+        name).
 
     Returns
     -------

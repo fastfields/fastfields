@@ -25,33 +25,35 @@ copy is forced); only freshly allocated outputs and in-place (``_``-suffixed)
 buffers are materialised as contiguous arrays.
 
 Spline order and boundary condition arguments accept an ``int``, one of the
-re-exported :class:`Spline` / :class:`Bound` enums, or a friendly string
-(e.g. ``"cubic"``, ``"dct2"``).
+re-exported [`Spline`][fastfields.numpy.Spline] /
+[`Bound`][fastfields.numpy.Bound] enums, or a friendly string (e.g.
+``"cubic"``, ``"dct2"``).
 
-The implementation is split by category into :mod:`._util` (validation and
-batch-broadcast helpers), :mod:`._dt` (distance transforms), :mod:`._sym`
-(compact-symmetric linear algebra), :mod:`._resample` (spline coefficients
-and resampling), :mod:`._pushpull` (spline gather/scatter) and :mod:`._reg`
+The implementation is split by category into `._util` (validation and
+batch-broadcast helpers), `._dt` (distance transforms), `._sym`
+(compact-symmetric linear algebra), `._resample` (spline coefficients
+and resampling), `._pushpull` (spline gather/scatter) and `._reg`
 (spatial regularisers).
 
-What this wrapper deliberately does not expose
-----------------------------------------------
-Of the 58 public operations of the C++ hub, this package wraps all but four.
-``tools/api_inventory.py`` in ``fastfields-dlpack`` prints the full matrix;
-the omissions are:
+!!! note "What this wrapper deliberately does not expose"
+    Of the 58 public operations of the C++ hub, this package wraps all but
+    four. ``tools/api_inventory.py`` in ``fastfields-dlpack`` prints the full
+    matrix; the omissions are:
 
-``pull_backward``, ``push_backward``, ``count_backward``, ``grad_backward``
-    The adjoints of the pushpull operators, with respect to both the sampled
-    field and the sampling coordinates. They exist so that an autograd engine
-    can differentiate through ``grid``, which only :mod:`fastfields.torch`
-    has; there is no automatic differentiation on numpy, so a wrapper here
-    would be a bare function nothing calls, with five pre-zeroed buffers for
-    the caller to get right. They stay reachable through the raw bindings --
-    ``fastfields.dlpack.pull_backward(...)`` and friends -- which is the
-    honest layer for them.
+    ``pull_backward``, ``push_backward``, ``count_backward``, ``grad_backward``
+        The adjoints of the pushpull operators, with respect to both the
+        sampled field and the sampling coordinates. They exist so that an
+        autograd engine can differentiate through ``grid``, which only
+        [`fastfields.torch`][fastfields.torch] has; there is no automatic
+        differentiation on numpy, so a wrapper here would be a bare function
+        nothing calls, with five pre-zeroed buffers for the caller to get
+        right. They stay reachable through the raw bindings --
+        ``fastfields.dlpack.pull_backward(...)`` and friends -- which is the
+        honest layer for them.
 
-This is checked rather than asserted: ``tests/test_api_coverage.py`` fails if
-the set of operations this package omits ever differs from the list above.
+    This is checked rather than asserted: ``tests/test_api_coverage.py`` fails
+    if the set of operations this package omits ever differs from the list
+    above.
 """
 
 from __future__ import annotations

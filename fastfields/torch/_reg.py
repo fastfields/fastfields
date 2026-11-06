@@ -8,28 +8,28 @@ The ``*_matvec`` operators are symmetric, so they are differentiable wrt the
 input field via the same (self-adjoint) operator. The ``*_diag``
 preconditioners have no differentiable input.
 
-Why ``*_forward`` / ``*_precond`` stay compositions here
---------------------------------------------------------
-``fastfields-lib`` has fused kernels for ``(H + L) x`` and
-``(H + diag(L))^-1 g``, bound as ``fastfields.dlpack.{field,flow}_forward``
-and ``...precond``, and :mod:`fastfields.numpy` / :mod:`fastfields.cupy` call
-them directly -- one kernel instead of a temporary and two traversals.
+!!! note "Why ``*_forward`` / ``*_precond`` stay compositions here"
+    ``fastfields-lib`` has fused kernels for ``(H + L) x`` and ``(H +
+    diag(L))^-1 g``, bound as ``fastfields.dlpack.{field,flow}_forward`` and
+    ``...precond``, and [`fastfields.numpy`][fastfields.numpy] /
+    [`fastfields.cupy`][fastfields.cupy] call them directly -- one kernel
+    instead of a temporary and two traversals.
 
-This backend deliberately does **not**. Here ``field_forward`` is
-``sym_matvec`` + ``field_matvec`` and ``field_precond`` is ``field_diag`` +
-``sym_solve``, and every one of those is an ``autograd.Function``: the
-composition is what makes these two differentiable wrt ``mat`` and ``vec``.
-Calling the raw fused binding instead would be faster and would silently
-drop the gradient -- the forward would still run, the graph would just end
-there. Trading autograd for a saved allocation is not a trade this wrapper
-should make on the caller's behalf.
+    This backend deliberately does **not**. Here ``field_forward`` is
+    ``sym_matvec`` + ``field_matvec`` and ``field_precond`` is ``field_diag`` +
+    ``sym_solve``, and every one of those is an ``autograd.Function``: the
+    composition is what makes these two differentiable wrt ``mat`` and ``vec``.
+    Calling the raw fused binding instead would be faster and would silently
+    drop the gradient -- the forward would still run, the graph would just end
+    there. Trading autograd for a saved allocation is not a trade this wrapper
+    should make on the caller's behalf.
 
-A fused *and* differentiable version is possible (a ``Function`` whose
-``forward`` calls ``field_forward`` and whose ``backward`` calls it again,
-the operator being self-adjoint), and is the right follow-up; it is a
-different change from exposing the op. Until then, reach for
-``fastfields.dlpack.field_forward`` directly if you want the fused kernel
-and have no use for gradients.
+    A fused *and* differentiable version is possible (a ``Function`` whose
+    ``forward`` calls ``field_forward`` and whose ``backward`` calls it again,
+    the operator being self-adjoint), and is the right follow-up; it is a
+    different change from exposing the op. Until then, reach for
+    ``fastfields.dlpack.field_forward`` directly if you want the fused kernel
+    and have no use for gradients.
 """
 
 from __future__ import annotations
@@ -565,7 +565,8 @@ class _FieldKernelAcc(torch.autograd.Function):
     ``K`` is the materialised Toeplitz stencil of the field regulariser: like
     ``diag(L)`` it is a function of the penalty weights and the voxel size
     only, with no tensor input, so the only gradient is the identity
-    pass-through wrt ``acc``. Same shape as :func:`field_kernel`'s output.
+    pass-through wrt ``acc``. Same shape as
+    [`field_kernel`][fastfields.torch.field_kernel]'s output.
     """
 
     @staticmethod
@@ -911,10 +912,11 @@ def field_kernel(
     """Materialise the field regulariser's per-channel Toeplitz stencil.
 
     Returns the small centred kernel that, convolved with a field, reproduces
-    :func:`field_matvec`. The shape is ``(*k, C)`` (channels are independent),
-    with ``k`` the stencil width per spatial dim: 1 (absolute), 3 (membrane) or
-    5 (bending). ``C`` is ``channels`` if given, else inferred from the
-    per-channel penalty lengths (default 1). Not differentiable.
+    [`field_matvec`][fastfields.torch.field_matvec]. The shape is ``(*k, C)``
+    (channels are independent), with ``k`` the stencil width per spatial dim: 1
+    (absolute), 3 (membrane) or 5 (bending). ``C`` is ``channels`` if given,
+    else inferred from the per-channel penalty lengths (default 1). Not
+    differentiable.
     """
     ndim = int(ndim)
     channels = _field_channels(channels, absolute, membrane, bending)
@@ -985,9 +987,9 @@ def field_relax(
 
     Solves ``(H + L) x = g`` with per-voxel compact-symmetric Hessian ``hes``
     (packed ``C*(C+1)/2`` last axis), the per-channel field regulariser ``L``
-    (same penalties as :func:`field_matvec`) and gradient ``grd``. Not
-    differentiable (an in-place iterative solver); ``field`` is the warm
-    start, mutated and returned.
+    (same penalties as [`field_matvec`][fastfields.torch.field_matvec]) and
+    gradient ``grd``. Not differentiable (an in-place iterative solver);
+    ``field`` is the warm start, mutated and returned.
     """
     check_dtype(field)
     channels = field.shape[-1]
@@ -1018,7 +1020,8 @@ def field_matvec_rls(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """RLS/JRLS-weighted variant of :func:`field_matvec`.
+    """RLS/JRLS-weighted variant of
+    [`field_matvec`][fastfields.torch.field_matvec].
 
     ``wgt`` has shape ``(*batch, *spatial, 1)`` for a single weight shared
     across all channels (JRLS), or ``(*batch, *spatial, C)`` for a genuine
@@ -1053,13 +1056,15 @@ def field_diag_rls(
     dtype: torch.dtype = torch.float64,
     device=None,
 ) -> Tensor:
-    """Diagonal (preconditioner) of :func:`field_matvec_rls`.
+    """Diagonal (preconditioner) of
+    [`field_matvec_rls`][fastfields.torch.field_matvec_rls].
 
-    ``wgt`` selects JRLS (trailing dim 1) vs RLS (trailing dim ``C``), same
-    as :func:`field_matvec_rls`. The output channel count ``C`` is taken
-    from ``channels`` if given, else from ``wgt``'s trailing dimension when
-    it is not 1 (RLS), else inferred from the per-channel penalty lengths
-    (default 1), exactly as :func:`field_kernel` does. Not differentiable.
+    ``wgt`` selects JRLS (trailing dim 1) vs RLS (trailing dim ``C``), same as
+    [`field_matvec_rls`][fastfields.torch.field_matvec_rls]. The output channel
+    count ``C`` is taken from ``channels`` if given, else from ``wgt``'s
+    trailing dimension when it is not 1 (RLS), else inferred from the
+    per-channel penalty lengths (default 1), exactly as
+    [`field_kernel`][fastfields.torch.field_kernel] does. Not differentiable.
     """
     if channels is None:
         channels = (
@@ -1100,12 +1105,13 @@ def field_relax_rls(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Tensor:
-    """RLS/JRLS-weighted variant of :func:`field_relax`.
+    """RLS/JRLS-weighted variant of [`field_relax`][fastfields.torch.field_relax].
 
-    Refines ``field`` in place with ``nb_iter`` relaxation sweeps of
-    ``(H + L(w)) x = g``, same ``wgt`` conventions as
-    :func:`field_matvec_rls`. Not differentiable (an in-place iterative
-    solver); ``field`` is the warm start, mutated and returned.
+    Refines ``field`` in place with ``nb_iter`` relaxation sweeps of ``(H +
+    L(w)) x = g``, same ``wgt`` conventions as
+    [`field_matvec_rls`][fastfields.torch.field_matvec_rls]. Not differentiable
+    (an in-place iterative solver); ``field`` is the warm start, mutated and
+    returned.
     """
     check_dtype(field)
     channels = field.shape[-1]
@@ -1173,11 +1179,12 @@ def flow_kernel(
     """Materialise the flow regulariser's Toeplitz convolution stencil.
 
     Returns the small centred kernel that, convolved with a flow field,
-    reproduces :func:`flow_matvec`. The shape is ``(*k, ndim)`` for the
-    per-channel vector stencil, or ``(*k, ndim, ndim)`` when ``shears``/``div``
-    select the cross-channel (Lamé) matrix stencil, where ``k`` is the stencil
-    width per spatial dim: 1 (absolute only), 3 (membrane/Lamé) or 5 (bending).
-    Not differentiable (it builds from a shape descriptor, not an input field).
+    reproduces [`flow_matvec`][fastfields.torch.flow_matvec]. The shape is
+    ``(*k, ndim)`` for the per-channel vector stencil, or ``(*k, ndim, ndim)``
+    when ``shears``/``div`` select the cross-channel (Lamé) matrix stencil,
+    where ``k`` is the stencil width per spatial dim: 1 (absolute only), 3
+    (membrane/Lamé) or 5 (bending). Not differentiable (it builds from a shape
+    descriptor, not an input field).
     """
     ndim = int(ndim)
     is_matrix = shears != 0.0 or div != 0.0
@@ -1259,7 +1266,7 @@ def flow_matvec_rls(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """RLS/JRLS-weighted variant of :func:`flow_matvec`.
+    """RLS/JRLS-weighted variant of [`flow_matvec`][fastfields.torch.flow_matvec].
 
     ``wgt`` has shape ``(*batch, *spatial, 1)``: unlike the field family, the
     flow weighting is always *joint* -- the trailing axis of a flow field
@@ -1299,12 +1306,14 @@ def flow_diag_rls(
     dtype: torch.dtype = torch.float64,
     device=None,
 ) -> Tensor:
-    """Diagonal (preconditioner) of :func:`flow_matvec_rls`.
+    """Diagonal (preconditioner) of
+    [`flow_matvec_rls`][fastfields.torch.flow_matvec_rls].
 
-    Unlike plain :func:`flow_diag`, which builds from a *shape*, this one is
-    driven by the weight map: the output is ``wgt.shape[:-1] + (ndim,)``,
-    since a flow field's channel count is ``ndim``. Same ``wgt`` conventions
-    as :func:`flow_matvec_rls`. Not differentiable.
+    Unlike plain [`flow_diag`][fastfields.torch.flow_diag], which builds from a
+    *shape*, this one is driven by the weight map: the output is
+    ``wgt.shape[:-1] + (ndim,)``, since a flow field's channel count is
+    ``ndim``. Same ``wgt`` conventions as
+    [`flow_matvec_rls`][fastfields.torch.flow_matvec_rls]. Not differentiable.
     """
     out = torch.zeros(
         tuple(wgt.shape[:-1]) + (int(ndim),),
@@ -1343,12 +1352,13 @@ def flow_relax_rls(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Tensor:
-    """RLS/JRLS-weighted variant of :func:`flow_relax`.
+    """RLS/JRLS-weighted variant of [`flow_relax`][fastfields.torch.flow_relax].
 
-    Refines ``flow`` in place with ``nb_iter`` relaxation sweeps of
-    ``(H + L(w)) x = g``, same ``wgt`` conventions as
-    :func:`flow_matvec_rls`. Not differentiable (an in-place iterative
-    solver); ``flow`` is the warm start, mutated and returned.
+    Refines ``flow`` in place with ``nb_iter`` relaxation sweeps of ``(H +
+    L(w)) x = g``, same ``wgt`` conventions as
+    [`flow_matvec_rls`][fastfields.torch.flow_matvec_rls]. Not differentiable
+    (an in-place iterative solver); ``flow`` is the warm start, mutated and
+    returned.
     """
     check_dtype(flow)
     _fb.flow_relax_rls(
@@ -1386,9 +1396,11 @@ def flow_precond(
     """Apply the preconditioner ``(M + diag(R)) \\ vec``.
 
     ``M`` is the per-voxel compact-symmetric matrix ``mat``; ``diag(R)`` is the
-    diagonal of the flow regulariser (same penalties as :func:`flow_matvec`).
-    A composition of :func:`flow_diag` and :func:`sym_solve` — no new kernel;
-    differentiable wrt ``vec`` (through the self-adjoint solve).
+    diagonal of the flow regulariser (same penalties as
+    [`flow_matvec`][fastfields.torch.flow_matvec]). A composition of
+    [`flow_diag`][fastfields.torch.flow_diag] and
+    [`sym_solve`][fastfields.torch.sym_solve] — no new kernel; differentiable
+    wrt ``vec`` (through the self-adjoint solve).
     """
     check_dtype(vec)
     diag = flow_diag(
@@ -1423,8 +1435,10 @@ def flow_forward(
     """Apply the forward matrix-vector product ``(M + R) @ vec``.
 
     ``M`` is the per-voxel compact-symmetric matrix ``mat`` and ``R`` the flow
-    regulariser operator. A composition of :func:`sym_matvec` and
-    :func:`flow_matvec` — no new kernel; differentiable wrt ``mat``/``vec``.
+    regulariser operator. A composition of
+    [`sym_matvec`][fastfields.torch.sym_matvec] and
+    [`flow_matvec`][fastfields.torch.flow_matvec] — no new kernel;
+    differentiable wrt ``mat``/``vec``.
     """
     check_dtype(vec)
     out = sym_matvec(mat, vec)
@@ -2021,7 +2035,7 @@ def field_subdiag_(
 #
 # The same `inp +/- op(...)` pattern as the *_adddiag / *_subdiag family, for
 # the materialised Toeplitz stencil rather than the diagonal. `inp` is shaped
-# like :func:`field_kernel` / :func:`flow_kernel`'s output, and the stencil
+# like `field_kernel` / `flow_kernel`'s output, and the stencil
 # depends on no tensor input, so these are differentiable wrt `inp` by
 # identity pass-through -- exactly like the diag forms.
 
@@ -2038,8 +2052,9 @@ def field_addkernel(
 ) -> Tensor:
     """Return ``inp + K`` as a **new** tensor, shaped like ``inp``.
 
-    ``K`` is the field regulariser's stencil (see :func:`field_kernel`, whose
-    output shape ``inp`` must match). Differentiable wrt ``inp``.
+    ``K`` is the field regulariser's stencil (see
+    [`field_kernel`][fastfields.torch.field_kernel], whose output shape ``inp``
+    must match). Differentiable wrt ``inp``.
     """
     return _field_kernel_acc(
         inp,
@@ -2140,8 +2155,9 @@ def flow_addkernel(
 ) -> Tensor:
     """Return ``inp + K`` as a **new** tensor, shaped like ``inp``.
 
-    ``K`` is the flow regulariser's stencil (see :func:`flow_kernel`, whose
-    output shape ``inp`` must match). Differentiable wrt ``inp``.
+    ``K`` is the flow regulariser's stencil (see
+    [`flow_kernel`][fastfields.torch.flow_kernel], whose output shape ``inp``
+    must match). Differentiable wrt ``inp``.
     """
     return _flow_kernel_acc(
         inp,

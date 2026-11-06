@@ -72,6 +72,14 @@ def _check_sym(
     Batch dims are broadcast later, so we only enforce the channel relation
     ``vec.shape[-1] == C``.
 
+    !!! note
+        The binding dispatches a single ``scalar_t`` for both operands, so
+        ``mat`` and ``vec`` must share a dtype. Rather than silently casting
+        ``vec`` to ``mat``'s dtype (which would drop precision for a float64
+        ``vec`` against a float32 ``mat``), both are promoted to
+        ``numpy.result_type(mat, vec)`` -- the lower-precision operand is
+        upcast, never the reverse.
+
     Parameters
     ----------
     mat : numpy.ndarray
@@ -94,14 +102,6 @@ def _check_sym(
     ------
     ValueError
         If ``vec``'s channel count does not match the matrix packing.
-
-    Notes
-    -----
-    The binding dispatches a single ``scalar_t`` for both operands, so ``mat``
-    and ``vec`` must share a dtype. Rather than silently casting ``vec`` to
-    ``mat``'s dtype (which would drop precision for a float64 ``vec`` against a
-    float32 ``mat``), both are promoted to ``numpy.result_type(mat, vec)`` --
-    the lower-precision operand is upcast, never the reverse.
     """
     mat = _as_float_array(mat, matname)
     vec = _as_float_array(vec, vecname)
@@ -250,7 +250,8 @@ def sym_submatvec_(
 
 
 def sym_matvec_backward(grad: np.ndarray, vec: np.ndarray) -> np.ndarray:
-    """Backward of :func:`sym_matvec`: gradient w.r.t. the packed matrix.
+    """Backward of [`sym_matvec`][fastfields.numpy.sym_matvec]: gradient w.r.t.
+    the packed matrix.
 
     Parameters
     ----------
@@ -335,8 +336,8 @@ def sym_invert(mat: np.ndarray) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        The packed inverse, same shape as ``mat``. See :func:`sym_invert_`
-        for the in-place variant.
+        The packed inverse, same shape as ``mat``. See
+        [`sym_invert_`][fastfields.numpy.sym_invert_] for the in-place variant.
     """
     mat = _as_float_array(mat, "mat")
     # Output must be a real C-contiguous buffer even if ``mat`` is strided.

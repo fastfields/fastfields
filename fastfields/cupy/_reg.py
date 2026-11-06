@@ -402,10 +402,10 @@ def field_kernel(
     """Materialise the field regulariser's per-channel Toeplitz stencil.
 
     Returns the small centred kernel that, convolved with a field, reproduces
-    :func:`field_matvec`. The shape is ``(*k, C)`` (channels are independent),
-    with ``k`` the stencil width per spatial dim: 1 (absolute), 3 (membrane) or
-    5 (bending). ``C`` is ``channels`` if given, else inferred from the
-    per-channel penalty lengths (default 1).
+    [`field_matvec`][fastfields.cupy.field_matvec]. The shape is ``(*k, C)``
+    (channels are independent), with ``k`` the stencil width per spatial dim: 1
+    (absolute), 3 (membrane) or 5 (bending). ``C`` is ``channels`` if given,
+    else inferred from the per-channel penalty lengths (default 1).
     """
     cp = cupy()
     ndim = int(ndim)
@@ -510,7 +510,8 @@ def field_matvec_rls(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """RLS/JRLS-weighted variant of :func:`field_matvec`.
+    """RLS/JRLS-weighted variant of
+    [`field_matvec`][fastfields.cupy.field_matvec].
 
     ``wgt`` has shape ``(*batch, *spatial, 1)`` for a single weight shared
     across all channels (JRLS), or ``(*batch, *spatial, C)`` for a genuine
@@ -549,13 +550,15 @@ def field_diag_rls(
     ndim: int = 1,
     dtype: Any = None,
 ) -> Any:
-    """Diagonal (preconditioner) of :func:`field_matvec_rls`.
+    """Diagonal (preconditioner) of
+    [`field_matvec_rls`][fastfields.cupy.field_matvec_rls].
 
-    ``wgt`` selects JRLS (trailing dim 1) vs RLS (trailing dim ``C``), same
-    as :func:`field_matvec_rls`. The output channel count ``C`` is taken
-    from ``channels`` if given, else from ``wgt``'s trailing dimension when
-    it is not 1 (RLS), else inferred from the per-channel penalty lengths
-    (default 1), exactly as :func:`field_kernel` does.
+    ``wgt`` selects JRLS (trailing dim 1) vs RLS (trailing dim ``C``), same as
+    [`field_matvec_rls`][fastfields.cupy.field_matvec_rls]. The output channel
+    count ``C`` is taken from ``channels`` if given, else from ``wgt``'s
+    trailing dimension when it is not 1 (RLS), else inferred from the
+    per-channel penalty lengths (default 1), exactly as
+    [`field_kernel`][fastfields.cupy.field_kernel] does.
     """
     cp = cupy()
     wgt = as_gpu_array(wgt, name="wgt")
@@ -596,12 +599,12 @@ def field_relax_rls(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Any:
-    """RLS/JRLS-weighted variant of :func:`field_relax`.
+    """RLS/JRLS-weighted variant of [`field_relax`][fastfields.cupy.field_relax].
 
-    Refines ``field`` in place with ``nb_iter`` relaxation sweeps of
-    ``(H + L(w)) x = g``, same ``wgt`` conventions as
-    :func:`field_matvec_rls`. ``field`` is the warm start, mutated in place
-    and returned.
+    Refines ``field`` in place with ``nb_iter`` relaxation sweeps of ``(H +
+    L(w)) x = g``, same ``wgt`` conventions as
+    [`field_matvec_rls`][fastfields.cupy.field_matvec_rls]. ``field`` is the
+    warm start, mutated in place and returned.
     """
     field = as_gpu_array(field, name="field")
     hes = as_gpu_array(hes, name="hes")
@@ -671,10 +674,11 @@ def flow_kernel(
     """Materialise the flow regulariser's Toeplitz convolution stencil.
 
     Returns the small centred kernel that, convolved with a flow field,
-    reproduces :func:`flow_matvec`. The shape is ``(*k, ndim)`` for the
-    per-channel vector stencil, or ``(*k, ndim, ndim)`` when ``shears``/``div``
-    select the cross-channel (Lamé) matrix stencil, where ``k`` is the stencil
-    width per spatial dim: 1 (absolute only), 3 (membrane/Lamé) or 5 (bending).
+    reproduces [`flow_matvec`][fastfields.cupy.flow_matvec]. The shape is
+    ``(*k, ndim)`` for the per-channel vector stencil, or ``(*k, ndim, ndim)``
+    when ``shears``/``div`` select the cross-channel (Lamé) matrix stencil,
+    where ``k`` is the stencil width per spatial dim: 1 (absolute only), 3
+    (membrane/Lamé) or 5 (bending).
     """
     cp = cupy()
     ndim = int(ndim)
@@ -758,7 +762,7 @@ def flow_matvec_rls(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """RLS/JRLS-weighted variant of :func:`flow_matvec`.
+    """RLS/JRLS-weighted variant of [`flow_matvec`][fastfields.cupy.flow_matvec].
 
     ``wgt`` has shape ``(*batch, *spatial, 1)``: unlike the field family, the
     flow weighting is always *joint* -- the trailing axis of a flow field
@@ -802,12 +806,14 @@ def flow_diag_rls(
     ndim: int = 1,
     dtype: Any = None,
 ) -> Any:
-    """Diagonal (preconditioner) of :func:`flow_matvec_rls`.
+    """Diagonal (preconditioner) of
+    [`flow_matvec_rls`][fastfields.cupy.flow_matvec_rls].
 
-    Unlike plain :func:`flow_diag`, which builds from a *shape*, this one is
-    driven by the weight map: the output is ``wgt.shape[:-1] + (ndim,)``,
-    since a flow field's channel count is ``ndim``. Same ``wgt`` conventions
-    as :func:`flow_matvec_rls`.
+    Unlike plain [`flow_diag`][fastfields.cupy.flow_diag], which builds from a
+    *shape*, this one is driven by the weight map: the output is
+    ``wgt.shape[:-1] + (ndim,)``, since a flow field's channel count is
+    ``ndim``. Same ``wgt`` conventions as
+    [`flow_matvec_rls`][fastfields.cupy.flow_matvec_rls].
     """
     cp = cupy()
     wgt = as_gpu_array(wgt, name="wgt")
@@ -846,12 +852,12 @@ def flow_relax_rls(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Any:
-    """RLS/JRLS-weighted variant of :func:`flow_relax`.
+    """RLS/JRLS-weighted variant of [`flow_relax`][fastfields.cupy.flow_relax].
 
-    Refines ``flow`` in place with ``nb_iter`` relaxation sweeps of
-    ``(H + L(w)) x = g``, same ``wgt`` conventions as
-    :func:`flow_matvec_rls`. ``flow`` is the warm start, mutated in place
-    and returned.
+    Refines ``flow`` in place with ``nb_iter`` relaxation sweeps of ``(H +
+    L(w)) x = g``, same ``wgt`` conventions as
+    [`flow_matvec_rls`][fastfields.cupy.flow_matvec_rls]. ``flow`` is the warm
+    start, mutated in place and returned.
     """
     flow = as_gpu_array(flow, name="flow")
     hes = as_gpu_array(hes, name="hes")
@@ -892,10 +898,11 @@ def flow_precond(
     """Apply the preconditioner ``(M + diag(R)) \\ vec``.
 
     ``M`` is the per-voxel compact-symmetric matrix ``mat``; ``diag(R)`` is the
-    diagonal of the flow regulariser (same penalties as :func:`flow_matvec`).
-    One kernel (``fastfields.dlpack.flow_precond``). Leading batch dims of
-    ``mat``/``vec`` broadcast; the ``ndim`` spatial axes and the component axis
-    must match. See :func:`flow_precond_` for the in-place form.
+    diagonal of the flow regulariser (same penalties as
+    [`flow_matvec`][fastfields.cupy.flow_matvec]). One kernel
+    (``fastfields.dlpack.flow_precond``). Leading batch dims of ``mat``/``vec``
+    broadcast; the ``ndim`` spatial axes and the component axis must match. See
+    [`flow_precond_`][fastfields.cupy.flow_precond_] for the in-place form.
     """
     cp = cupy()
     batch, mat, vec = _reg_broadcast(mat, vec, ndim)
@@ -1236,7 +1243,8 @@ def field_precond(
 
     One kernel (``fastfields.dlpack.field_precond``). Leading batch dims of
     ``mat``/``vec`` broadcast; the ``ndim`` spatial axes and the channel axis
-    must match. See :func:`field_precond_` for the in-place form.
+    must match. See [`field_precond_`][fastfields.cupy.field_precond_] for the
+    in-place form.
     """
     cp = cupy()
     batch, mat, vec = _reg_broadcast(mat, vec, ndim)
@@ -1535,7 +1543,8 @@ def field_precond_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In-place :func:`field_precond`: ``sol = (M + diag(R)) \\ sol``.
+    """In-place [`field_precond`][fastfields.cupy.field_precond]: ``sol = (M +
+    diag(R)) \\ sol``.
 
     ``sol`` holds the gradient on entry and the preconditioned solution on
     exit; it is mutated and returned. Nothing is broadcast -- an in-place op
@@ -1571,7 +1580,8 @@ def flow_precond_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In-place :func:`flow_precond`: ``sol = (M + diag(R)) \\ sol``.
+    """In-place [`flow_precond`][fastfields.cupy.flow_precond]: ``sol = (M +
+    diag(R)) \\ sol``.
 
     ``sol`` holds the gradient on entry and the preconditioned solution on
     exit; it is mutated and returned.
@@ -1600,7 +1610,7 @@ def flow_precond_(
 #
 # The same `inp ± op(...)` pattern as the *_adddiag / *_subdiag family, for
 # the materialised Toeplitz stencil rather than the diagonal. `inp` is shaped
-# like the output of :func:`field_kernel` / :func:`flow_kernel`.
+# like the output of `field_kernel` / `flow_kernel`.
 
 
 def field_addkernel(
@@ -1615,8 +1625,9 @@ def field_addkernel(
 ) -> Any:
     """Return ``inp + K`` as a **new** array, shaped like ``inp``.
 
-    ``K`` is the field regulariser's stencil (see :func:`field_kernel`, whose
-    output shape ``inp`` must match).
+    ``K`` is the field regulariser's stencil (see
+    [`field_kernel`][fastfields.cupy.field_kernel], whose output shape ``inp``
+    must match).
     """
     return _field_kernel_acc(
         inp,
@@ -1717,8 +1728,9 @@ def flow_addkernel(
 ) -> Any:
     """Return ``inp + K`` as a **new** array, shaped like ``inp``.
 
-    ``K`` is the flow regulariser's stencil (see :func:`flow_kernel`, whose
-    output shape ``inp`` must match).
+    ``K`` is the flow regulariser's stencil (see
+    [`flow_kernel`][fastfields.cupy.flow_kernel], whose output shape ``inp``
+    must match).
     """
     return _flow_kernel_acc(
         inp,

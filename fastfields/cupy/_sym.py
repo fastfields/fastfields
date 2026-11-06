@@ -52,7 +52,7 @@ def sym_matvec(mat: Any, vec: Any) -> Any:
 
 
 def sym_matvec_backward(grad: Any, vec: Any) -> Any:
-    """Backward of :func:`sym_matvec` w.r.t. the matrix.
+    """Backward of [`sym_matvec`][fastfields.cupy.sym_matvec] w.r.t. the matrix.
 
     ``grad`` and ``vec`` are ``(..., C)`` (batch dims broadcast); returns the
     gradient in the same compact-symmetric packing, shape ``(..., C*(C+1)/2)``.

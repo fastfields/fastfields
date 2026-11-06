@@ -322,7 +322,8 @@ def push(
 ) -> Tensor:
     """Splat (push) ``inp`` into a volume of spatial size ``shape``.
 
-    Adjoint of :func:`pull`; differentiable wrt ``inp`` and ``grid``.
+    Adjoint of [`pull`][fastfields.torch.pull]; differentiable wrt ``inp`` and
+    ``grid``.
     """
     check_dtype(inp, grid)
     if grid.ndim != inp.ndim:

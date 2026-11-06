@@ -1,11 +1,12 @@
-"""Shared dispatch machinery for :mod:`fastfields.auto`.
+"""Shared dispatch machinery for [`fastfields.auto`][fastfields.auto].
 
-Every public wrapper dispatches on the **type of the first array
-argument** and forwards the call to the matching backend package
-(:mod:`fastfields.numpy` / :mod:`fastfields.torch` / :mod:`fastfields.cupy`).
-Backends are imported **lazily**: only the backend for the array type
-actually passed is imported, so ``fastfields.auto`` works with any subset
-of the optional backends installed.
+Every public wrapper dispatches on the **type of the first array argument** and
+forwards the call to the matching backend package
+([`fastfields.numpy`][fastfields.numpy] /
+[`fastfields.torch`][fastfields.torch] / [`fastfields.cupy`][fastfields.cupy]).
+Backends are imported **lazily**: only the backend for the array type actually
+passed is imported, so ``fastfields.auto`` works with any subset of the
+optional backends installed.
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ def _load_backend(root: str) -> Any:
     Parameters
     ----------
     root : str
-        A backend key from :data:`_ARRAY_BACKENDS`.
+        A backend key from `_ARRAY_BACKENDS`.
 
     Returns
     -------
@@ -122,7 +123,8 @@ def make_dispatcher(name: str, table: dict[str, str]) -> Callable[..., Any]:
     Parameters
     ----------
     name : str
-        The unified operation name exposed by :mod:`fastfields.auto`.
+        The unified operation name exposed by
+        [`fastfields.auto`][fastfields.auto].
     table : dict of {str: str}
         Mapping ``{backend_root: attribute_name}`` giving the backend function
         that implements ``name`` in each backend package.
@@ -188,12 +190,12 @@ def make_dispatcher(name: str, table: dict[str, str]) -> Callable[..., Any]:
 def dlpack_backend() -> "str | None":
     """Report the compute backend of the installed compiled bindings.
 
-    ``fastfields.auto`` works against whichever backend is installed and
-    never requires a particular one, so -- unlike
-    :mod:`fastfields.cupy` (which refuses to import on a CPU-only build) and
-    :mod:`fastfields.torch` (which refuses a CUDA tensor on one) -- it only
-    reports. This is the one place to ask "which lane did I end up on?"
-    without knowing which wrapper to interrogate.
+    ``fastfields.auto`` works against whichever backend is installed and never
+    requires a particular one, so -- unlike
+    [`fastfields.cupy`][fastfields.cupy] (which refuses to import on a CPU-only
+    build) and [`fastfields.torch`][fastfields.torch] (which refuses a CUDA
+    tensor on one) -- it only reports. This is the one place to ask "which lane
+    did I end up on?" without knowing which wrapper to interrogate.
 
     It is a function rather than a module attribute mirroring
     ``fastfields.dlpack.backend`` on purpose: ``fastfields.auto`` must not

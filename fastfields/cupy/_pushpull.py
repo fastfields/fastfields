@@ -66,7 +66,7 @@ def push(
 ) -> Any:
     """Splat (push) ``inp`` into a volume of spatial size ``shape``.
 
-    Adjoint of :func:`pull` -> ``(*B, *shape, C)``.
+    Adjoint of [`pull`][fastfields.cupy.pull] -> ``(*B, *shape, C)``.
     """
     cp = cupy()
     inp = as_gpu_array(inp, name="inp")

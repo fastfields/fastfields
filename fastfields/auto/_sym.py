@@ -1,4 +1,5 @@
-"""Backend-dispatching compact-symmetric ops (:mod:`fastfields.auto`).
+"""Backend-dispatching compact-symmetric ops
+([`fastfields.auto`][fastfields.auto]).
 
 Both spellings of each in-place op are dispatched: the trailing-underscore
 forms mutate their first argument, which is also the array the backend is

@@ -6,65 +6,66 @@ This package mirrors the numpy-style fastfields interface but operates on
 arrays do, sharing device memory with zero copy) and write results in place or
 through pre-allocated outputs.
 
-Conventions
------------
-* Functional wrappers (``dt_euclidean``, ``sym_matvec``, ``resample`` ...)
-  take cupy arrays, allocate their outputs, and return cupy arrays. Inputs
-  must be float32/float64 but are passed with their native strides (the
-  stride-aware C++/CUDA library reads them zero-copy -- no contiguous copy is
-  forced); freshly allocated outputs are always contiguous.
-* Trailing-underscore wrappers (``dt_euclidean_``, ``sym_solve_`` ...) operate
-  in place / through the caller's output array and return it.
-* **Streams:** cupy queues work on its *current* CUDA stream. Every wrapper
-  forwards ``cupy.cuda.get_current_stream().ptr`` to the binding's ``stream``
-  argument, so the C++/CUDA kernels are correctly ordered w.r.t. the
-  surrounding cupy operations. To run on a specific stream, wrap the call in a
-  ``with my_stream:`` block.
+!!! note "Conventions"
+    * Functional wrappers (``dt_euclidean``, ``sym_matvec``, ``resample`` ...)
+      take cupy arrays, allocate their outputs, and return cupy arrays. Inputs
+      must be float32/float64 but are passed with their native strides (the
+      stride-aware C++/CUDA library reads them zero-copy -- no contiguous copy
+      is forced); freshly allocated outputs are always contiguous.
+    * Trailing-underscore wrappers (``dt_euclidean_``, ``sym_solve_`` ...)
+      operate in place / through the caller's output array and return it.
+    * **Streams:** cupy queues work on its *current* CUDA stream. Every wrapper
+      forwards ``cupy.cuda.get_current_stream().ptr`` to the binding's
+      ``stream`` argument, so the C++/CUDA kernels are correctly ordered w.r.t.
+      the surrounding cupy operations. To run on a specific stream, wrap the
+      call in a ``with my_stream:`` block.
 
-Availability
-------------
-Two different things can be missing, and they are treated differently.
+!!! note "Availability"
+    Two different things can be missing, and they are treated differently.
 
-* **The cupy client library.** Imported lazily, so ``import fastfields.cupy``
-  succeeds where cupy itself is not installed or no GPU is present; a clear
-  ``ImportError`` is raised only when a wrapper is actually called. This is
-  what lets the static parts of this package (the enums, the argument
-  normalisation) be imported and tested anywhere.
-* **The CUDA kernels.** Checked eagerly: ``import fastfields.cupy`` raises
-  ``ImportError`` when the installed ``fastfields-dlpack`` is a CPU-only
-  build, naming the wheel-index lane to install instead. Unlike a missing
-  cupy, that is not a situation any part of this package can work in -- see
-  :mod:`fastfields.cupy._backend`.
+    * **The cupy client library.** Imported lazily, so ``import
+      fastfields.cupy`` succeeds where cupy itself is not installed or no GPU
+      is present; a clear ``ImportError`` is raised only when a wrapper is
+      actually called. This is what lets the static parts of this package (the
+      enums, the argument normalisation) be imported and tested anywhere.
+    * **The CUDA kernels.** Checked eagerly: ``import fastfields.cupy`` raises
+      ``ImportError`` when the installed ``fastfields-dlpack`` is a CPU-only
+      build, naming the wheel-index lane to install instead. Unlike a missing
+      cupy, that is not a situation any part of this package can work in -- see
+      `fastfields.cupy._backend`.
 
-What this wrapper deliberately does not expose
-----------------------------------------------
-Of the 58 public operations of the C++ hub, this package wraps all but five.
-``tools/api_inventory.py`` in ``fastfields-dlpack`` prints the full matrix;
-the omissions are:
+!!! note "What this wrapper deliberately does not expose"
+    Of the 58 public operations of the C++ hub, this package wraps all but
+    five. ``tools/api_inventory.py`` in ``fastfields-dlpack`` prints the full
+    matrix; the omissions are:
 
-``pull_backward``, ``push_backward``, ``count_backward``, ``grad_backward``
-    The adjoints of the pushpull operators, with respect to both the sampled
-    field and the sampling coordinates. They exist so that an autograd engine
-    can differentiate through ``grid``, which only :mod:`fastfields.torch`
-    has; there is no automatic differentiation on cupy, so a wrapper here
-    would be a bare function nothing calls, with five pre-zeroed device
-    buffers for the caller to get right -- and, on CUDA, five more blocks to
-    keep alive until the stream is synchronised. They stay reachable through
-    the raw bindings: ``fastfields.dlpack.pull_backward(...)``.
+    ``pull_backward``, ``push_backward``, ``count_backward``, ``grad_backward``
+        The adjoints of the pushpull operators, with respect to both the
+        sampled field and the sampling coordinates. They exist so that an
+        autograd engine can differentiate through ``grid``, which only
+        [`fastfields.torch`][fastfields.torch] has; there is no automatic
+        differentiation on cupy, so a wrapper here would be a bare function
+        nothing calls, with five pre-zeroed device buffers for the caller to
+        get right -- and, on CUDA, five more blocks to keep alive until the
+        stream is synchronised. They stay reachable through the raw bindings:
+        ``fastfields.dlpack.pull_backward(...)``.
 
-``field_cg``
-    The conjugate-gradient driver is **CPU-only** in ``fastfields-lib``: the
-    solver's dot products need a device-side reduction the CUDA backend does
-    not implement yet (fastfields-lib#34), and the hub rejects CUDA tensors
-    rather than silently running on the host. A ``fastfields.cupy.field_cg``
-    could therefore only ever raise, so this package does not pretend to have
-    one. :func:`field_relax` and :func:`flow_relax` do run on CUDA and solve
-    the same system by Gauss-Seidel sweeps; when fastfields-lib#34 lands,
-    wrapping ``field_cg`` here is a two-screen change and
-    ``tests/test_api_coverage.py`` will remind whoever is looking.
+    ``field_cg``
+        The conjugate-gradient driver is **CPU-only** in ``fastfields-lib``:
+        the solver's dot products need a device-side reduction the CUDA backend
+        does not implement yet (fastfields-lib#34), and the hub rejects CUDA
+        tensors rather than silently running on the host. A
+        ``fastfields.cupy.field_cg`` could therefore only ever raise, so this
+        package does not pretend to have one.
+        [`field_relax`][fastfields.cupy.field_relax] and
+        [`flow_relax`][fastfields.cupy.flow_relax] do run on CUDA and solve the
+        same system by Gauss-Seidel sweeps; when fastfields-lib#34 lands,
+        wrapping ``field_cg`` here is a two-screen change and
+        ``tests/test_api_coverage.py`` will remind whoever is looking.
 
-This is checked rather than asserted: ``tests/test_api_coverage.py`` fails if
-the set of operations this package omits ever differs from the list above.
+    This is checked rather than asserted: ``tests/test_api_coverage.py`` fails
+    if the set of operations this package omits ever differs from the list
+    above.
 """
 
 from __future__ import annotations

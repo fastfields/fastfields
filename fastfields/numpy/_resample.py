@@ -41,7 +41,8 @@ def spline_coeff(
     -------
     numpy.ndarray
         Spline coefficients, a newly allocated array; ``inp`` is left
-        untouched. See :func:`spline_coeff_` for the in-place variant.
+        untouched. See [`spline_coeff_`][fastfields.numpy.spline_coeff_] for
+        the in-place variant.
     """
     out = _as_float_array(inp, "inp", copy=True)
     _ff.spline_coeff(out, _as_spline(order), _as_bound(bound))
@@ -83,9 +84,9 @@ def _resize_shapes(
     """Return the batch, input-spatial, and output-spatial shapes.
 
     The output spatial shape is resolved via
-    :func:`fastfields.helpers.resolve_out_spatial` so every backend shares one
-    implementation. Raises ``ValueError`` if ``factor``/``shape`` do not have
-    length ``ndim``.
+    [`fastfields.helpers.resolve_out_spatial`][fastfields.helpers.resolve_out_spatial]
+    so every backend shares one implementation. Raises ``ValueError`` if
+    ``factor``/``shape`` do not have length ``ndim``.
     """
     batch = tuple(in_shape[:-ndim]) if ndim < len(in_shape) else ()
     spatial_in = tuple(in_shape[-ndim:])
@@ -190,13 +191,14 @@ def restriction(
     shift: float | None = None,
     scale: Sequence[float] | None = None,
 ) -> np.ndarray:
-    """Restriction (adjoint of :func:`resample`) of the last ``ndim`` axes.
+    """Restriction (adjoint of [`resample`][fastfields.numpy.resample]) of the
+    last ``ndim`` axes.
 
     The output buffer is zeroed before the (accumulating) binding call. The
-    ``anchor`` convention matches :func:`resample`; because the scale is
-    derived from this call's own (input, output) shapes, a ``resample`` and a
-    matching ``restriction`` use reciprocal scales and the same shift -- the
-    adjoint relationship the binding expects.
+    ``anchor`` convention matches [`resample`][fastfields.numpy.resample];
+    because the scale is derived from this call's own (input, output) shapes, a
+    ``resample`` and a matching ``restriction`` use reciprocal scales and the
+    same shift -- the adjoint relationship the binding expects.
 
     Parameters
     ----------
@@ -214,11 +216,11 @@ def restriction(
     ndim : int, optional
         Number of trailing spatial dimensions (inferred when omitted).
     anchor : {"centers", "edges", "first", "last"}, default="centers"
-        Sampling-grid convention (see :func:`resample`).
+        Sampling-grid convention (see [`resample`][fastfields.numpy.resample]).
     shift : float, optional
-        Sampling shift override (see :func:`resample`).
+        Sampling shift override (see [`resample`][fastfields.numpy.resample]).
     scale : sequence of float, optional
-        Per-dim scale override (see :func:`resample`).
+        Per-dim scale override (see [`resample`][fastfields.numpy.resample]).
 
     Returns
     -------

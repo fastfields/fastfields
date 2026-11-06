@@ -1,25 +1,25 @@
 """Shared helpers for the fastfields.torch wrappers.
 
-Compute backend
----------------
-``fastfields.torch`` is the only one of the five namespaces that works on
-either compute backend: its CPU path is the tested one and runs against any
-build of ``fastfields-dlpack``, while a CUDA tensor needs a CUDA build. So,
-unlike :mod:`fastfields.cupy` (which refuses to import at all on a CPU-only
-build), this package imports cleanly everywhere and raises only when a CUDA
-tensor actually meets a CPU-only build. :func:`stream_ptr` is where that is
-enforced -- see its docstring for why that is the right place.
+!!! note "Compute backend"
+    ``fastfields.torch`` is the only one of the five namespaces that works on
+    either compute backend: its CPU path is the tested one and runs against any
+    build of ``fastfields-dlpack``, while a CUDA tensor needs a CUDA build. So,
+    unlike [`fastfields.cupy`][fastfields.cupy] (which refuses to import at all
+    on a CPU-only build), this package imports cleanly everywhere and raises
+    only when a CUDA tensor actually meets a CPU-only build. `stream_ptr` is
+    where that is enforced -- see its docstring for why that is the right
+    place.
 
-Stream semantics
-----------------
-The ``fastfields.dlpack`` bindings take a trailing ``stream`` argument (a CUDA
-stream handle as an ``int``; ``0`` means the CPU/default stream). torch queues
-its own CUDA work on the *current* stream of each device, so -- to keep the
-binding's kernels correctly ordered with respect to the surrounding torch ops
-(output allocation, later reads, ...) -- every wrapper forwards the current
-stream of its primary CUDA tensor via :func:`stream_ptr`. For CPU tensors this
-is ``0``, so CPU behaviour is unchanged. This mirrors how ``fastfields.cupy``
-forwards ``cupy.cuda.get_current_stream().ptr``.
+!!! note "Stream semantics"
+    The ``fastfields.dlpack`` bindings take a trailing ``stream`` argument (a
+    CUDA stream handle as an ``int``; ``0`` means the CPU/default stream).
+    torch queues its own CUDA work on the *current* stream of each device, so
+    -- to keep the binding's kernels correctly ordered with respect to the
+    surrounding torch ops (output allocation, later reads, ...) -- every
+    wrapper forwards the current stream of its primary CUDA tensor via
+    `stream_ptr`. For CPU tensors this is ``0``, so CPU behaviour is unchanged.
+    This mirrors how ``fastfields.cupy`` forwards
+    ``cupy.cuda.get_current_stream().ptr``.
 """
 
 from __future__ import annotations

@@ -3,9 +3,9 @@
 Every function here dispatches on the **type of the first array argument** and
 forwards the call to the matching backend package:
 
-* ``numpy.ndarray`` -> :mod:`fastfields.numpy`
-* ``torch.Tensor``  -> :mod:`fastfields.torch`
-* ``cupy.ndarray``  -> :mod:`fastfields.cupy`
+* ``numpy.ndarray`` -> [`fastfields.numpy`][fastfields.numpy]
+* ``torch.Tensor``  -> [`fastfields.torch`][fastfields.torch]
+* ``cupy.ndarray``  -> [`fastfields.cupy`][fastfields.cupy]
 
 Backends are imported **lazily**: only the backend for the array type
 actually passed is imported, so ``fastfields.auto`` works with any subset
@@ -22,49 +22,50 @@ backend's function. Arguments are forwarded unchanged, so each dispatched call
 shares the signature of the selected backend's function.
 
 This namespace requires no particular compute backend -- it runs against
-whatever is installed, and :func:`dlpack_backend` reports which lane that is
-(``"cpu"``, ``"cu126"``, ...). That is the whole of its backend handling, by
-contrast with :mod:`fastfields.cupy`, which refuses to import on a CPU-only
-build, and :mod:`fastfields.torch`, which refuses a CUDA tensor on one.
+whatever is installed, and [`dlpack_backend`][fastfields.auto.dlpack_backend]
+reports which lane that is (``"cpu"``, ``"cu126"``, ...). That is the whole of
+its backend handling, by contrast with [`fastfields.cupy`][fastfields.cupy],
+which refuses to import on a CPU-only build, and
+[`fastfields.torch`][fastfields.torch], which refuses a CUDA tensor on one.
 
-The dispatchers are split by category into :mod:`._dt` (distance transforms),
-:mod:`._sym` (compact-symmetric ops), :mod:`._resample` (resampling / spline
-coefficients), :mod:`._pushpull` (spline gather/scatter) and :mod:`._reg`
-(spatial regularisers), all built on the shared machinery in :mod:`._util`.
+The dispatchers are split by category into `._dt` (distance transforms),
+`._sym` (compact-symmetric ops), `._resample` (resampling / spline
+coefficients), `._pushpull` (spline gather/scatter) and `._reg`
+(spatial regularisers), all built on the shared machinery in `._util`.
 
-What is not dispatched here, and why
-------------------------------------
-This module is a *dispatcher*: it picks a backend from the type of the first
-array argument and forwards every argument unchanged. Two kinds of operation
-cannot be reached through it, and both are deliberate.
+!!! note "What is not dispatched here, and why"
+    This module is a *dispatcher*: it picks a backend from the type of the
+    first array argument and forwards every argument unchanged. Two kinds of
+    operation cannot be reached through it, and both are deliberate.
 
-**Builders that take a shape, not an array.** ``field_diag``, ``flow_diag``,
-``field_kernel`` and ``flow_kernel`` allocate their output from a rank and a
-set of penalty weights -- there is no array to dispatch on, so there is
-nothing for this module to decide. Call them on a concrete backend
-(``fastfields.numpy.field_diag(...)``) and pass the result into the
-dispatched operators. Their ``*_add``/``*_sub`` accumulate forms *do* take
-an array and are dispatched.
+    **Builders that take a shape, not an array.** ``field_diag``,
+    ``flow_diag``, ``field_kernel`` and ``flow_kernel`` allocate their output
+    from a rank and a set of penalty weights -- there is no array to dispatch
+    on, so there is nothing for this module to decide. Call them on a concrete
+    backend (``fastfields.numpy.field_diag(...)``) and pass the result into the
+    dispatched operators. Their ``*_add``/``*_sub`` accumulate forms *do* take
+    an array and are dispatched.
 
-**Adjoints that exist for autograd.** ``pull_backward``, ``push_backward``,
-``count_backward`` and ``grad_backward`` are the gradients of the pushpull
-operators; only :mod:`fastfields.torch` has an autograd engine, and there
-they are wired into the forward op's ``autograd.Function`` rather than
-exported. There is nothing uniform to dispatch, so the supported spelling is
-``fastfields.auto.pull(...)`` followed by ``.backward()`` on a torch tensor,
-or ``fastfields.dlpack.pull_backward(...)`` raw.
+    **Adjoints that exist for autograd.** ``pull_backward``, ``push_backward``,
+    ``count_backward`` and ``grad_backward`` are the gradients of the pushpull
+    operators; only [`fastfields.torch`][fastfields.torch] has an autograd
+    engine, and there they are wired into the forward op's
+    ``autograd.Function`` rather than exported. There is nothing uniform to
+    dispatch, so the supported spelling is ``fastfields.auto.pull(...)``
+    followed by ``.backward()`` on a torch tensor, or
+    ``fastfields.dlpack.pull_backward(...)`` raw.
 
-Operations that *some* backends have are dispatched with a partial table and
-raise ``NotImplementedError`` naming the backends that do have them --
-``field_cg`` (CPU-only in the C++ library, so numpy), ``field_precond_`` /
-``flow_precond_`` (numpy and cupy), ``sym_matvec_backward`` (numpy and cupy).
-Listing them with a clear failure is better than omitting them, which would
-make the asymmetry invisible from here.
+    Operations that *some* backends have are dispatched with a partial table
+    and raise ``NotImplementedError`` naming the backends that do have them --
+    ``field_cg`` (CPU-only in the C++ library, so numpy), ``field_precond_`` /
+    ``flow_precond_`` (numpy and cupy), ``sym_matvec_backward`` (numpy and
+    cupy). Listing them with a clear failure is better than omitting them,
+    which would make the asymmetry invisible from here.
 
-If a backend turns out not to have an operation this module says it does --
-a mixed install, where ``fastfields.auto`` is newer than the wrapper -- the
-call raises ``NotImplementedError`` saying which package to upgrade, not a
-bare ``AttributeError`` from a module the caller never named.
+    If a backend turns out not to have an operation this module says it does --
+    a mixed install, where ``fastfields.auto`` is newer than the wrapper -- the
+    call raises ``NotImplementedError`` saying which package to upgrade, not a
+    bare ``AttributeError`` from a module the caller never named.
 """
 
 from __future__ import annotations
