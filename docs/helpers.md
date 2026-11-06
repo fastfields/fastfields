@@ -33,7 +33,7 @@ namespaces accept an `int`, an enum member or a name.
 
 | Group | Names |
 |---|---|
-| **Enums** | [`Spline`][fastfields.helpers.Spline] (orders 0 to 7) and [`Bound`][fastfields.helpers.Bound] (eight boundary conditions) |
+| **Enums** | [`Spline`][fastfields.helpers.Spline] (orders 0 to 7) and [`Bound`][fastfields.helpers.Bound] (seven boundary conditions) |
 | **Normalisers** | [`as_spline`][fastfields.helpers.as_spline] and [`as_bound`][fastfields.helpers.as_bound] accept an `int`, an enum member or a name |
 | **Shapes** | [`normalize_shape`][fastfields.helpers.normalize_shape], [`infer_ndim`][fastfields.helpers.infer_ndim], [`check_ndim`][fastfields.helpers.check_ndim] and [`resolve_out_spatial`][fastfields.helpers.resolve_out_spatial] work out the arguments of a resampling call |
 | **Anchors** | [`anchor_scale_shift`][fastfields.helpers.anchor_scale_shift] turns an `interpol.resize` anchor into a per-axis `scale` and a scalar `shift` |

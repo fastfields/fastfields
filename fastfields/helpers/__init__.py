@@ -193,13 +193,16 @@ class Bound(IntEnum):
     | `DST1` | 4 | is antisymmetric about the centre of the last voxel |
     | `DST2` | 5 | is antisymmetric about the edge of the last voxel |
     | `DFT` | 6 | wraps around (circular) |
-    | `NoCheck` | 7 | is not handled: coordinates are assumed inbound |
 
     `DCT2` is the Neumann condition and `DST2` the Dirichlet one.
 
     The wrappers take it as the `bound` argument, as an integer, as a member of
     this enum or as a name such as `"dct2"`; see
     [`as_bound`][fastfields.helpers.as_bound].
+
+    The C++ library also has an internal "no check" condition (value 7,
+    coordinates assumed inbound). It is not part of the public API: it has no
+    member here and [`as_bound`][fastfields.helpers.as_bound] rejects it.
     """
 
     Zero = 0  # zero outside the FOV
@@ -209,12 +212,21 @@ class Bound(IntEnum):
     DST1 = 4  # antisymmetric w.r.t. voxel centre
     DST2 = 5  # antisymmetric w.r.t. voxel edge (Dirichlet)
     DFT = 6  # circular / wrap around
-    NoCheck = 7  # assume coordinates are inbound
 
 
 # --------------------------------------------------------------------------- #
 # order / bound normalisation                                                 #
 # --------------------------------------------------------------------------- #
+
+# Spellings of the C++-internal "no check" bound (value 7). It is rejected
+# by name rather than left to the generic "unknown name" error, so the
+# message says why.
+_INTERNAL_BOUND_NAMES = frozenset({"nocheck", "no_check", "no-check"})
+_INTERNAL_BOUND_VALUE = 7
+_INTERNAL_BOUND_MESSAGE = (
+    "the 'nocheck' boundary condition (value 7) is internal to the C++ "
+    "library and not supported by the public API; use one of 0..6"
+)
 
 _SPLINE_ALIASES = {
     "nearest": Spline.Nearest,
@@ -243,7 +255,6 @@ _BOUND_ALIASES = {
     "dft": Bound.DFT,
     "wrap": Bound.DFT,
     "circular": Bound.DFT,
-    "nocheck": Bound.NoCheck,
 }
 
 
@@ -283,7 +294,7 @@ def as_spline(value: int | str | Spline) -> int:
 
 
 def as_bound(value: int | str | Bound) -> int:
-    """Turn a boundary-condition argument into an integer from 0 to 7.
+    """Turn a boundary-condition argument into an integer from 0 to 6.
 
     Parameters
     ----------
@@ -292,7 +303,7 @@ def as_bound(value: int | str | Bound) -> int:
         any case. The names are `"zero"` (or `"zeros"`), `"replicate"` (or
         `"nearest"`), `"dct1"`, `"dct2"` (or `"neumann"`, `"reflect"`),
         `"dst1"`, `"dst2"` (or `"dirichlet"`), `"dft"` (or `"wrap"`,
-        `"circular"`) and `"nocheck"`.
+        `"circular"`).
 
     Returns
     -------
@@ -302,19 +313,25 @@ def as_bound(value: int | str | Bound) -> int:
     Raises
     ------
     ValueError
-        If the name is unknown or the integer is outside 0 to 7.
+        If the name is unknown, the integer is outside 0 to 6, or the value
+        is the C++-internal "no check" condition (7, `"nocheck"`), which the
+        public API does not support.
     """
     if isinstance(value, str):
         key = value.strip().lower()
+        if key in _INTERNAL_BOUND_NAMES:
+            raise ValueError(_INTERNAL_BOUND_MESSAGE)
         if key not in _BOUND_ALIASES:
             raise ValueError(
                 f"unknown boundary condition {value!r}; "
-                f"expected an int 0..7 or one of {sorted(_BOUND_ALIASES)}"
+                f"expected an int 0..6 or one of {sorted(_BOUND_ALIASES)}"
             )
         return int(_BOUND_ALIASES[key])
     ivalue = int(value)
-    if not 0 <= ivalue <= 7:
-        raise ValueError(f"boundary condition must be in 0..7, got {ivalue}")
+    if ivalue == _INTERNAL_BOUND_VALUE:
+        raise ValueError(_INTERNAL_BOUND_MESSAGE)
+    if not 0 <= ivalue <= 6:
+        raise ValueError(f"boundary condition must be in 0..6, got {ivalue}")
     return ivalue
 
 

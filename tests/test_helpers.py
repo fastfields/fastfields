@@ -65,7 +65,10 @@ def test_enums():
     assert int(Spline.SeventhOrder) == 7
     assert int(Bound.Zero) == 0
     assert int(Bound.DCT2) == 3
-    assert int(Bound.NoCheck) == 7
+    assert int(Bound.DFT) == 6
+    # the C++-internal "no check" bound (7) is not part of the public enum
+    assert not hasattr(Bound, "NoCheck")
+    assert 7 not in {int(b) for b in Bound}
 
 
 def test_order_bound_normalisation():
@@ -85,6 +88,15 @@ def test_order_bound_normalisation():
             as_spline(bad)
         with pytest.raises(ValueError):
             as_bound(bad)
+
+
+@pytest.mark.parametrize(
+    "bad", ["nocheck", "NoCheck", " NOCHECK ", "no_check", "no-check", 7]
+)
+def test_as_bound_rejects_nocheck(bad):
+    """The C++-internal "no check" bound is refused with a clear message."""
+    with pytest.raises(ValueError, match="not supported by the public API"):
+        as_bound(bad)
 
 
 def test_ndim_inference_and_check():

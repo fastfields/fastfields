@@ -408,7 +408,7 @@ _BOUND_DCT1 = int(Bound.DCT1)
 # now (fastfields-lib#70 -- previously ``zero`` was silently aliased to
 # ``dct1``, handing back results for a boundary condition the caller did
 # not ask for). This check is kept as defense-in-depth: it still applies
-# to the built-in ``dst1``/``dst2``/``nocheck`` bounds, and it gives a
+# to the built-in ``dst1``/``dst2`` bounds, and it gives a
 # clear error to callers on older published wheels that predate #70,
 # where the binding still aliases ``zero`` silently instead of raising.
 _SPLINC_BOUNDS_OK = (
