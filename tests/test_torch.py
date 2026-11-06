@@ -1627,7 +1627,7 @@ def test_spline_coeff_dct1_adjoint_identity(order):
     assert torch.allclose(lhs, rhs, atol=1e-6, rtol=1e-5)
 
 
-@pytest.mark.parametrize("bound", ["zero", "dst1", "dst2", "nocheck"])
+@pytest.mark.parametrize("bound", ["zero", "dst1", "dst2", "nocheck", 7])
 def test_spline_coeff_rejects_unimplemented_bounds(bound):
     """``zero`` is silently treated as ``dct1`` by the binding -- reject it.
 
