@@ -14,4 +14,4 @@ namespace. Pick the one matching the arrays you work with, or
 
 The raw bindings they are all built on, `fastfields.dlpack`, ship from a
 separate distribution (`fastfields-dlpack`) and are documented
-[there](https://fastfields.github.io/fastfields-dlpack/).
+[there](https://fastfields.github.io/dlpack/).

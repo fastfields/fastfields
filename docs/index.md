@@ -12,6 +12,12 @@ Today the tested, working path is **CPU** (NumPy and PyTorch); the CuPy/GPU
 path is implemented but not yet published as a wheel or validated on hardware
 — see [Status](#status) below.
 
+This is the Python section of the fastfields documentation. The
+[project overview](https://fastfields.github.io/) has the per-operation status
+matrix and the roadmap; the layers underneath are documented separately, as the
+[raw DLPack binding](https://fastfields.github.io/dlpack/) and the
+[C++/CUDA library](https://fastfields.github.io/lib/).
+
 ## Install
 
 ```sh
