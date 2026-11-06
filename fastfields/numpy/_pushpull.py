@@ -42,11 +42,46 @@ def pull(
     *,
     extrapolate: int = 1,
 ) -> np.ndarray:
-    """Sample (pull) ``inp`` at the coordinates in ``grid``.
+    """Sample a spline volume at arbitrary coordinates (gather).
 
-    Returns ``(*B, *outshape, C)`` with ``outshape`` and ``C`` taken from
-    ``grid`` and ``inp``. ``extrapolate``: 1 always, 0 not past voxel centres,
-    -1 not past edges.
+    Coordinates are in voxels, channels come last and the first coordinate is
+    x. For a spatial rank `D` of 1, 2 or 3 and any number of leading batch axes
+    `B`, the volume `inp` is `(*B, *inshape, C)` and the coordinates `grid` are
+    `(*B, *outshape, D)`; `D` is read from the last axis of `grid`.
+
+    `inp` holds spline coefficients, which
+    [`spline_coeff`][fastfields.numpy.spline_coeff] computes from samples.
+    [`push`][fastfields.numpy.push] is the adjoint operation.
+
+    Parameters
+    ----------
+    inp : numpy.ndarray
+        Volume of spline coefficients, shape `(*B, *inshape, C)`.
+    grid : numpy.ndarray
+        Sampling coordinates in voxels, x first, shape `(*B, *outshape,
+        D)`. `D` is the spatial rank (1, 2 or 3) and `grid` must have the
+        same number of axes as `inp`.
+    order : int or str, default=2
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    extrapolate : int, default=1
+        How far outside the field of view samples still count: `1` always,
+        `0` not past the voxel centres, `-1` not past the voxel edges.
+
+    Returns
+    -------
+    numpy.ndarray
+        The sampled values, shape `(*B, *outshape, C)`.
+
+    Raises
+    ------
+    ValueError
+        If `inp` and `grid` do not have the same number of axes.
     """
     inp = _as_float_array(inp, "inp")
     grid = _as_float_array(grid, "grid", dtype=inp.dtype)
@@ -73,12 +108,52 @@ def push(
     *,
     extrapolate: int = 1,
 ) -> np.ndarray:
-    """Splat (push) ``inp`` into a volume of spatial size ``shape``.
+    """Splat values into a spline volume (scatter).
 
-    The adjoint of [`pull`][fastfields.numpy.pull]. ``inp``/``grid`` are
-    ``(*B, *outshape, {C,D})``; the result is ``(*B, *shape, C)`` (``shape``
-    gives the ``D`` spatial sizes of the target volume). Values are accumulated
-    (the buffer is pre-zeroed here).
+    Coordinates are in voxels, channels come last and the first coordinate is
+    x. For a spatial rank `D` of 1, 2 or 3 and any number of leading batch axes
+    `B`, the volume `inp` is `(*B, *inshape, C)` and the coordinates `grid` are
+    `(*B, *outshape, D)`; `D` is read from the last axis of `grid`. Here `inp`
+    holds one value per coordinate, `(*B, *outshape, C)`, and the result is a
+    volume `(*B, *shape, C)`.
+
+    The adjoint of [`pull`][fastfields.numpy.pull]. Values landing on the same
+    voxel are summed; the result starts from zero.
+
+    Parameters
+    ----------
+    inp : numpy.ndarray
+        Values to splat, shape `(*B, *outshape, C)`, one per coordinate in
+        `grid`.
+    grid : numpy.ndarray
+        Sampling coordinates in voxels, x first, shape `(*B, *outshape,
+        D)`. `D` is the spatial rank (1, 2 or 3) and `grid` must have the
+        same number of axes as `inp`.
+    shape : int or sequence of int
+        Spatial size of the target volume, one value per spatial axis or a
+        single value for all.
+    order : int or str, default=2
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    extrapolate : int, default=1
+        How far outside the field of view samples still count: `1` always,
+        `0` not past the voxel centres, `-1` not past the voxel edges.
+
+    Returns
+    -------
+    numpy.ndarray
+        The volume, shape `(*B, *shape, C)`.
+
+    Raises
+    ------
+    ValueError
+        If `inp` and `grid` do not have the same number of axes, or `shape`
+        has the wrong length.
     """
     inp = _as_float_array(inp, "inp")
     grid = _as_float_array(grid, "grid", dtype=inp.dtype)
@@ -111,9 +186,39 @@ def count(
     *,
     extrapolate: int = 1,
 ) -> np.ndarray:
-    """Splat ones into a volume of spatial size ``shape`` (push of all-ones).
+    """Splat ones into a volume: how many samples land on each voxel.
 
-    Returns ``(*B, *shape, 1)``.
+    Coordinates are in voxels, channels come last and the first coordinate is
+    x. The coordinates `grid` are `(*B, *outshape, D)`; `D` is read from their
+    last axis.
+
+    Equivalent to [`push`][fastfields.numpy.push] of an all-ones input: the
+    weight each voxel receives from the sampling pattern.
+
+    Parameters
+    ----------
+    grid : numpy.ndarray
+        Sampling coordinates in voxels, x first, shape `(*B, *outshape,
+        D)`; `D` is the spatial rank (1, 2 or 3).
+    shape : int or sequence of int
+        Spatial size of the target volume, one value per spatial axis or a
+        single value for all.
+    order : int or str, default=2
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    extrapolate : int, default=1
+        How far outside the field of view samples still count: `1` always,
+        `0` not past the voxel centres, `-1` not past the voxel edges.
+
+    Returns
+    -------
+    numpy.ndarray
+        The weights, shape `(*B, *shape, 1)`.
     """
     grid = _as_float_array(grid, "grid")
     ndim = grid.shape[-1]
@@ -141,10 +246,49 @@ def grad(
     extrapolate: int = 1,
     abs: bool = False,
 ) -> np.ndarray:
-    """Sample the spatial gradients of ``inp`` at ``grid``.
+    """Sample the spatial gradient of a spline volume at arbitrary coordinates.
 
-    Returns ``(*B, *outshape, C, D)`` — one gradient vector of length ``D`` per
-    sampled channel value. ``abs=True`` takes the absolute value per component.
+    Coordinates are in voxels, channels come last and the first coordinate is
+    x. For a spatial rank `D` of 1, 2 or 3 and any number of leading batch axes
+    `B`, the volume `inp` is `(*B, *inshape, C)` and the coordinates `grid` are
+    `(*B, *outshape, D)`; `D` is read from the last axis of `grid`. The result
+    holds, for every coordinate and channel, the vector of the `D` spatial
+    derivatives.
+
+    With `abs=True` the absolute value of each spline derivative is used
+    instead of its signed value.
+
+    Parameters
+    ----------
+    inp : numpy.ndarray
+        Volume of spline coefficients, shape `(*B, *inshape, C)`.
+    grid : numpy.ndarray
+        Sampling coordinates in voxels, x first, shape `(*B, *outshape,
+        D)`. `D` is the spatial rank (1, 2 or 3) and `grid` must have the
+        same number of axes as `inp`.
+    order : int or str, default=2
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    extrapolate : int, default=1
+        How far outside the field of view samples still count: `1` always,
+        `0` not past the voxel centres, `-1` not past the voxel edges.
+    abs : bool, default=False
+        Take the absolute value of each spline derivative.
+
+    Returns
+    -------
+    numpy.ndarray
+        The gradients, shape `(*B, *outshape, C, D)`.
+
+    Raises
+    ------
+    ValueError
+        If `inp` and `grid` do not have the same number of axes.
     """
     inp = _as_float_array(inp, "inp")
     grid = _as_float_array(grid, "grid", dtype=inp.dtype)

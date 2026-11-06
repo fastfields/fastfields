@@ -35,22 +35,24 @@ __all__ = [
 
 
 def sym_channels_from_packed(packed_len: int) -> int:
-    """Return the channel count ``C`` with ``C*(C+1)/2 == packed_len``.
+    """Channel count `C` of a compact-symmetric matrix from its packed length.
+
+    Inverts `packed_len = C*(C+1)//2`.
 
     Parameters
     ----------
     packed_len : int
-        Length of the packed (compact-symmetric) trailing dimension.
+        Length of the packed last axis.
 
     Returns
     -------
     int
-        The number of channels ``C``.
+        The channel count `C`.
 
     Raises
     ------
     ValueError
-        If ``packed_len`` is not a triangular number ``C*(C+1)/2``.
+        If `packed_len` is not a triangular number.
     """
     c = int((math.isqrt(8 * packed_len + 1) - 1) // 2)
     if c * (c + 1) // 2 != packed_len:
@@ -118,21 +120,25 @@ def _check_sym(
 
 
 def sym_matvec(mat: np.ndarray, vec: np.ndarray) -> np.ndarray:
-    """Compute ``H @ vec`` for a compact-symmetric packed matrix ``H``.
+    """Product of compact-symmetric matrices with vectors.
+
+    A compact-symmetric matrix with `C` channels is stored along the last axis
+    as `C*(C+1)//2` values: the diagonal first, then the rows of the upper
+    triangle. Vectors have a last axis of length `C`.
+
+    Batch axes of `mat` and `vec` are broadcast against each other.
 
     Parameters
     ----------
     mat : numpy.ndarray
-        Compact-symmetric matrix, trailing dim ``C*(C+1)/2`` (diagonal first,
-        then upper rows).
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`.
     vec : numpy.ndarray
-        Vector, trailing dim ``C``.
+        Vectors, shape `(*B, C)`.
 
     Returns
     -------
     numpy.ndarray
-        The product, shaped ``broadcast_batch + (C,)``. The batch (leading)
-        dims of ``mat`` and ``vec`` are broadcast together.
+        `mat @ vec`, shape `(*B, C)` with the broadcast batch shape.
     """
     mat, vec, c = _check_sym(mat, vec)
     batch, (mat_b, vec_b) = _broadcast_batch([(mat, 1), (vec, 1)])
@@ -180,35 +186,35 @@ def _addsub_matvec_(
 def sym_addmatvec_(
     out0: np.ndarray, mat: np.ndarray, vec: np.ndarray
 ) -> np.ndarray:
-    """Accumulate ``out0 += H @ vec`` **in place**; returns ``out0``.
+    """Accumulate a matrix-vector product in place: `out0 += mat @ vec`.
 
-    The trailing ``_`` denotes an in-place op: the caller's ``out0`` array is
-    mutated directly (written through its DLPack buffer) and also returned for
-    convenience.
+    `out0` fixes the batch shape; `mat` and `vec` are broadcast to it. Note
+    that the accumulator comes first, unlike in
+    [`sym_matvec`][fastfields.numpy.sym_matvec].
 
     Parameters
     ----------
     out0 : numpy.ndarray
-        Accumulator, trailing dim ``C``, mutated in place. Must be a
-        float32/float64 array; it fixes the batch (leading) shape.
+        Accumulator, shape `(*B, C)`. Updated in place. It fixes the batch
+        shape of the call.
     mat : numpy.ndarray
-        Compact-symmetric matrix, trailing dim ``C*(C+1)/2``. Broadcast to
-        ``out0``'s batch shape.
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`, broadcast to
+        the batch shape of `out0`.
     vec : numpy.ndarray
-        Vector, trailing dim ``C``. Broadcast to ``out0``'s batch shape.
+        Vectors, shape `(*B, C)`, broadcast to the batch shape of `out0`.
 
     Returns
     -------
     numpy.ndarray
-        ``out0`` (the same array object), now holding ``out0 + H @ vec``.
+        `out0` itself, now holding `out0 + mat @ vec`.
 
     Raises
     ------
     TypeError
-        If ``out0`` is not a float32/float64 numpy array.
+        If `out0` is not a float32 or float64 NumPy array.
     ValueError
-        If ``out0``'s channel count does not match ``vec``, or ``mat``/``vec``
-        cannot be broadcast to ``out0``'s batch shape.
+        If the channel counts disagree, or `mat` or `vec` cannot be
+        broadcast to the batch shape of `out0`.
     """
     return _addsub_matvec_(out0, mat, vec, _ff.sym_addmatvec_)
 
@@ -216,60 +222,65 @@ def sym_addmatvec_(
 def sym_submatvec_(
     out0: np.ndarray, mat: np.ndarray, vec: np.ndarray
 ) -> np.ndarray:
-    """Accumulate ``out0 -= H @ vec`` **in place**; returns ``out0``.
+    """Subtract a matrix-vector product in place: `out0 -= mat @ vec`.
 
-    The trailing ``_`` denotes an in-place op: the caller's ``out0`` array is
-    mutated directly (written through its DLPack buffer) and also returned for
-    convenience.
+    The subtracting twin of
+    [`sym_addmatvec_`][fastfields.numpy.sym_addmatvec_], with the same
+    contract.
 
     Parameters
     ----------
     out0 : numpy.ndarray
-        Accumulator, trailing dim ``C``, mutated in place. Must be a
-        float32/float64 array; it fixes the batch (leading) shape.
+        Accumulator, shape `(*B, C)`. Updated in place. It fixes the batch
+        shape of the call.
     mat : numpy.ndarray
-        Compact-symmetric matrix, trailing dim ``C*(C+1)/2``. Broadcast to
-        ``out0``'s batch shape.
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`, broadcast to
+        the batch shape of `out0`.
     vec : numpy.ndarray
-        Vector, trailing dim ``C``. Broadcast to ``out0``'s batch shape.
+        Vectors, shape `(*B, C)`, broadcast to the batch shape of `out0`.
 
     Returns
     -------
     numpy.ndarray
-        ``out0`` (the same array object), now holding ``out0 - H @ vec``.
+        `out0` itself, now holding `out0 - mat @ vec`.
 
     Raises
     ------
     TypeError
-        If ``out0`` is not a float32/float64 numpy array.
+        If `out0` is not a float32 or float64 NumPy array.
     ValueError
-        If ``out0``'s channel count does not match ``vec``, or ``mat``/``vec``
-        cannot be broadcast to ``out0``'s batch shape.
+        If the channel counts disagree, or `mat` or `vec` cannot be
+        broadcast to the batch shape of `out0`.
     """
     return _addsub_matvec_(out0, mat, vec, _ff.sym_submatvec_)
 
 
 def sym_matvec_backward(grad: np.ndarray, vec: np.ndarray) -> np.ndarray:
-    """Backward of [`sym_matvec`][fastfields.numpy.sym_matvec]: gradient w.r.t.
-    the packed matrix.
+    """Gradient of `sym_matvec` with respect to the matrix.
+
+    Given the upstream gradient of `mat @ vec` and the `vec` of the forward
+    pass, returns the gradient with respect to the packed matrix, in the same
+    packing. Batch axes are broadcast against each other.
+
+    Only numpy and cupy expose this function. On torch it is the adjoint behind
+    `sym_matvec`'s autograd support, reached by calling `.backward()`.
 
     Parameters
     ----------
     grad : numpy.ndarray
-        Upstream gradient, trailing dim ``C``.
+        Upstream gradient, shape `(*B, C)`.
     vec : numpy.ndarray
-        The vector from the forward pass, trailing dim ``C``.
+        The vector of the forward pass, shape `(*B, C)`.
 
     Returns
     -------
     numpy.ndarray
-        Gradient in packed form, trailing dim ``C*(C+1)/2``. Batch dims of
-        ``grad`` and ``vec`` are broadcast together.
+        Gradient with respect to `mat`, shape `(*B, C*(C+1)//2)`.
 
     Raises
     ------
     ValueError
-        If ``grad`` and ``vec`` have different channel counts.
+        If `grad` and `vec` have different channel counts.
     """
     grad = _as_float_array(grad, "grad")
     vec = _as_float_array(vec, "vec", dtype=grad.dtype)
@@ -286,27 +297,34 @@ def sym_matvec_backward(grad: np.ndarray, vec: np.ndarray) -> np.ndarray:
 def sym_solve(
     mat: np.ndarray, vec: np.ndarray, weight: np.ndarray | None = None
 ) -> np.ndarray:
-    """Solve ``(H + diag(weight)) @ x = vec`` for ``x``.
+    """Solve compact-symmetric systems, optionally with a diagonal added.
+
+    A compact-symmetric matrix with `C` channels is stored along the last axis
+    as `C*(C+1)//2` values: the diagonal first, then the rows of the upper
+    triangle. Vectors have a last axis of length `C`. Solves `(mat +
+    diag(weight)) x = vec` for `x`, voxel by voxel. Batch axes of all inputs
+    are broadcast against each other.
+
+    [`sym_solve_`][fastfields.numpy.sym_solve_] is the in-place version.
 
     Parameters
     ----------
     mat : numpy.ndarray
-        Compact-symmetric matrix, trailing dim ``C*(C+1)/2``.
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`.
     vec : numpy.ndarray
-        Right-hand side, trailing dim ``C``.
+        Right-hand sides, shape `(*B, C)`.
     weight : numpy.ndarray, optional
-        Diagonal regulariser added to ``H``, trailing dim ``C``.
+        Diagonal added to `mat` before solving, shape `(*B, C)`.
 
     Returns
     -------
     numpy.ndarray
-        The solution ``x``, shaped ``broadcast_batch + (C,)``. Batch dims of
-        ``mat``/``vec``/``weight`` are broadcast together.
+        The solution `x`, shape `(*B, C)` with the broadcast batch shape.
 
     Raises
     ------
     ValueError
-        If ``weight``'s channel count does not match ``vec``.
+        If the channel counts of `mat`, `vec` and `weight` disagree.
     """
     mat, vec, c = _check_sym(mat, vec)
     if weight is None:
@@ -326,18 +344,24 @@ def sym_solve(
 
 
 def sym_invert(mat: np.ndarray) -> np.ndarray:
-    """Invert a compact-symmetric packed matrix; result is also packed.
+    """Invert compact-symmetric matrices.
+
+    A compact-symmetric matrix with `C` channels is stored along the last axis
+    as `C*(C+1)//2` values: the diagonal first, then the rows of the upper
+    triangle. Vectors have a last axis of length `C`. The inverse is symmetric
+    too and is returned in the same packing.
+
+    [`sym_invert_`][fastfields.numpy.sym_invert_] is the in-place version.
 
     Parameters
     ----------
     mat : numpy.ndarray
-        Compact-symmetric matrix, trailing dim ``C*(C+1)/2``.
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`.
 
     Returns
     -------
     numpy.ndarray
-        The packed inverse, same shape as ``mat``. See
-        [`sym_invert_`][fastfields.numpy.sym_invert_] for the in-place variant.
+        The packed inverses, with the shape of `mat`.
     """
     mat = _as_float_array(mat, "mat")
     # Output must be a real C-contiguous buffer even if ``mat`` is strided.
@@ -349,39 +373,36 @@ def sym_invert(mat: np.ndarray) -> np.ndarray:
 def sym_solve_(
     inp_out: np.ndarray, mat: np.ndarray, weight: np.ndarray | None = None
 ) -> np.ndarray:
-    """In-place solve ``inp_out = (H + diag(weight)) @ inp_out``.
+    """Solve compact-symmetric linear systems in place.
 
-    Mirrors the cupy backend's ``sym_solve_``; there is no autograd concern
-    on numpy (unlike torch's ``sym_solve``, whose backward would need the
-    pre-mutation right-hand side if it were made in-place -- see
-    ``API_CONTRACT.md``), so numpy can expose the same trailing-underscore
-    in-place form cupy already does.
+    Solves `(mat + diag(weight)) x = inp_out` for `x` and stores `x` in
+    `inp_out`. `inp_out` fixes the batch shape; `mat` and `weight` are
+    broadcast to it. Note that the right-hand side comes first, unlike in
+    [`sym_solve`][fastfields.numpy.sym_solve].
 
     Parameters
     ----------
     inp_out : numpy.ndarray
-        Right-hand side on input, solution on output; trailing dim ``C``.
-        Mutated in place and returned. Must be a float32/float64 array; it
-        fixes the batch (leading) shape.
+        Right-hand sides, shape `(*B, C)`, on entry; the solutions on exit.
     mat : numpy.ndarray
-        Compact-symmetric matrix, trailing dim ``C*(C+1)/2``. Broadcast to
-        ``inp_out``'s batch shape.
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`, broadcast to
+        the batch shape of `inp_out`.
     weight : numpy.ndarray, optional
-        Diagonal regulariser added to ``mat``, trailing dim ``C``. Broadcast
-        to ``inp_out``'s batch shape.
+        Diagonal added to `mat`, shape `(*B, C)`, broadcast to the batch
+        shape of `inp_out`.
 
     Returns
     -------
     numpy.ndarray
-        ``inp_out`` (the same array object), now holding the solution.
+        `inp_out` itself, now holding the solution.
 
     Raises
     ------
     TypeError
-        If ``inp_out`` is not a float32/float64 numpy array.
+        If `inp_out` is not a float32 or float64 NumPy array.
     ValueError
-        If ``mat``/``weight`` cannot be broadcast to ``inp_out``'s batch
-        shape, or channel counts disagree.
+        If the channel counts disagree, or `mat` or `weight` cannot be
+        broadcast to the batch shape of `inp_out`.
     """
     inp_out = _validate_inplace(inp_out, "inp_out")
     mat = _as_float_array(mat, "mat", dtype=inp_out.dtype)
@@ -408,23 +429,25 @@ def sym_solve_(
 
 
 def sym_invert_(mat: np.ndarray) -> np.ndarray:
-    """In-place invert a compact-symmetric packed matrix.
+    """Invert compact-symmetric matrices in place.
 
-    Mirrors the cupy backend's ``sym_invert_``. Not exposed on torch: the
-    inverse is nonlinear in ``mat`` and ``sym_invert`` is not differentiable
-    there at all (see ``API_CONTRACT.md``). numpy has no autograd concern, so
-    the same in-place form cupy exposes is safe here.
+    The inverse is symmetric too and replaces `mat` in the same packing.
 
     Parameters
     ----------
     mat : numpy.ndarray
-        Compact-symmetric matrix, trailing dim ``C*(C+1)/2``. Must be a
-        float32/float64 array; mutated in place and returned.
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`, on entry;
+        their inverses on exit.
 
     Returns
     -------
     numpy.ndarray
-        ``mat`` (the same array object), now holding its packed inverse.
+        `mat` itself, now holding the packed inverses.
+
+    Raises
+    ------
+    TypeError
+        If `mat` is not a float32 or float64 NumPy array.
     """
     _validate_inplace(mat, "mat")
     _ff.sym_invert_(mat)

@@ -842,7 +842,53 @@ def field_matvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Apply the field regulariser (differentiable wrt ``inp``)."""
+    """Apply the field regulariser to a multi-channel field.
+
+    Computes `L @ inp` for the field regulariser `L`, the sum of the requested
+    penalties. Each penalty is given per channel and the regulariser never
+    couples channels. The highest-order penalty that is set decides the
+    finite-difference stencil.
+
+    With unit voxels and only `absolute`, the operator scales each channel by
+    its weight; with only `membrane` it is the discrete negative Laplacian.
+
+    The `*_addmatvec`, `*_submatvec` and `*_rls` families accumulate or
+    reweight this operator.
+
+    Differentiable with respect to `inp`. The operator is symmetric, so the
+    backward pass applies the same operator.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        The field to filter, shape `(*batch, *spatial, C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `L @ inp`, a new tensor the shape of `inp`.
+    """
     check_dtype(inp)
     channels = inp.shape[-1]
     return _FieldMatvec.apply(
@@ -868,10 +914,53 @@ def flow_matvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Apply the flow regulariser (scalar penalties; diff'able wrt inp).
+    """Apply the flow regulariser to a vector flow field.
 
-    ``shears`` (Lamé mu) and ``div`` (Lamé lambda) add the linear-elastic
-    penalty coupling the flow channels.
+    Computes `L @ inp` for the flow regulariser `L`, the sum of the requested
+    penalties. The penalties are scalars. A non-zero `shears` or `div` adds the
+    linear-elastic terms, which couple the flow components. The highest-order
+    penalty that is set decides the finite-difference stencil.
+
+    With unit voxels and only `absolute`, the operator scales each channel by
+    its weight; with only `membrane` it is the discrete negative Laplacian.
+
+    The `*_addmatvec`, `*_submatvec` and `*_rls` families accumulate or
+    reweight this operator.
+
+    Differentiable with respect to `inp`. The operator is symmetric, so the
+    backward pass applies the same operator.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        The flow to filter, shape `(*batch, *spatial, ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `L @ inp`, a new tensor the shape of `inp`.
     """
     check_dtype(inp)
     return _FlowMatvec.apply(
@@ -909,14 +998,50 @@ def field_kernel(
     dtype: torch.dtype = torch.float64,
     device=None,
 ) -> Tensor:
-    """Materialise the field regulariser's per-channel Toeplitz stencil.
+    """Convolution stencil of the field regulariser.
 
     Returns the small centred kernel that, convolved with a field, reproduces
-    [`field_matvec`][fastfields.torch.field_matvec]. The shape is ``(*k, C)``
-    (channels are independent), with ``k`` the stencil width per spatial dim: 1
-    (absolute), 3 (membrane) or 5 (bending). ``C`` is ``channels`` if given,
-    else inferred from the per-channel penalty lengths (default 1). Not
-    differentiable.
+    [`field_matvec`][fastfields.torch.field_matvec] with the same penalties.
+    Its shape is `(*k, C)`: one independent stencil per channel. `k` is the
+    stencil width along each spatial axis: 1 if only `absolute` is set, 3 with
+    `membrane`, 5 with `bending`.
+
+    Not differentiable: it builds a result from a shape and takes no tensor
+    input.
+
+    Parameters
+    ----------
+    ndim : int
+        Number of spatial axes of the stencil.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    channels : int, optional
+        Number of channels `C`. When omitted it is the length of the first
+        penalty given as a sequence, and 1 if there is none.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    dtype : dtype, default=torch.float64
+        Data type of the result.
+    device : torch.device, optional
+        Device of the result.
+
+    Returns
+    -------
+    torch.Tensor
+        The stencil, with the shape described above.
     """
     ndim = int(ndim)
     channels = _field_channels(channels, absolute, membrane, bending)
@@ -954,7 +1079,53 @@ def field_diag(
     dtype: torch.dtype = torch.float64,
     device=None,
 ) -> Tensor:
-    """Diagonal (preconditioner) of the field regulariser, shaped ``shape``."""
+    """Diagonal of the field regulariser.
+
+    Builds the diagonal of the field regulariser `L`, which is a cheap Jacobi
+    preconditioner. Each penalty is given per channel and the regulariser never
+    couples channels.
+
+    The result is allocated from `shape`; for a version that accumulates onto
+    an existing array see [`field_adddiag`][fastfields.torch.field_adddiag].
+
+    Not differentiable: it builds a result from a shape and takes no tensor
+    input.
+
+    Parameters
+    ----------
+    shape : sequence of int
+        Shape of the result, `(*batch, *spatial, C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    dtype : dtype, default=torch.float64
+        Data type of the result.
+    device : torch.device, optional
+        Device of the result.
+
+    Returns
+    -------
+    torch.Tensor
+        The diagonal of `L`, shape `shape`.
+    """
     out = torch.zeros(tuple(int(s) for s in shape), dtype=dtype, device=device)
     channels = out.shape[-1]
     _fb.field_diag(
@@ -983,13 +1154,54 @@ def field_relax(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Tensor:
-    """Refine ``field`` in place with ``nb_iter`` relaxation sweeps.
+    """Solve the regularised system `(H + L) x = g` by relaxation sweeps.
 
-    Solves ``(H + L) x = g`` with per-voxel compact-symmetric Hessian ``hes``
-    (packed ``C*(C+1)/2`` last axis), the per-channel field regulariser ``L``
-    (same penalties as [`field_matvec`][fastfields.torch.field_matvec]) and
-    gradient ``grd``. Not differentiable (an in-place iterative solver);
-    ``field`` is the warm start, mutated and returned.
+    Runs `nb_iter` Gauss-Seidel sweeps on `(H + L) x = g`, where `H` is the
+    per-voxel Hessian `hes` and `L` is the field regulariser `L`. Each penalty
+    is given per channel and the regulariser never couples channels.
+
+    `field` is the starting point and receives the result: it is updated in
+    place and returned.
+
+    Not differentiable, being an iterative in-place solver.
+
+    Parameters
+    ----------
+    field : torch.Tensor
+        Starting point, shape `(*batch, *spatial, C)`. Updated in place.
+    hes : torch.Tensor
+        Per-voxel Hessian `H` in compact-symmetric packing, shape `(*batch,
+        *spatial, C*(C+1)//2)`.
+    grd : torch.Tensor
+        Gradient `g`, same shape as `field`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    nb_iter : int, default=1
+        Number of relaxation sweeps.
+
+    Returns
+    -------
+    torch.Tensor
+        `field` itself, holding the refined solution.
     """
     check_dtype(field)
     channels = field.shape[-1]
@@ -1020,14 +1232,50 @@ def field_matvec_rls(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """RLS/JRLS-weighted variant of
-    [`field_matvec`][fastfields.torch.field_matvec].
+    """Apply the weighted (RLS/JRLS) field regulariser.
 
-    ``wgt`` has shape ``(*batch, *spatial, 1)`` for a single weight shared
-    across all channels (JRLS), or ``(*batch, *spatial, C)`` for a genuine
-    per-channel weight (RLS, ``C`` matching ``inp``'s channel count) --
-    the trailing dimension of ``wgt`` selects which mode is used.
-    Differentiable wrt ``inp`` (``wgt`` is treated as fixed).
+    The reweighted form of [`field_matvec`][fastfields.torch.field_matvec]. The
+    weight map `wgt` modulates the strength of the penalties voxel by voxel,
+    for edge-preserving or robust regularisation. Its last axis decides the
+    mode: 1 for one weight shared by all channels (JRLS), `C` for one per
+    channel (RLS).
+
+    Differentiable with respect to `inp`; `wgt` is treated as fixed.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        The field to filter, shape `(*batch, *spatial, C)`.
+    wgt : torch.Tensor
+        Weight map. Its shape is `(*batch, *spatial, 1)` for one weight
+        shared by all channels (JRLS) or `(*batch, *spatial, C)` for one
+        weight per channel (RLS); the last axis decides which.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        The filtered result, a new tensor the shape of `inp`.
     """
     check_dtype(inp)
     channels = inp.shape[-1]
@@ -1056,15 +1304,58 @@ def field_diag_rls(
     dtype: torch.dtype = torch.float64,
     device=None,
 ) -> Tensor:
-    """Diagonal (preconditioner) of
-    [`field_matvec_rls`][fastfields.torch.field_matvec_rls].
+    """Diagonal of the weighted (RLS/JRLS) field regulariser.
 
-    ``wgt`` selects JRLS (trailing dim 1) vs RLS (trailing dim ``C``), same as
-    [`field_matvec_rls`][fastfields.torch.field_matvec_rls]. The output channel
-    count ``C`` is taken from ``channels`` if given, else from ``wgt``'s
-    trailing dimension when it is not 1 (RLS), else inferred from the
-    per-channel penalty lengths (default 1), exactly as
-    [`field_kernel`][fastfields.torch.field_kernel] does. Not differentiable.
+    The diagonal of the operator of
+    [`field_matvec_rls`][fastfields.torch.field_matvec_rls]. Unlike
+    [`field_diag`][fastfields.torch.field_diag] it is shaped by the weight map
+    and not by a `shape` argument. The weight map `wgt` modulates the strength
+    of the penalties voxel by voxel, for edge-preserving or robust
+    regularisation. Its last axis decides the mode: 1 for one weight shared by
+    all channels (JRLS), `C` for one per channel (RLS).
+
+    Not differentiable.
+
+    Parameters
+    ----------
+    wgt : torch.Tensor
+        Weight map. Its shape is `(*batch, *spatial, 1)` for one weight
+        shared by all channels (JRLS) or `(*batch, *spatial, C)` for one
+        weight per channel (RLS); the last axis decides which.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    channels : int, optional
+        Number of channels `C`. When omitted it is the last axis of `wgt`
+        if that is not 1, otherwise the length of the first penalty given
+        as a sequence, and 1 if there is none.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    dtype : dtype, default=torch.float64
+        Data type of the result.
+    device : torch.device, optional
+        Device of the result.
+
+    Returns
+    -------
+    torch.Tensor
+        The diagonal, shape `(*batch, *spatial, C)`.
     """
     if channels is None:
         channels = (
@@ -1105,13 +1396,63 @@ def field_relax_rls(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Tensor:
-    """RLS/JRLS-weighted variant of [`field_relax`][fastfields.torch.field_relax].
+    """Solve the weighted system `(H + L(w)) x = g` by relaxation sweeps.
 
-    Refines ``field`` in place with ``nb_iter`` relaxation sweeps of ``(H +
-    L(w)) x = g``, same ``wgt`` conventions as
-    [`field_matvec_rls`][fastfields.torch.field_matvec_rls]. Not differentiable
-    (an in-place iterative solver); ``field`` is the warm start, mutated and
-    returned.
+    The reweighted form of [`field_relax`][fastfields.torch.field_relax]:
+    `nb_iter` Gauss-Seidel sweeps on `(H + L(w)) x = g`, where `L(w)` is the
+    weighted regulariser of
+    [`field_matvec_rls`][fastfields.torch.field_matvec_rls]. The weight map
+    `wgt` modulates the strength of the penalties voxel by voxel, for
+    edge-preserving or robust regularisation. Its last axis decides the mode: 1
+    for one weight shared by all channels (JRLS), `C` for one per channel
+    (RLS).
+
+    `field` is the starting point and receives the result: it is updated in
+    place and returned.
+
+    Not differentiable, being an iterative in-place solver.
+
+    Parameters
+    ----------
+    field : torch.Tensor
+        Starting point, shape `(*batch, *spatial, C)`. Updated in place.
+    hes : torch.Tensor
+        Per-voxel Hessian `H` in compact-symmetric packing, shape `(*batch,
+        *spatial, C*(C+1)//2)`.
+    grd : torch.Tensor
+        Gradient `g`, same shape as `field`.
+    wgt : torch.Tensor
+        Weight map. Its shape is `(*batch, *spatial, 1)` for one weight
+        shared by all channels (JRLS) or `(*batch, *spatial, C)` for one
+        weight per channel (RLS); the last axis decides which.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    nb_iter : int, default=1
+        Number of relaxation sweeps.
+
+    Returns
+    -------
+    torch.Tensor
+        `field` itself, holding the refined solution.
     """
     check_dtype(field)
     channels = field.shape[-1]
@@ -1146,7 +1487,54 @@ def flow_diag(
     dtype: torch.dtype = torch.float64,
     device=None,
 ) -> Tensor:
-    """Diagonal (preconditioner) of the flow regulariser, shaped ``shape``."""
+    """Diagonal of the flow regulariser.
+
+    Builds the diagonal of the flow regulariser `L`, which is a cheap Jacobi
+    preconditioner. The penalties are scalars. A non-zero `shears` or `div`
+    adds the linear-elastic terms, which couple the flow components.
+
+    The result is allocated from `shape`; for a version that accumulates onto
+    an existing array see [`flow_adddiag`][fastfields.torch.flow_adddiag].
+
+    Not differentiable: it builds a result from a shape and takes no tensor
+    input.
+
+    Parameters
+    ----------
+    shape : sequence of int
+        Shape of the result, `(*batch, *spatial, ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    dtype : dtype, default=torch.float64
+        Data type of the result.
+    device : torch.device, optional
+        Device of the result.
+
+    Returns
+    -------
+    torch.Tensor
+        The diagonal of `L`, shape `shape`.
+    """
     out = torch.zeros(tuple(int(s) for s in shape), dtype=dtype, device=device)
     _fb.flow_diag(
         out,
@@ -1176,15 +1564,50 @@ def flow_kernel(
     dtype: torch.dtype = torch.float64,
     device=None,
 ) -> Tensor:
-    """Materialise the flow regulariser's Toeplitz convolution stencil.
+    """Convolution stencil of the flow regulariser.
 
-    Returns the small centred kernel that, convolved with a flow field,
-    reproduces [`flow_matvec`][fastfields.torch.flow_matvec]. The shape is
-    ``(*k, ndim)`` for the per-channel vector stencil, or ``(*k, ndim, ndim)``
-    when ``shears``/``div`` select the cross-channel (Lamé) matrix stencil,
-    where ``k`` is the stencil width per spatial dim: 1 (absolute only), 3
-    (membrane/Lamé) or 5 (bending). Not differentiable (it builds from a shape
-    descriptor, not an input field).
+    Returns the small centred kernel that, convolved with a flow, reproduces
+    [`flow_matvec`][fastfields.torch.flow_matvec] with the same penalties. Its
+    shape is `(*k, ndim)` for the per-component stencil, or `(*k, ndim, ndim)`
+    when `shears` or `div` select the matrix stencil that couples components.
+    `k` is the stencil width along each spatial axis: 1 if only `absolute` is
+    set, 3 with `membrane` or the elastic terms, 5 with `bending`.
+
+    Not differentiable: it builds a result from a shape and takes no tensor
+    input.
+
+    Parameters
+    ----------
+    ndim : int
+        Number of spatial axes, which is also the number of flow
+        components.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    dtype : dtype, default=torch.float64
+        Data type of the result.
+    device : torch.device, optional
+        Device of the result.
+
+    Returns
+    -------
+    torch.Tensor
+        The stencil, with the shape described above.
     """
     ndim = int(ndim)
     is_matrix = shears != 0.0 or div != 0.0
@@ -1228,11 +1651,56 @@ def flow_relax(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Tensor:
-    """Refine ``flow`` in place with ``nb_iter`` relaxation sweeps.
+    """Solve the regularised system `(H + L) x = g` by relaxation sweeps.
 
-    Solves ``(H + L) x = g`` with per-voxel symmetric Hessian ``hes`` and
-    gradient ``grd``. Not differentiable (an in-place iterative solver);
-    ``flow`` is the warm start, mutated and returned.
+    Runs `nb_iter` Gauss-Seidel sweeps on `(H + L) x = g`, where `H` is the
+    per-voxel Hessian `hes` and `L` is the flow regulariser `L`. The penalties
+    are scalars. A non-zero `shears` or `div` adds the linear-elastic terms,
+    which couple the flow components.
+
+    `flow` is the starting point and receives the result: it is updated in
+    place and returned.
+
+    Not differentiable, being an iterative in-place solver.
+
+    Parameters
+    ----------
+    flow : torch.Tensor
+        Starting point, shape `(*batch, *spatial, ndim)`. Updated in place.
+    hes : torch.Tensor
+        Per-voxel Hessian `H` in compact-symmetric packing, shape `(*batch,
+        *spatial, ndim*(ndim+1)//2)`.
+    grd : torch.Tensor
+        Gradient `g`, same shape as `flow`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    nb_iter : int, default=1
+        Number of relaxation sweeps.
+
+    Returns
+    -------
+    torch.Tensor
+        `flow` itself, holding the refined solution.
     """
     check_dtype(flow)
     _fb.flow_relax(
@@ -1266,16 +1734,50 @@ def flow_matvec_rls(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """RLS/JRLS-weighted variant of [`flow_matvec`][fastfields.torch.flow_matvec].
+    """Apply the weighted (RLS/JRLS) flow regulariser.
 
-    ``wgt`` has shape ``(*batch, *spatial, 1)``: unlike the field family, the
-    flow weighting is always *joint* -- the trailing axis of a flow field
-    holds the components of one displacement vector, so a single weight is
-    shared across them. Differentiable wrt ``inp`` (``wgt`` is treated as
-    fixed).
+    The reweighted form of [`flow_matvec`][fastfields.torch.flow_matvec]. The
+    weight map `wgt` modulates the strength of the penalties voxel by voxel,
+    for edge-preserving or robust regularisation. Flow weighting is always
+    joint: one weight per voxel, shared by all flow components. `bending` is
+    not supported with weighting, and a non-zero value is rejected.
 
-    ``bending`` is **not supported** with weighting (no weighted bending
-    kernel exists, as in ``jitfields``); a non-zero value raises.
+    Differentiable with respect to `inp`; `wgt` is treated as fixed.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        The flow to filter, shape `(*batch, *spatial, ndim)`.
+    wgt : torch.Tensor
+        Weight map, shape `(*batch, *spatial, 1)`: one weight per voxel,
+        shared by all flow components.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        The filtered result, a new tensor the shape of `inp`.
     """
     check_dtype(inp)
     return _FlowMatvecRLS.apply(
@@ -1306,14 +1808,56 @@ def flow_diag_rls(
     dtype: torch.dtype = torch.float64,
     device=None,
 ) -> Tensor:
-    """Diagonal (preconditioner) of
-    [`flow_matvec_rls`][fastfields.torch.flow_matvec_rls].
+    """Diagonal of the weighted (JRLS) flow regulariser.
 
-    Unlike plain [`flow_diag`][fastfields.torch.flow_diag], which builds from a
-    *shape*, this one is driven by the weight map: the output is
-    ``wgt.shape[:-1] + (ndim,)``, since a flow field's channel count is
-    ``ndim``. Same ``wgt`` conventions as
-    [`flow_matvec_rls`][fastfields.torch.flow_matvec_rls]. Not differentiable.
+    The diagonal of the operator of
+    [`flow_matvec_rls`][fastfields.torch.flow_matvec_rls]. Unlike
+    [`flow_diag`][fastfields.torch.flow_diag] it is shaped by the weight map
+    and not by a `shape` argument. The weight map `wgt` modulates the strength
+    of the penalties voxel by voxel, for edge-preserving or robust
+    regularisation. Flow weighting is always joint: one weight per voxel,
+    shared by all flow components. `bending` is not supported with weighting,
+    and a non-zero value is rejected.
+
+    Not differentiable.
+
+    Parameters
+    ----------
+    wgt : torch.Tensor
+        Weight map, shape `(*batch, *spatial, 1)`: one weight per voxel,
+        shared by all flow components.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    dtype : dtype, default=torch.float64
+        Data type of the result.
+    device : torch.device, optional
+        Device of the result.
+
+    Returns
+    -------
+    torch.Tensor
+        The diagonal, shape `(*batch, *spatial, ndim)`: the shape of `wgt`
+        with its last axis replaced by the number of flow components.
     """
     out = torch.zeros(
         tuple(wgt.shape[:-1]) + (int(ndim),),
@@ -1352,13 +1896,63 @@ def flow_relax_rls(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Tensor:
-    """RLS/JRLS-weighted variant of [`flow_relax`][fastfields.torch.flow_relax].
+    """Solve the weighted system `(H + L(w)) x = g` by relaxation sweeps.
 
-    Refines ``flow`` in place with ``nb_iter`` relaxation sweeps of ``(H +
-    L(w)) x = g``, same ``wgt`` conventions as
-    [`flow_matvec_rls`][fastfields.torch.flow_matvec_rls]. Not differentiable
-    (an in-place iterative solver); ``flow`` is the warm start, mutated and
-    returned.
+    The reweighted form of [`flow_relax`][fastfields.torch.flow_relax]:
+    `nb_iter` Gauss-Seidel sweeps on `(H + L(w)) x = g`, where `L(w)` is the
+    weighted regulariser of
+    [`flow_matvec_rls`][fastfields.torch.flow_matvec_rls]. The weight map `wgt`
+    modulates the strength of the penalties voxel by voxel, for edge-preserving
+    or robust regularisation. Flow weighting is always joint: one weight per
+    voxel, shared by all flow components. `bending` is not supported with
+    weighting, and a non-zero value is rejected.
+
+    `flow` is the starting point and receives the result: it is updated in
+    place and returned.
+
+    Not differentiable, being an iterative in-place solver.
+
+    Parameters
+    ----------
+    flow : torch.Tensor
+        Starting point, shape `(*batch, *spatial, ndim)`. Updated in place.
+    hes : torch.Tensor
+        Per-voxel Hessian `H` in compact-symmetric packing, shape `(*batch,
+        *spatial, ndim*(ndim+1)//2)`.
+    grd : torch.Tensor
+        Gradient `g`, same shape as `flow`.
+    wgt : torch.Tensor
+        Weight map, shape `(*batch, *spatial, 1)`: one weight per voxel,
+        shared by all flow components.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    nb_iter : int, default=1
+        Number of relaxation sweeps.
+
+    Returns
+    -------
+    torch.Tensor
+        `flow` itself, holding the refined solution.
     """
     check_dtype(flow)
     _fb.flow_relax_rls(
@@ -1393,14 +1987,60 @@ def flow_precond(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Apply the preconditioner ``(M + diag(R)) \\ vec``.
+    """Jacobi preconditioner: solve `(M + diag(L)) x = vec` voxel by voxel.
 
-    ``M`` is the per-voxel compact-symmetric matrix ``mat``; ``diag(R)`` is the
-    diagonal of the flow regulariser (same penalties as
-    [`flow_matvec`][fastfields.torch.flow_matvec]). A composition of
-    [`flow_diag`][fastfields.torch.flow_diag] and
-    [`sym_solve`][fastfields.torch.sym_solve] — no new kernel; differentiable
-    wrt ``vec`` (through the self-adjoint solve).
+    Solves `(M + diag(L)) x = vec` voxel by voxel, where `M` is the per-voxel
+    matrix `mat` and `diag(L)` is the diagonal of the flow regulariser `L`. It
+    approximates the inverse of the operator of
+    [`flow_forward`][fastfields.torch.flow_forward]. The penalties are scalars.
+    A non-zero `shears` or `div` adds the linear-elastic terms, which couple
+    the flow components.
+
+    Batch axes of `mat` and `vec` are broadcast against each other; the spatial
+    axes and the last axis must match.
+
+    `flow_precond_` is the in-place version.
+
+    Differentiable with respect to `vec`, through the self-adjoint solve. `mat`
+    must not require grad, as for [`sym_solve`][fastfields.torch.sym_solve].
+
+    Parameters
+    ----------
+    mat : torch.Tensor
+        Per-voxel matrix `M` in compact-symmetric packing, shape `(*batch,
+        *spatial, ndim*(ndim+1)//2)`. Batch axes are broadcast against
+        those of `vec`.
+    vec : torch.Tensor
+        Right-hand side, shape `(*batch, *spatial, ndim)`. Batch axes are
+        broadcast against those of `mat`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        The solution `x`, shape `(*batch, *spatial, ndim)` with the
+        broadcast batch shape.
     """
     check_dtype(vec)
     diag = flow_diag(
@@ -1432,13 +2072,56 @@ def flow_forward(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Apply the forward matrix-vector product ``(M + R) @ vec``.
+    """Apply the regularised system: `(M + L) @ vec`.
 
-    ``M`` is the per-voxel compact-symmetric matrix ``mat`` and ``R`` the flow
-    regulariser operator. A composition of
-    [`sym_matvec`][fastfields.torch.sym_matvec] and
-    [`flow_matvec`][fastfields.torch.flow_matvec] — no new kernel;
-    differentiable wrt ``mat``/``vec``.
+    Computes `(M + L) @ vec`, where `M` is the per-voxel matrix `mat` and `L`
+    is the flow regulariser `L`. This is the operator that
+    [`flow_relax`][fastfields.torch.flow_relax] solves. The penalties are
+    scalars. A non-zero `shears` or `div` adds the linear-elastic terms, which
+    couple the flow components.
+
+    Batch axes of `mat` and `vec` are broadcast against each other; the spatial
+    axes and the last axis must match.
+
+    Differentiable with respect to both `mat` and `vec`.
+
+    Parameters
+    ----------
+    mat : torch.Tensor
+        Per-voxel matrix `M` in compact-symmetric packing, shape `(*batch,
+        *spatial, ndim*(ndim+1)//2)`. Batch axes are broadcast against
+        those of `vec`.
+    vec : torch.Tensor
+        Vector field, shape `(*batch, *spatial, ndim)`. Batch axes are
+        broadcast against those of `mat`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `(M + L) @ vec`, shape `(*batch, *spatial, ndim)` with the
+        broadcast batch shape.
     """
     check_dtype(vec)
     out = sym_matvec(mat, vec)
@@ -1477,11 +2160,53 @@ def flow_addmatvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp + L @ flow`` as a **new** tensor.
+    """Add the flow regulariser applied to a flow: `inp + L @ flow`.
 
-    Clones ``inp`` and applies the in-place accumulate primitive to the
-    clone -- one kernel, no temporary for the regulariser result.
-    Differentiable wrt both ``inp`` and ``flow``.
+    Computes `inp + L @ flow` for the flow regulariser `L`. The penalties are
+    scalars. A non-zero `shears` or `div` adds the linear-elastic terms, which
+    couple the flow components.
+
+    `inp` is copied, never modified;
+    [`flow_addmatvec_`][fastfields.torch.flow_addmatvec_] is the version that
+    updates it in place.
+
+    Differentiable with respect to both `inp` and `flow`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the result is accumulated onto, shape `(*batch, *spatial,
+        ndim)`.
+    flow : torch.Tensor
+        The flow the operator is applied to, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp + L @ flow`, a new tensor the shape of `inp`.
     """
     return _flow_matvec_acc(
         inp,
@@ -1512,11 +2237,53 @@ def flow_submatvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp - L @ flow`` as a **new** tensor.
+    """Subtract the flow regulariser applied to a flow: `inp - L @ flow`.
 
-    Clones ``inp`` and applies the in-place accumulate primitive to the
-    clone -- one kernel, no temporary for the regulariser result.
-    Differentiable wrt both ``inp`` and ``flow``.
+    Computes `inp - L @ flow` for the flow regulariser `L`. The penalties are
+    scalars. A non-zero `shears` or `div` adds the linear-elastic terms, which
+    couple the flow components.
+
+    `inp` is copied, never modified;
+    [`flow_submatvec_`][fastfields.torch.flow_submatvec_] is the version that
+    updates it in place.
+
+    Differentiable with respect to both `inp` and `flow`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the result is accumulated onto, shape `(*batch, *spatial,
+        ndim)`.
+    flow : torch.Tensor
+        The flow the operator is applied to, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp - L @ flow`, a new tensor the shape of `inp`.
     """
     return _flow_matvec_acc(
         inp,
@@ -1547,12 +2314,54 @@ def flow_addmatvec_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place ``inp += L @ flow``; returns ``inp``.
+    """Accumulate the flow regulariser in place: `inp += L @ flow`.
 
-    Calls the fused in-place C primitive directly. Autograd-safe (the op
-    is additive in ``inp``, so backward needs no pre-mutation value); a
-    leaf tensor requiring grad still cannot be mutated, as with
-    ``Tensor.add_``.
+    Updates `inp` with `inp += L @ flow` for the flow regulariser `L`, in one
+    kernel and without a temporary for the product. The penalties are scalars.
+    A non-zero `shears` or `div` adds the linear-elastic terms, which couple
+    the flow components.
+
+    [`flow_addmatvec`][fastfields.torch.flow_addmatvec] is the version that
+    returns a new tensor.
+
+    Safe under autograd: the operation is additive in `inp`, so the backward
+    pass needs no value that was overwritten. As with `Tensor.add_`, a leaf
+    tensor that requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shape `(*batch, *spatial, ndim)`. Updated in place.
+    flow : torch.Tensor
+        The flow the operator is applied to, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
     """
     return _flow_matvec_acc(
         inp,
@@ -1583,12 +2392,54 @@ def flow_submatvec_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place ``inp -= L @ flow``; returns ``inp``.
+    """Accumulate the flow regulariser in place: `inp -= L @ flow`.
 
-    Calls the fused in-place C primitive directly. Autograd-safe (the op
-    is additive in ``inp``, so backward needs no pre-mutation value); a
-    leaf tensor requiring grad still cannot be mutated, as with
-    ``Tensor.add_``.
+    Updates `inp` with `inp -= L @ flow` for the flow regulariser `L`, in one
+    kernel and without a temporary for the product. The penalties are scalars.
+    A non-zero `shears` or `div` adds the linear-elastic terms, which couple
+    the flow components.
+
+    [`flow_submatvec`][fastfields.torch.flow_submatvec] is the version that
+    returns a new tensor.
+
+    Safe under autograd: the operation is additive in `inp`, so the backward
+    pass needs no value that was overwritten. As with `Tensor.add_`, a leaf
+    tensor that requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shape `(*batch, *spatial, ndim)`. Updated in place.
+    flow : torch.Tensor
+        The flow the operator is applied to, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
     """
     return _flow_matvec_acc(
         inp,
@@ -1618,10 +2469,49 @@ def flow_adddiag(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp + diag(L)`` as a **new** tensor, shaped like ``inp``.
+    """Add the diagonal of the flow regulariser: `inp + diag(L)`.
 
-    Clones ``inp`` and applies the in-place accumulate primitive to the
-    clone. Differentiable wrt ``inp``.
+    Computes `inp + diag(L)` for the flow regulariser `L`. The penalties are
+    scalars. A non-zero `shears` or `div` adds the linear-elastic terms, which
+    couple the flow components.
+
+    `inp` is copied, never modified;
+    [`flow_adddiag_`][fastfields.torch.flow_adddiag_] updates it in place.
+
+    Differentiable with respect to `inp`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the diagonal is accumulated onto, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp + diag(L)`, a new tensor the shape of `inp`.
     """
     return _flow_diag_acc(
         inp,
@@ -1650,10 +2540,49 @@ def flow_subdiag(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp - diag(L)`` as a **new** tensor, shaped like ``inp``.
+    """Subtract the diagonal of the flow regulariser: `inp - diag(L)`.
 
-    Clones ``inp`` and applies the in-place accumulate primitive to the
-    clone. Differentiable wrt ``inp``.
+    Computes `inp - diag(L)` for the flow regulariser `L`. The penalties are
+    scalars. A non-zero `shears` or `div` adds the linear-elastic terms, which
+    couple the flow components.
+
+    `inp` is copied, never modified;
+    [`flow_subdiag_`][fastfields.torch.flow_subdiag_] updates it in place.
+
+    Differentiable with respect to `inp`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the diagonal is accumulated onto, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp - diag(L)`, a new tensor the shape of `inp`.
     """
     return _flow_diag_acc(
         inp,
@@ -1682,11 +2611,49 @@ def flow_adddiag_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place ``inp += diag(L)``; returns ``inp``.
+    """Accumulate the flow regulariser's diagonal in place: `inp += diag(L)`.
 
-    Calls the fused in-place C primitive directly. Autograd-safe (the op
-    is additive in ``inp``); a leaf tensor requiring grad still cannot be
-    mutated, as with ``Tensor.add_``.
+    Updates `inp` with `inp += diag(L)` for the flow regulariser `L`, in one
+    kernel. The penalties are scalars. A non-zero `shears` or `div` adds the
+    linear-elastic terms, which couple the flow components.
+
+    [`flow_adddiag`][fastfields.torch.flow_adddiag] returns a new tensor
+    instead.
+
+    Safe under autograd: the operation is additive in `inp`. A leaf tensor that
+    requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shape `(*batch, *spatial, ndim)`. Updated in place.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
     """
     return _flow_diag_acc(
         inp,
@@ -1715,11 +2682,49 @@ def flow_subdiag_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place ``inp -= diag(L)``; returns ``inp``.
+    """Accumulate the flow regulariser's diagonal in place: `inp -= diag(L)`.
 
-    Calls the fused in-place C primitive directly. Autograd-safe (the op
-    is additive in ``inp``); a leaf tensor requiring grad still cannot be
-    mutated, as with ``Tensor.add_``.
+    Updates `inp` with `inp -= diag(L)` for the flow regulariser `L`, in one
+    kernel. The penalties are scalars. A non-zero `shears` or `div` adds the
+    linear-elastic terms, which couple the flow components.
+
+    [`flow_subdiag`][fastfields.torch.flow_subdiag] returns a new tensor
+    instead.
+
+    Safe under autograd: the operation is additive in `inp`. A leaf tensor that
+    requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shape `(*batch, *spatial, ndim)`. Updated in place.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
     """
     return _flow_diag_acc(
         inp,
@@ -1747,7 +2752,59 @@ def field_precond(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Apply the preconditioner ``(M + diag(R)) \\ vec`` (diff wrt vec)."""
+    """Jacobi preconditioner: solve `(M + diag(L)) x = vec` voxel by voxel.
+
+    Solves `(M + diag(L)) x = vec` voxel by voxel, where `M` is the per-voxel
+    matrix `mat` and `diag(L)` is the diagonal of the field regulariser `L`. It
+    approximates the inverse of the operator of
+    [`field_forward`][fastfields.torch.field_forward]. Each penalty is given
+    per channel and the regulariser never couples channels.
+
+    Batch axes of `mat` and `vec` are broadcast against each other; the spatial
+    axes and the last axis must match.
+
+    `field_precond_` is the in-place version.
+
+    Differentiable with respect to `vec`, through the self-adjoint solve. `mat`
+    must not require grad, as for [`sym_solve`][fastfields.torch.sym_solve].
+
+    Parameters
+    ----------
+    mat : torch.Tensor
+        Per-voxel matrix `M` in compact-symmetric packing, shape `(*batch,
+        *spatial, C*(C+1)//2)`. Batch axes are broadcast against those of
+        `vec`.
+    vec : torch.Tensor
+        Right-hand side, shape `(*batch, *spatial, C)`. Batch axes are
+        broadcast against those of `mat`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        The solution `x`, shape `(*batch, *spatial, C)` with the broadcast
+        batch shape.
+    """
     check_dtype(vec)
     diag = field_diag(
         vec.shape,
@@ -1774,7 +2831,55 @@ def field_forward(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Apply ``(M + R) @ vec`` (differentiable wrt ``mat`` and ``vec``)."""
+    """Apply the regularised system: `(M + L) @ vec`.
+
+    Computes `(M + L) @ vec`, where `M` is the per-voxel matrix `mat` and `L`
+    is the field regulariser `L`. This is the operator that
+    [`field_relax`][fastfields.torch.field_relax] solves. Each penalty is given
+    per channel and the regulariser never couples channels.
+
+    Batch axes of `mat` and `vec` are broadcast against each other; the spatial
+    axes and the last axis must match.
+
+    Differentiable with respect to both `mat` and `vec`.
+
+    Parameters
+    ----------
+    mat : torch.Tensor
+        Per-voxel matrix `M` in compact-symmetric packing, shape `(*batch,
+        *spatial, C*(C+1)//2)`. Batch axes are broadcast against those of
+        `vec`.
+    vec : torch.Tensor
+        Vector field, shape `(*batch, *spatial, C)`. Batch axes are
+        broadcast against those of `mat`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `(M + L) @ vec`, shape `(*batch, *spatial, C)` with the broadcast
+        batch shape.
+    """
     check_dtype(vec)
     out = sym_matvec(mat, vec)
     out = out + field_matvec(
@@ -1800,11 +2905,51 @@ def field_addmatvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp + L @ field`` as a **new** tensor.
+    """Add the field regulariser applied to a field: `inp + L @ field`.
 
-    Clones ``inp`` and applies the in-place accumulate primitive to the
-    clone -- one kernel, no temporary for the regulariser result.
-    Differentiable wrt both ``inp`` and ``field``.
+    Computes `inp + L @ field` for the field regulariser `L`. Each penalty is
+    given per channel and the regulariser never couples channels.
+
+    `inp` is copied, never modified;
+    [`field_addmatvec_`][fastfields.torch.field_addmatvec_] is the version that
+    updates it in place.
+
+    Differentiable with respect to both `inp` and `field`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the result is accumulated onto, shape `(*batch, *spatial,
+        C)`.
+    field : torch.Tensor
+        The field the operator is applied to, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp + L @ field`, a new tensor the shape of `inp`.
     """
     return _field_matvec_acc(
         inp,
@@ -1831,11 +2976,51 @@ def field_submatvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp - L @ field`` as a **new** tensor.
+    """Subtract the field regulariser applied to a field: `inp - L @ field`.
 
-    Clones ``inp`` and applies the in-place accumulate primitive to the
-    clone -- one kernel, no temporary for the regulariser result.
-    Differentiable wrt both ``inp`` and ``field``.
+    Computes `inp - L @ field` for the field regulariser `L`. Each penalty is
+    given per channel and the regulariser never couples channels.
+
+    `inp` is copied, never modified;
+    [`field_submatvec_`][fastfields.torch.field_submatvec_] is the version that
+    updates it in place.
+
+    Differentiable with respect to both `inp` and `field`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the result is accumulated onto, shape `(*batch, *spatial,
+        C)`.
+    field : torch.Tensor
+        The field the operator is applied to, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp - L @ field`, a new tensor the shape of `inp`.
     """
     return _field_matvec_acc(
         inp,
@@ -1862,12 +3047,52 @@ def field_addmatvec_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place ``inp += L @ field``; returns ``inp``.
+    """Accumulate the field regulariser in place: `inp += L @ field`.
 
-    Calls the fused in-place C primitive directly. Autograd-safe (the op
-    is additive in ``inp``, so backward needs no pre-mutation value); a
-    leaf tensor requiring grad still cannot be mutated, as with
-    ``Tensor.add_``.
+    Updates `inp` with `inp += L @ field` for the field regulariser `L`, in one
+    kernel and without a temporary for the product. Each penalty is given per
+    channel and the regulariser never couples channels.
+
+    [`field_addmatvec`][fastfields.torch.field_addmatvec] is the version that
+    returns a new tensor.
+
+    Safe under autograd: the operation is additive in `inp`, so the backward
+    pass needs no value that was overwritten. As with `Tensor.add_`, a leaf
+    tensor that requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shape `(*batch, *spatial, C)`. Updated in place.
+    field : torch.Tensor
+        The field the operator is applied to, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
     """
     return _field_matvec_acc(
         inp,
@@ -1894,12 +3119,52 @@ def field_submatvec_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place ``inp -= L @ field``; returns ``inp``.
+    """Accumulate the field regulariser in place: `inp -= L @ field`.
 
-    Calls the fused in-place C primitive directly. Autograd-safe (the op
-    is additive in ``inp``, so backward needs no pre-mutation value); a
-    leaf tensor requiring grad still cannot be mutated, as with
-    ``Tensor.add_``.
+    Updates `inp` with `inp -= L @ field` for the field regulariser `L`, in one
+    kernel and without a temporary for the product. Each penalty is given per
+    channel and the regulariser never couples channels.
+
+    [`field_submatvec`][fastfields.torch.field_submatvec] is the version that
+    returns a new tensor.
+
+    Safe under autograd: the operation is additive in `inp`, so the backward
+    pass needs no value that was overwritten. As with `Tensor.add_`, a leaf
+    tensor that requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shape `(*batch, *spatial, C)`. Updated in place.
+    field : torch.Tensor
+        The field the operator is applied to, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
     """
     return _field_matvec_acc(
         inp,
@@ -1925,10 +3190,47 @@ def field_adddiag(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp + diag(L)`` as a **new** tensor, shaped like ``inp``.
+    """Add the diagonal of the field regulariser: `inp + diag(L)`.
 
-    Clones ``inp`` and applies the in-place accumulate primitive to the
-    clone. Differentiable wrt ``inp``.
+    Computes `inp + diag(L)` for the field regulariser `L`. Each penalty is
+    given per channel and the regulariser never couples channels.
+
+    `inp` is copied, never modified;
+    [`field_adddiag_`][fastfields.torch.field_adddiag_] updates it in place.
+
+    Differentiable with respect to `inp`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the diagonal is accumulated onto, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp + diag(L)`, a new tensor the shape of `inp`.
     """
     return _field_diag_acc(
         inp,
@@ -1953,10 +3255,47 @@ def field_subdiag(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp - diag(L)`` as a **new** tensor, shaped like ``inp``.
+    """Subtract the diagonal of the field regulariser: `inp - diag(L)`.
 
-    Clones ``inp`` and applies the in-place accumulate primitive to the
-    clone. Differentiable wrt ``inp``.
+    Computes `inp - diag(L)` for the field regulariser `L`. Each penalty is
+    given per channel and the regulariser never couples channels.
+
+    `inp` is copied, never modified;
+    [`field_subdiag_`][fastfields.torch.field_subdiag_] updates it in place.
+
+    Differentiable with respect to `inp`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the diagonal is accumulated onto, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp - diag(L)`, a new tensor the shape of `inp`.
     """
     return _field_diag_acc(
         inp,
@@ -1981,11 +3320,48 @@ def field_adddiag_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place ``inp += diag(L)``; returns ``inp``.
+    """Accumulate the field regulariser's diagonal in place: `inp += diag(L)`.
 
-    Calls the fused in-place C primitive directly. Autograd-safe (the op
-    is additive in ``inp``); a leaf tensor requiring grad still cannot be
-    mutated, as with ``Tensor.add_``.
+    Updates `inp` with `inp += diag(L)` for the field regulariser `L`, in one
+    kernel. Each penalty is given per channel and the regulariser never couples
+    channels.
+
+    [`field_adddiag`][fastfields.torch.field_adddiag] returns a new tensor
+    instead.
+
+    Safe under autograd: the operation is additive in `inp`. A leaf tensor that
+    requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shape `(*batch, *spatial, C)`. Updated in place.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
     """
     return _field_diag_acc(
         inp,
@@ -2010,11 +3386,48 @@ def field_subdiag_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place ``inp -= diag(L)``; returns ``inp``.
+    """Accumulate the field regulariser's diagonal in place: `inp -= diag(L)`.
 
-    Calls the fused in-place C primitive directly. Autograd-safe (the op
-    is additive in ``inp``); a leaf tensor requiring grad still cannot be
-    mutated, as with ``Tensor.add_``.
+    Updates `inp` with `inp -= diag(L)` for the field regulariser `L`, in one
+    kernel. Each penalty is given per channel and the regulariser never couples
+    channels.
+
+    [`field_subdiag`][fastfields.torch.field_subdiag] returns a new tensor
+    instead.
+
+    Safe under autograd: the operation is additive in `inp`. A leaf tensor that
+    requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shape `(*batch, *spatial, C)`. Updated in place.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
     """
     return _field_diag_acc(
         inp,
@@ -2050,11 +3463,47 @@ def field_addkernel(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp + K`` as a **new** tensor, shaped like ``inp``.
+    """Add the stencil of the field regulariser: `inp + K`.
 
-    ``K`` is the field regulariser's stencil (see
-    [`field_kernel`][fastfields.torch.field_kernel], whose output shape ``inp``
-    must match). Differentiable wrt ``inp``.
+    Computes `inp + K`, where `K` is the stencil that
+    [`field_kernel`][fastfields.torch.field_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil and is copied, never
+    modified; [`field_addkernel_`][fastfields.torch.field_addkernel_] updates
+    it in place.
+
+    Differentiable with respect to `inp`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the stencil is accumulated onto, shaped like the output of
+        [`field_kernel`][fastfields.torch.field_kernel].
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp + K`, a new tensor the shape of `inp`.
     """
     return _field_kernel_acc(
         inp,
@@ -2079,7 +3528,48 @@ def field_subkernel(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp - K`` as a **new** tensor. Differentiable wrt ``inp``."""
+    """Subtract the stencil of the field regulariser: `inp - K`.
+
+    Computes `inp - K`, where `K` is the stencil that
+    [`field_kernel`][fastfields.torch.field_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil and is copied, never
+    modified; [`field_subkernel_`][fastfields.torch.field_subkernel_] updates
+    it in place.
+
+    Differentiable with respect to `inp`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the stencil is accumulated onto, shaped like the output of
+        [`field_kernel`][fastfields.torch.field_kernel].
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp - K`, a new tensor the shape of `inp`.
+    """
     return _field_kernel_acc(
         inp,
         absolute,
@@ -2103,7 +3593,49 @@ def field_addkernel_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place: ``inp += K``. Mutates and returns ``inp``."""
+    """Accumulate the field regulariser's stencil in place: `inp += K`.
+
+    Updates `inp` with `inp += K`, where `K` is the stencil that
+    [`field_kernel`][fastfields.torch.field_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil.
+    [`field_addkernel`][fastfields.torch.field_addkernel] returns a new tensor
+    instead.
+
+    Safe under autograd: the operation is additive in `inp`. A leaf tensor that
+    requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shaped like the output of
+        [`field_kernel`][fastfields.torch.field_kernel]. Updated in place.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
+    """
     return _field_kernel_acc(
         inp,
         absolute,
@@ -2127,7 +3659,49 @@ def field_subkernel_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place: ``inp -= K``. Mutates and returns ``inp``."""
+    """Accumulate the field regulariser's stencil in place: `inp -= K`.
+
+    Updates `inp` with `inp -= K`, where `K` is the stencil that
+    [`field_kernel`][fastfields.torch.field_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil.
+    [`field_subkernel`][fastfields.torch.field_subkernel] returns a new tensor
+    instead.
+
+    Safe under autograd: the operation is additive in `inp`. A leaf tensor that
+    requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shaped like the output of
+        [`field_kernel`][fastfields.torch.field_kernel]. Updated in place.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
+    """
     return _field_kernel_acc(
         inp,
         absolute,
@@ -2153,11 +3727,48 @@ def flow_addkernel(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp + K`` as a **new** tensor, shaped like ``inp``.
+    """Add the stencil of the flow regulariser: `inp + K`.
 
-    ``K`` is the flow regulariser's stencil (see
-    [`flow_kernel`][fastfields.torch.flow_kernel], whose output shape ``inp``
-    must match). Differentiable wrt ``inp``.
+    Computes `inp + K`, where `K` is the stencil that
+    [`flow_kernel`][fastfields.torch.flow_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil and is copied, never
+    modified; [`flow_addkernel_`][fastfields.torch.flow_addkernel_] updates it
+    in place.
+
+    Differentiable with respect to `inp`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the stencil is accumulated onto, shaped like the output of
+        [`flow_kernel`][fastfields.torch.flow_kernel].
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp + K`, a new tensor the shape of `inp`.
     """
     return _flow_kernel_acc(
         inp,
@@ -2186,7 +3797,49 @@ def flow_subkernel(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Return ``inp - K`` as a **new** tensor. Differentiable wrt ``inp``."""
+    """Subtract the stencil of the flow regulariser: `inp - K`.
+
+    Computes `inp - K`, where `K` is the stencil that
+    [`flow_kernel`][fastfields.torch.flow_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil and is copied, never
+    modified; [`flow_subkernel_`][fastfields.torch.flow_subkernel_] updates it
+    in place.
+
+    Differentiable with respect to `inp`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Array the stencil is accumulated onto, shaped like the output of
+        [`flow_kernel`][fastfields.torch.flow_kernel].
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp - K`, a new tensor the shape of `inp`.
+    """
     return _flow_kernel_acc(
         inp,
         absolute,
@@ -2214,7 +3867,50 @@ def flow_addkernel_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place: ``inp += K``. Mutates and returns ``inp``."""
+    """Accumulate the flow regulariser's stencil in place: `inp += K`.
+
+    Updates `inp` with `inp += K`, where `K` is the stencil that
+    [`flow_kernel`][fastfields.torch.flow_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil.
+    [`flow_addkernel`][fastfields.torch.flow_addkernel] returns a new tensor
+    instead.
+
+    Safe under autograd: the operation is additive in `inp`. A leaf tensor that
+    requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shaped like the output of
+        [`flow_kernel`][fastfields.torch.flow_kernel]. Updated in place.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
+    """
     return _flow_kernel_acc(
         inp,
         absolute,
@@ -2242,7 +3938,50 @@ def flow_subkernel_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """In place: ``inp -= K``. Mutates and returns ``inp``."""
+    """Accumulate the flow regulariser's stencil in place: `inp -= K`.
+
+    Updates `inp` with `inp -= K`, where `K` is the stencil that
+    [`flow_kernel`][fastfields.torch.flow_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil.
+    [`flow_subkernel`][fastfields.torch.flow_subkernel] returns a new tensor
+    instead.
+
+    Safe under autograd: the operation is additive in `inp`. A leaf tensor that
+    requires grad cannot be modified in place.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Accumulator, shaped like the output of
+        [`flow_kernel`][fastfields.torch.flow_kernel]. Updated in place.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    torch.Tensor
+        `inp` itself, after the update.
+    """
     return _flow_kernel_acc(
         inp,
         absolute,

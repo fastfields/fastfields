@@ -87,62 +87,78 @@ class _DtEuclidean_(torch.autograd.Function):
 def dt_euclidean(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
     """Squared Euclidean distance transform along the last axis.
 
-    Not differentiable -- calling ``.backward()`` through this raises
-    ``RuntimeError``. Forward still runs normally (including when ``inp``
-    requires grad); only an actual backward call fails.
+    The input marks the features with `0` and everything else with `+inf`. Each
+    position of the result holds the squared distance to the nearest feature in
+    the same row along the last axis, in units set by `voxel_spacing`. Only the
+    last axis is transformed.
+
+    [`dt_euclidean_`][fastfields.torch.dt_euclidean_] is the in-place version,
+    which overwrites its input.
+
+    Not differentiable: the forward pass runs normally, even when an input
+    requires grad, but calling `.backward()` through the result raises
+    `RuntimeError`.
 
     Parameters
     ----------
     inp : torch.Tensor
-        Input holding ``0`` at feature locations and ``+inf`` elsewhere.
+        Features are `0`, background is `+inf`.
     voxel_spacing : float, default=1.0
-        Physical spacing between samples along the last axis.
+        Physical distance between neighbouring samples along the last axis.
 
     Returns
     -------
     torch.Tensor
-        The distance transform (a new tensor with ``inp``'s layout); ``inp`` is
-        left untouched. See [`dt_euclidean_`][fastfields.torch.dt_euclidean_]
-        for the in-place variant.
+        The distance transform, a new tensor the shape of `inp`.
 
     Raises
     ------
     TypeError
-        If ``inp`` is not float32/float64.
+        If the tensor is not float32 or float64.
     RuntimeError
-        If ``.backward()`` is called through the output.
+        If `.backward()` is called through the result.
     """
     check_dtype(inp)
     return _DtEuclidean.apply(inp, voxel_spacing)
 
 
 def dt_euclidean_(inp_out: Tensor, voxel_spacing: float = 1.0) -> Tensor:
-    """In-place squared Euclidean distance transform along the last axis.
+    """Squared Euclidean distance transform along the last axis, in place.
 
-    Not differentiable -- calling ``.backward()`` through this raises
-    ``RuntimeError``. As with any in-place op, a leaf tensor with
-    ``requires_grad=True`` cannot be mutated (torch's ordinary leaf rule).
+    The input marks the features with `0` and everything else with `+inf`. Each
+    position of the result holds the squared distance to the nearest feature in
+    the same row along the last axis, in units set by `voxel_spacing`. Only the
+    last axis is transformed.
+
+    [`dt_euclidean`][fastfields.torch.dt_euclidean] is the version that returns
+    a new tensor and leaves its input untouched.
+
+    Not differentiable: the forward pass runs normally, even when an input
+    requires grad, but calling `.backward()` through the result raises
+    `RuntimeError`.
 
     Parameters
     ----------
     inp_out : torch.Tensor
-        Input holding ``0`` at feature locations and ``+inf`` elsewhere.
-        Mutated in place and returned.
+        Features are `0`, background is `+inf`. Must be float32 or float64.
+        Overwritten with the result.
     voxel_spacing : float, default=1.0
-        Physical spacing between samples along the last axis.
+        Physical distance between neighbouring samples along the last axis.
 
     Returns
     -------
     torch.Tensor
-        ``inp_out`` (the same tensor object), now holding the distance
-        transform.
+        `inp_out` itself, now holding the distance transform.
 
     Raises
     ------
     TypeError
-        If ``inp_out`` is not float32/float64.
+        If the tensor is not float32 or float64.
     RuntimeError
-        If ``.backward()`` is called through the output.
+        If `.backward()` is called through the result.
+    RuntimeError
+        If `inp_out` is a leaf tensor that requires grad. This is checked
+        before anything is written.
     """
     check_dtype(inp_out)
     check_inplace_leaf("dt_euclidean_", inp_out)
@@ -184,62 +200,78 @@ class _DtL1_(torch.autograd.Function):
 def dt_l1(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
     """L1 distance transform along the last axis.
 
-    Not differentiable -- calling ``.backward()`` through this raises
-    ``RuntimeError``. See [`dt_euclidean`][fastfields.torch.dt_euclidean] for
-    the input convention.
+    The input marks the features with `0` and everything else with `+inf`. Each
+    position of the result holds the distance to the nearest feature in the
+    same row along the last axis, in units set by `voxel_spacing`. Only the
+    last axis is transformed.
+
+    [`dt_l1_`][fastfields.torch.dt_l1_] is the in-place version, which
+    overwrites its input.
+
+    Not differentiable: the forward pass runs normally, even when an input
+    requires grad, but calling `.backward()` through the result raises
+    `RuntimeError`.
 
     Parameters
     ----------
     inp : torch.Tensor
-        Input holding ``0`` at feature locations and ``+inf`` elsewhere.
+        Features are `0`, background is `+inf`.
     voxel_spacing : float, default=1.0
-        Physical spacing between samples along the last axis.
+        Physical distance between neighbouring samples along the last axis.
 
     Returns
     -------
     torch.Tensor
-        The distance transform (a new tensor with ``inp``'s layout); ``inp`` is
-        left untouched. See [`dt_l1_`][fastfields.torch.dt_l1_] for the
-        in-place variant.
+        The distance transform, a new tensor the shape of `inp`.
 
     Raises
     ------
     TypeError
-        If ``inp`` is not float32/float64.
+        If the tensor is not float32 or float64.
     RuntimeError
-        If ``.backward()`` is called through the output.
+        If `.backward()` is called through the result.
     """
     check_dtype(inp)
     return _DtL1.apply(inp, voxel_spacing)
 
 
 def dt_l1_(inp_out: Tensor, voxel_spacing: float = 1.0) -> Tensor:
-    """In-place L1 distance transform along the last axis.
+    """L1 distance transform along the last axis, in place.
 
-    Not differentiable -- calling ``.backward()`` through this raises
-    ``RuntimeError``. As with any in-place op, a leaf tensor with
-    ``requires_grad=True`` cannot be mutated (torch's ordinary leaf rule).
+    The input marks the features with `0` and everything else with `+inf`. Each
+    position of the result holds the distance to the nearest feature in the
+    same row along the last axis, in units set by `voxel_spacing`. Only the
+    last axis is transformed.
+
+    [`dt_l1`][fastfields.torch.dt_l1] is the version that returns a new tensor
+    and leaves its input untouched.
+
+    Not differentiable: the forward pass runs normally, even when an input
+    requires grad, but calling `.backward()` through the result raises
+    `RuntimeError`.
 
     Parameters
     ----------
     inp_out : torch.Tensor
-        Input holding ``0`` at feature locations and ``+inf`` elsewhere.
-        Mutated in place and returned.
+        Features are `0`, background is `+inf`. Must be float32 or float64.
+        Overwritten with the result.
     voxel_spacing : float, default=1.0
-        Physical spacing between samples along the last axis.
+        Physical distance between neighbouring samples along the last axis.
 
     Returns
     -------
     torch.Tensor
-        ``inp_out`` (the same tensor object), now holding the distance
-        transform.
+        `inp_out` itself, now holding the distance transform.
 
     Raises
     ------
     TypeError
-        If ``inp_out`` is not float32/float64.
+        If the tensor is not float32 or float64.
     RuntimeError
-        If ``.backward()`` is called through the output.
+        If `.backward()` is called through the result.
+    RuntimeError
+        If `inp_out` is a leaf tensor that requires grad. This is checked
+        before anything is written.
     """
     check_dtype(inp_out)
     check_inplace_leaf("dt_l1_", inp_out)
@@ -293,54 +325,54 @@ def dt_mesh(
     naive: bool = False,
     return_nearest: bool = False,
 ) -> Union[Tensor, Tuple[Tensor, Tensor]]:
-    """Point-to-triangular-mesh (squared) distance.
+    """Distance from points to a triangular mesh.
 
-    Not differentiable -- calling ``.backward()`` through ``dist`` raises
-    ``RuntimeError``. Forward still runs normally (including when ``loc``/
-    ``vertices`` require grad); only an actual backward call fails.
+    A single mesh is queried by any number of points: only `loc` has batch
+    axes, and the result has shape `loc.shape[:-1]`. `vertices` and `faces` are
+    not broadcast against that batch and must be exactly two-dimensional.
 
-    !!! note
-        A **single** mesh is queried by an arbitrarily batched point set: only
-        ``loc`` carries batch dims, and ``dist`` (and ``nearest_vertex``) are
-        allocated with ``loc.shape[:-1]``. The mesh operands are *not*
-        broadcast against that batch -- ``vertices`` and ``faces`` must be
-        exactly ``(V, D)`` / ``(F, D)``, matching jitfields' ``mesh_distance``
-        and the ``ff::dt_mesh`` contract. (An earlier revision broadcast them
-        to ``(*B, V, D)``, which the binding rejects outright; see
-        fastfields#32.)
+    The distance is the plain Euclidean point-to-triangle distance, not
+    squared, unlike the point-to-spline distances. With `signed=True` it is
+    negative inside the surface.
+
+    Not differentiable: the forward pass runs normally, even when an input
+    requires grad, but calling `.backward()` through the result raises
+    `RuntimeError`.
 
     Parameters
     ----------
     loc : torch.Tensor
-        Query points, shape ``(*B, D)``.
+        Query points, shape `(*B, D)`.
     vertices : torch.Tensor
-        Mesh vertices, shape ``(V, D)`` (same float dtype as ``loc``).
+        Mesh vertices, shape `(V, D)`.
     faces : torch.Tensor
-        Triangle vertex indices, shape ``(F, D)`` (integer tensor; cast
-        to int64 before the binding).
+        Triangles as indices into `vertices`, shape `(F, D)`. Converted to
+        int64.
     signed : bool, default=True
-        Return signed distances.
+        Return signed distances, negative inside the surface.
     naive : bool, default=False
-        Use the naive (brute-force) algorithm.
+        Use the brute-force algorithm instead of the acceleration
+        structure.
     return_nearest : bool, default=False
-        Also return the nearest-vertex index per query point.
+        Also return the index of the nearest mesh vertex for every query
+        point.
 
     Returns
     -------
     dist : torch.Tensor
-        (Squared) distance per query point, shape ``(*B,)``.
-    nearest_vertex : torch.Tensor, optional
-        Nearest-vertex index per query point, only if ``return_nearest`` is
-        ``True``.
+        Distance from each query point to the mesh, shape `(*B,)`.
+    nearest : torch.Tensor
+        Index of the vertex nearest to each query point, shape `(*B,)`,
+        int64. Returned only if `return_nearest` is true.
 
     Raises
     ------
     TypeError
-        If ``loc``/``vertices`` are not float32/float64.
+        If `loc` or `vertices` is not float32 or float64.
     ValueError
-        If ``vertices`` or ``faces`` is not 2D.
+        If `vertices` or `faces` is not two-dimensional.
     RuntimeError
-        If ``.backward()`` is called through ``dist``.
+        If `.backward()` is called through `dist`.
     """
     check_dtype(loc, vertices)
     # faces holds integer vertex indices: the binding reads them at int64
@@ -485,36 +517,49 @@ def dt_spline_table(
     order: int | str = 3,
     bound: int | str = "dct2",
 ) -> Tuple[Tensor, Tensor]:
-    """Point-to-spline (squared) distance via a dictionary of candidate times.
+    """Squared distance from points to a spline, over candidate parameters.
 
-    Not differentiable -- calling ``.backward()`` through either output raises
-    ``RuntimeError``. Forward still runs normally.
+    The curve is a spline with `N` coefficients in `D` dimensions. For each
+    query point the closest point of the curve is searched for. The result is
+    the pair ``(dist, time)``: the squared distance and the curve parameter at
+    which it is attained. Batch axes of all inputs are broadcast against each
+    other.
 
-    !!! note
-        Batch dims of ``loc`` / ``coeff`` / ``times`` are broadcast together
-        with ``Tensor.expand`` (0-stride views, no copy), which the
-        stride-aware binding consumes directly. The return order matches
-        ``fastfields.numpy.dt_spline_table``: ``(dist, time)``.
+    The closest point is the best of the candidate parameters in `times`, so
+    the accuracy is limited by how finely they sample the curve.
+    [`dt_spline_brent`][fastfields.torch.dt_spline_brent] and
+    [`dt_spline_gaussnewton`][fastfields.torch.dt_spline_gaussnewton] refine
+    the parameter iteratively instead.
+
+    Not differentiable: the forward pass runs normally, even when an input
+    requires grad, but calling `.backward()` through the result raises
+    `RuntimeError`. The result comes from an inner optimisation that the
+    library does not differentiate.
 
     Parameters
     ----------
-    loc : `(*B, D) tensor`
-        Query points.
-    coeff : `(*B, N, D) tensor`
-        Spline coefficients.
-    times : `(*B, K) tensor`
-        Candidate times to try.
+    loc : torch.Tensor
+        Query points, shape `(*B, D)`.
+    coeff : torch.Tensor
+        Spline coefficients of the curve, shape `(*B, N, D)`: `N`
+        coefficients, each a `D`-dimensional vector.
+    times : torch.Tensor
+        Candidate curve parameters to try, shape `(*B, K)`.
     order : int or str, default=3
-        Spline order.
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition.
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
 
     Returns
     -------
-    dist : `(*B,) tensor`
-        Squared distance per query point.
-    time : `(*B,) tensor`
-        Best time per query point.
+    dist : torch.Tensor
+        Squared distance from each query point to the curve, shape `(*B,)`.
+    time : torch.Tensor
+        Curve parameter of the closest point found, shape `(*B,)`.
     """
     batch, (loc, coeff, times) = _spline_operands(loc, coeff, times)
     time, dist = _spline_outputs(loc, batch, seed=False)
@@ -539,35 +584,54 @@ def dt_spline_brent(
     order: int | str = 3,
     bound: int | str = "dct2",
 ) -> Tuple[Tensor, Tensor]:
-    """Point-to-spline (squared) distance via Brent's method.
+    """Squared distance from points to a spline, refined with Brent's method.
 
-    Not differentiable (see
-    [`dt_spline_table`][fastfields.torch.dt_spline_table]).
+    The curve is a spline with `N` coefficients in `D` dimensions. For each
+    query point the closest point of the curve is searched for. The result is
+    the pair ``(dist, time)``: the squared distance and the curve parameter at
+    which it is attained. Batch axes of all inputs are broadcast against each
+    other.
+
+    The curve parameter is refined by Brent's method, which needs a bracket
+    around the optimum; `step` sets how wide the initial one is.
+    [`dt_spline_table`][fastfields.torch.dt_spline_table] and
+    [`dt_spline_gaussnewton`][fastfields.torch.dt_spline_gaussnewton] are the
+    alternatives.
+
+    Not differentiable: the forward pass runs normally, even when an input
+    requires grad, but calling `.backward()` through the result raises
+    `RuntimeError`. The result comes from an inner optimisation that the
+    library does not differentiate.
 
     Parameters
     ----------
-    loc : `(*B, D) tensor`
-        Query points.
-    coeff : `(*B, N, D) tensor`
-        Spline coefficients.
+    loc : torch.Tensor
+        Query points, shape `(*B, D)`.
+    coeff : torch.Tensor
+        Spline coefficients of the curve, shape `(*B, N, D)`: `N`
+        coefficients, each a `D`-dimensional vector.
     max_iter : int, default=64
-        Maximum number of Brent iterations.
-    tol : float, default=1e-6
+        Maximum number of iterations.
+    tol : float, default=1e-06
         Convergence tolerance.
     step : float, default=0.1
-        Initial bracket half-width; must be wide enough to bracket the
+        Initial bracketing step; it must be wide enough to bracket the
         optimum.
     order : int or str, default=3
-        Spline order.
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition.
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
 
     Returns
     -------
-    dist : `(*B,) tensor`
-        Squared distance per query point.
-    time : `(*B,) tensor`
-        Best time per query point.
+    dist : torch.Tensor
+        Squared distance from each query point to the curve, shape `(*B,)`.
+    time : torch.Tensor
+        Curve parameter of the closest point found, shape `(*B,)`.
     """
     batch, (loc, coeff) = _spline_operands(loc, coeff)
     time, dist = _spline_outputs(loc, batch, seed=True)
@@ -597,32 +661,49 @@ def dt_spline_gaussnewton(
     order: int | str = 3,
     bound: int | str = "dct2",
 ) -> Tuple[Tensor, Tensor]:
-    """Point-to-spline (squared) distance via Gauss-Newton optimization.
+    """Squared distance from points to a spline, refined with Gauss-Newton.
 
-    Not differentiable (see
-    [`dt_spline_table`][fastfields.torch.dt_spline_table]).
+    The curve is a spline with `N` coefficients in `D` dimensions. For each
+    query point the closest point of the curve is searched for. The result is
+    the pair ``(dist, time)``: the squared distance and the curve parameter at
+    which it is attained. Batch axes of all inputs are broadcast against each
+    other.
+
+    The curve parameter is refined by Gauss-Newton iterations.
+    [`dt_spline_table`][fastfields.torch.dt_spline_table] and
+    [`dt_spline_brent`][fastfields.torch.dt_spline_brent] are the alternatives.
+
+    Not differentiable: the forward pass runs normally, even when an input
+    requires grad, but calling `.backward()` through the result raises
+    `RuntimeError`. The result comes from an inner optimisation that the
+    library does not differentiate.
 
     Parameters
     ----------
-    loc : `(*B, D) tensor`
-        Query points.
-    coeff : `(*B, N, D) tensor`
-        Spline coefficients.
+    loc : torch.Tensor
+        Query points, shape `(*B, D)`.
+    coeff : torch.Tensor
+        Spline coefficients of the curve, shape `(*B, N, D)`: `N`
+        coefficients, each a `D`-dimensional vector.
     max_iter : int, default=64
-        Maximum number of Gauss-Newton iterations.
-    tol : float, default=1e-6
+        Maximum number of iterations.
+    tol : float, default=1e-06
         Convergence tolerance.
     order : int or str, default=3
-        Spline order.
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition.
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
 
     Returns
     -------
-    dist : `(*B,) tensor`
-        Squared distance per query point.
-    time : `(*B,) tensor`
-        Best time per query point.
+    dist : torch.Tensor
+        Squared distance from each query point to the curve, shape `(*B,)`.
+    time : torch.Tensor
+        Curve parameter of the closest point found, shape `(*B,)`.
     """
     batch, (loc, coeff) = _spline_operands(loc, coeff)
     time, dist = _spline_outputs(loc, batch, seed=True)
