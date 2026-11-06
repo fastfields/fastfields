@@ -1498,7 +1498,7 @@ def flow_precond(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Jacobi preconditioner: solve `(M + diag(L)) x = vec` voxel by voxel.
+    """Jacobi preconditioner of the regularised system.
 
     Solves `(M + diag(L)) x = vec` voxel by voxel, where `M` is the per-voxel
     matrix `mat` and `diag(L)` is the diagonal of the flow regulariser `L`. It
@@ -2241,7 +2241,7 @@ def field_precond(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Jacobi preconditioner: solve `(M + diag(L)) x = vec` voxel by voxel.
+    """Jacobi preconditioner of the regularised system.
 
     Solves `(M + diag(L)) x = vec` voxel by voxel, where `M` is the per-voxel
     matrix `mat` and `diag(L)` is the diagonal of the field regulariser `L`. It

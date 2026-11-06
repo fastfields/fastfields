@@ -161,8 +161,12 @@ def cuda_backend_message(
 class Spline(IntEnum):
     """Order of the spline used for interpolation.
 
-    The wrappers accept it as the `order` argument, as an integer, as a member
-    of this enum or as a name such as `"cubic"`; see
+    The members are the integers 0 to 7, from `Nearest` (0), `Linear` (1),
+    `Quadratic` (2) and `Cubic` (3) up to `FourthOrder`, `FifthOrder`,
+    `SixthOrder` and `SeventhOrder` (4 to 7).
+
+    The wrappers take it as the `order` argument, as an integer, as a member of
+    this enum or as a name such as `"cubic"`; see
     [`as_spline`][fastfields.helpers.as_spline]. The raw `fastfields.dlpack`
     bindings and the C++ library call the same argument `spline`.
     """
@@ -180,10 +184,22 @@ class Spline(IntEnum):
 class Bound(IntEnum):
     """Boundary condition, applied to every spatial axis.
 
-    The wrappers accept it as the `bound` argument, as an integer, as a member
-    of this enum or as a name such as `"dct2"`; see
-    [`as_bound`][fastfields.helpers.as_bound]. The comment beside each member
-    says how the signal is extended beyond the last voxel.
+    | Member | Value | Beyond the last voxel, the signal |
+    |---|---|---|
+    | `Zero` | 0 | is zero |
+    | `Replicate` | 1 | repeats the last voxel (coordinates are clipped) |
+    | `DCT1` | 2 | is symmetric about the centre of the last voxel |
+    | `DCT2` | 3 | is symmetric about the edge of the last voxel |
+    | `DST1` | 4 | is antisymmetric about the centre of the last voxel |
+    | `DST2` | 5 | is antisymmetric about the edge of the last voxel |
+    | `DFT` | 6 | wraps around (circular) |
+    | `NoCheck` | 7 | is not handled: coordinates are assumed inbound |
+
+    `DCT2` is the Neumann condition and `DST2` the Dirichlet one.
+
+    The wrappers take it as the `bound` argument, as an integer, as a member of
+    this enum or as a name such as `"dct2"`; see
+    [`as_bound`][fastfields.helpers.as_bound].
     """
 
     Zero = 0  # zero outside the FOV

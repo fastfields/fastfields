@@ -1965,7 +1965,7 @@ def flow_precond(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Jacobi preconditioner: solve `(M + diag(L)) x = vec` voxel by voxel.
+    """Jacobi preconditioner of the regularised system.
 
     Solves `(M + diag(L)) x = vec` voxel by voxel, where `M` is the per-voxel
     matrix `mat` and `diag(L)` is the diagonal of the flow regulariser `L`. It
@@ -1976,8 +1976,6 @@ def flow_precond(
 
     Batch axes of `mat` and `vec` are broadcast against each other; the spatial
     axes and the last axis must match.
-
-    `flow_precond_` is the in-place version.
 
     Differentiable with respect to `vec`, through the self-adjoint solve. `mat`
     must not require grad, as for [`sym_solve`][fastfields.torch.sym_solve].
@@ -2745,7 +2743,7 @@ def field_precond(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Tensor:
-    """Jacobi preconditioner: solve `(M + diag(L)) x = vec` voxel by voxel.
+    """Jacobi preconditioner of the regularised system.
 
     Solves `(M + diag(L)) x = vec` voxel by voxel, where `M` is the per-voxel
     matrix `mat` and `diag(L)` is the diagonal of the field regulariser `L`. It
@@ -2755,8 +2753,6 @@ def field_precond(
 
     Batch axes of `mat` and `vec` are broadcast against each other; the spatial
     axes and the last axis must match.
-
-    `field_precond_` is the in-place version.
 
     Differentiable with respect to `vec`, through the self-adjoint solve. `mat`
     must not require grad, as for [`sym_solve`][fastfields.torch.sym_solve].
