@@ -1,25 +1,18 @@
-"""Shared helpers for the fastfields.torch wrappers.
+"""Shared helpers for the PyTorch wrappers.
 
-!!! note "Compute backend"
-    ``fastfields.torch`` is the only one of the five namespaces that works on
-    either compute backend: its CPU path is the tested one and runs against any
-    build of ``fastfields-dlpack``, while a CUDA tensor needs a CUDA build. So,
-    unlike [`fastfields.cupy`][fastfields.cupy] (which refuses to import at all
-    on a CPU-only build), this package imports cleanly everywhere and raises
-    only when a CUDA tensor actually meets a CPU-only build. `stream_ptr` is
-    where that is enforced -- see its docstring for why that is the right
-    place.
+`fastfields.torch` is the only namespace that works on either compute backend.
+Its CPU path runs against any build of `fastfields-dlpack`, and a CUDA tensor
+needs a CUDA build. So, unlike `fastfields.cupy`, which refuses to import on a
+CPU-only build, this package always imports and raises only when a CUDA tensor
+meets a CPU-only build. `stream_ptr` is where that is enforced.
 
-!!! note "Stream semantics"
-    The ``fastfields.dlpack`` bindings take a trailing ``stream`` argument (a
-    CUDA stream handle as an ``int``; ``0`` means the CPU/default stream).
-    torch queues its own CUDA work on the *current* stream of each device, so
-    -- to keep the binding's kernels correctly ordered with respect to the
-    surrounding torch ops (output allocation, later reads, ...) -- every
-    wrapper forwards the current stream of its primary CUDA tensor via
-    `stream_ptr`. For CPU tensors this is ``0``, so CPU behaviour is unchanged.
-    This mirrors how ``fastfields.cupy`` forwards
-    ``cupy.cuda.get_current_stream().ptr``.
+The bindings take a trailing `stream` argument, a CUDA stream handle as an
+integer, where 0 means the CPU or default stream. PyTorch queues its own CUDA
+work on the current stream of each device, so to keep the binding's kernels
+ordered with the surrounding PyTorch operations (allocating the output, later
+reads) every wrapper forwards the current stream of its primary CUDA tensor,
+obtained from `stream_ptr`. For CPU tensors that is 0. `fastfields.cupy` does
+the same with `cupy.cuda.get_current_stream().ptr`.
 """
 
 from __future__ import annotations
@@ -163,29 +156,29 @@ def _require_cuda_backend(t: Tensor) -> None:
 
 
 def stream_ptr(t: Tensor) -> int:
-    """Return the CUDA stream handle to forward to the binding for ``t``.
+    """Return the CUDA stream handle to forward to the binding for a tensor.
+
+    This is also where the lazy compute-backend check lives. `stream_ptr` is
+    the one helper every wrapper already calls with the primary tensor of its
+    operation, so a single call site covers all of them, and only on the branch
+    that matters: a CPU tensor never reaches the check, and a CUDA tensor
+    cannot reach the bindings without passing it.
 
     Parameters
     ----------
     t : torch.Tensor
-        The primary tensor of the operation; its device selects the stream.
-
-    This is also where the lazy compute-backend check lives, because it is
-    the one helper every wrapper in this package already calls with the
-    operation's primary tensor -- so a single call site covers every op, and
-    it covers it on the only branch that matters. A CPU tensor never reaches
-    the check; a CUDA tensor cannot reach the bindings without passing it.
+        The primary tensor of the operation. Its device selects the stream.
 
     Returns
     -------
     int
-        ``torch.cuda.current_stream(t.device).cuda_stream`` for a CUDA tensor,
-        or ``0`` (the default/CPU stream) for a CPU tensor.
+        `torch.cuda.current_stream(t.device).cuda_stream` for a CUDA tensor,
+        and 0 (the default or CPU stream) for a CPU tensor.
 
     Raises
     ------
     RuntimeError
-        If ``t`` is a CUDA tensor but the installed ``fastfields-dlpack`` is a
+        If `t` is a CUDA tensor but the installed `fastfields-dlpack` is a
         CPU-only build.
     """
     if t.is_cuda:

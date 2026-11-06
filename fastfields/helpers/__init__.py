@@ -1,23 +1,26 @@
-"""Shared enums and argument-normalisation helpers for the fastfields packages.
+"""Shared enums and argument normalisers for the fastfields namespaces.
 
-The ``fastfields.numpy`` / ``fastfields.torch`` / ``fastfields.cupy`` wrappers
-and the ``fastfields.auto`` dispatcher all need the same backend-agnostic
-logic: the [`Spline`][fastfields.helpers.Spline] /
-[`Bound`][fastfields.helpers.Bound] enums, the ``order``/``bound`` normalisers,
-and the resolution of ``factor``/``shape``/``anchor`` into the per-dim
-``scale`` + scalar ``shift`` that the resize binding consumes. It lives here,
-in one dependency-free package, so each consumer imports it instead of carrying
-its own copy.
+`fastfields.numpy`, `fastfields.torch`, `fastfields.cupy` and
+`fastfields.auto` all need the same logic that does not depend on an array
+library:
 
-This package is **pure Python and dependency-free** -- it imports nothing but
-the standard library, and in particular no numpy/torch/cupy and none of the
-compiled ``fastfields.dlpack`` bindings. That is the point of it existing
-separately: a fix to any of this logic ships as an ordinary pure-Python
-release, with no recompilation of the C++/CUDA chain and no per-platform wheel
-cycle.
+- the [`Spline`][fastfields.helpers.Spline] and
+  [`Bound`][fastfields.helpers.Bound] enums and the normalisers that turn an
+  integer, an enum member or a name into one of them;
+- the resolution of `factor`, `shape` and `anchor` into the per-axis `scale`
+  and scalar `shift` that the resampling kernels consume;
+- the checks that decide whether the installed `fastfields-dlpack` is a CUDA
+  build.
 
-``fastfields.helpers`` is a sibling of ``fastfields.dlpack``, not a layer over
-it -- neither package depends on the other.
+It lives here, in one place, so that each of them imports it instead of
+carrying a copy.
+
+The package is pure Python and imports nothing but the standard library: no
+NumPy, PyTorch or CuPy, and not the compiled `fastfields.dlpack` bindings. That
+is the reason it exists apart from them. A fix to this logic ships as an
+ordinary pure-Python release, without recompiling the C++/CUDA chain or
+rebuilding the per-platform wheels. It is a sibling of `fastfields.dlpack`,
+not a layer over it, and neither depends on the other.
 """
 
 from __future__ import annotations
@@ -81,24 +84,28 @@ _CUDA_BACKEND_RE = _re.compile(r"\Acu[0-9]+\Z")
 
 
 def is_cuda_backend(backend: Optional[str]) -> bool:
-    """Return whether ``backend`` names a CUDA build of fastfields-dlpack.
+    """Tell whether a backend label names a CUDA build of `fastfields-dlpack`.
+
+    The label is what `fastfields.dlpack.backend` reports: `"cpu"`, `"cu126"`
+    and so on, or `None` for a build that carries no label, such as an
+    unversioned source checkout.
+
+    `None` means unknown, not CPU. A caller that rejects non-CUDA builds should
+    therefore test `backend is not None and not is_cuda_backend(backend)`
+    instead of negating this function: a source build cannot be verified, and
+    refusing it would block GPU development from a checkout for no gain in
+    safety.
 
     Parameters
     ----------
     backend : str or None
-        A compute-backend label as exposed by ``fastfields.dlpack.backend``:
-        ``"cpu"``, ``"cu126"``, ... or ``None`` when the installed build
-        carries no label (an unversioned source checkout).
+        A compute-backend label.
 
     Returns
     -------
     bool
-        True for ``cu<digits>``, False for anything else -- ``None``
-        included. ``None`` means *unknown*, not *CPU*, so callers that reject
-        a non-CUDA build should test ``backend is not None and not
-        is_cuda_backend(backend)`` rather than negating this directly: a
-        source build is unverifiable, and refusing it would block GPU
-        development from a checkout for no safety gain.
+        True for `cu` followed by digits, False for anything else, `None`
+        included.
     """
     return bool(backend) and bool(_CUDA_BACKEND_RE.match(backend))
 
@@ -108,27 +115,27 @@ def cuda_backend_message(
     backend: Optional[str],
     because: str,
 ) -> str:
-    """Build the "this needs a CUDA build of fastfields-dlpack" message.
+    """Build the error message for a `fastfields-dlpack` build without CUDA.
 
-    Shared by [`fastfields.cupy`][fastfields.cupy] (which refuses at import)
-    and [`fastfields.torch`][fastfields.torch] (which refuses only when a CUDA
-    tensor meets a CPU-only build) so that one wording, naming both the index
-    URL and the command that fixes it, covers both.
+    [`fastfields.cupy`][fastfields.cupy] raises it at import, and
+    [`fastfields.torch`][fastfields.torch] when a CUDA tensor meets a CPU-only
+    build. Sharing the function gives both the same wording, which names the
+    index URL and the `pip` command that fixes the problem.
 
     Parameters
     ----------
     namespace : str
-        The importing namespace, e.g. ``"fastfields.cupy"``.
+        The namespace that is refusing, for example `"fastfields.cupy"`.
     backend : str or None
-        The installed ``fastfields.dlpack.backend``.
+        The installed `fastfields.dlpack.backend`.
     because : str
-        A clause completing "... cannot work because ...", stating what in
-        the caller's situation requires CUDA kernels.
+        A clause that completes "cannot work because ...", saying what in the
+        caller's situation requires CUDA kernels.
 
     Returns
     -------
     str
-        The full multi-line message.
+        The complete, multi-line message.
     """
     installed = (
         f"a {backend!r} build" if backend else "a build with no backend label"
@@ -152,7 +159,13 @@ def cuda_backend_message(
 
 
 class Spline(IntEnum):
-    """Spline interpolation order (passed as the ``spline`` argument)."""
+    """Order of the spline used for interpolation.
+
+    The wrappers accept it as the `order` argument, as an integer, as a member
+    of this enum or as a name such as `"cubic"`; see
+    [`as_spline`][fastfields.helpers.as_spline]. The raw `fastfields.dlpack`
+    bindings and the C++ library call the same argument `spline`.
+    """
 
     Nearest = 0
     Linear = 1
@@ -165,7 +178,13 @@ class Spline(IntEnum):
 
 
 class Bound(IntEnum):
-    """Boundary condition (passed as the ``bound`` argument)."""
+    """Boundary condition, applied to every spatial axis.
+
+    The wrappers accept it as the `bound` argument, as an integer, as a member
+    of this enum or as a name such as `"dct2"`; see
+    [`as_bound`][fastfields.helpers.as_bound]. The comment beside each member
+    says how the signal is extended beyond the last voxel.
+    """
 
     Zero = 0  # zero outside the FOV
     Replicate = 1  # clip coordinates
@@ -213,11 +232,25 @@ _BOUND_ALIASES = {
 
 
 def as_spline(value: int | str | Spline) -> int:
-    """Normalise a spline-order argument to an ``int`` in ``0..7``.
+    """Turn a spline-order argument into an integer from 0 to 7.
 
-    Accepts an integer, a [`Spline`][fastfields.helpers.Spline] enum, or a
-    friendly string alias (e.g. ``"cubic"``). Raises ``ValueError`` for an
-    unknown alias or an out-of-range integer.
+    Parameters
+    ----------
+    value : int or str or Spline
+        An integer, a [`Spline`][fastfields.helpers.Spline] member, or one of
+        the names `"nearest"` (or `"constant"`), `"linear"`, `"quadratic"`,
+        `"cubic"`, `"fourth"`, `"fifth"`, `"sixth"` and `"seventh"`, in any
+        case.
+
+    Returns
+    -------
+    int
+        The spline order.
+
+    Raises
+    ------
+    ValueError
+        If the name is unknown or the integer is outside 0 to 7.
     """
     if isinstance(value, str):
         key = value.strip().lower()
@@ -234,11 +267,26 @@ def as_spline(value: int | str | Spline) -> int:
 
 
 def as_bound(value: int | str | Bound) -> int:
-    """Normalise a boundary-condition argument to an ``int`` in ``0..7``.
+    """Turn a boundary-condition argument into an integer from 0 to 7.
 
-    Accepts an integer, a [`Bound`][fastfields.helpers.Bound] enum, or a
-    friendly string alias (e.g. ``"dct2"``, ``"wrap"``). Raises ``ValueError``
-    for an unknown alias or an out-of-range integer.
+    Parameters
+    ----------
+    value : int or str or Bound
+        An integer, a [`Bound`][fastfields.helpers.Bound] member, or a name, in
+        any case. The names are `"zero"` (or `"zeros"`), `"replicate"` (or
+        `"nearest"`), `"dct1"`, `"dct2"` (or `"neumann"`, `"reflect"`),
+        `"dst1"`, `"dst2"` (or `"dirichlet"`), `"dft"` (or `"wrap"`,
+        `"circular"`) and `"nocheck"`.
+
+    Returns
+    -------
+    int
+        The boundary condition as an integer.
+
+    Raises
+    ------
+    ValueError
+        If the name is unknown or the integer is outside 0 to 7.
     """
     if isinstance(value, str):
         key = value.strip().lower()
@@ -260,10 +308,24 @@ def as_bound(value: int | str | Bound) -> int:
 
 
 def normalize_shape(shape: int | Sequence[int], ndim: int) -> list[int]:
-    """Normalise a shape argument to a list of ``int`` of length ``ndim``.
+    """Expand a shape argument to a list of `ndim` integers.
 
-    A scalar ``int`` is broadcast to ``ndim`` entries. Raises ``ValueError`` if
-    an explicit sequence does not have length ``ndim``.
+    Parameters
+    ----------
+    shape : int or sequence of int
+        A single size, used for every axis, or one size per axis.
+    ndim : int
+        Number of axes.
+
+    Returns
+    -------
+    list of int
+        The sizes, one per axis.
+
+    Raises
+    ------
+    ValueError
+        If a sequence is given and its length is not `ndim`.
     """
     if isinstance(shape, int):
         shape = [shape] * ndim
@@ -278,10 +340,24 @@ def infer_ndim(
     factor: float | Sequence[float] | None,
     shape: int | Sequence[int] | None,
 ) -> int:
-    """Infer the number of trailing spatial dimensions to resize.
+    """Work out how many trailing axes a resampling call applies to.
 
-    An explicit ``ndim`` wins; otherwise a sequence ``shape`` or ``factor``
-    implies its length; failing that, ``1``.
+    The rule is, in order: an explicit `ndim` wins; otherwise the length of
+    `shape` or `factor`, if one of them is a sequence; otherwise 1.
+
+    Parameters
+    ----------
+    ndim : int or None
+        The explicit number of axes, if given.
+    factor : float or sequence of float or None
+        The size multiplier.
+    shape : int or sequence of int or None
+        The output size.
+
+    Returns
+    -------
+    int
+        The number of trailing axes.
     """
     if ndim is not None:
         return int(ndim)
@@ -293,7 +369,20 @@ def infer_ndim(
 
 
 def check_ndim(ndim: int, arr_ndim: int) -> None:
-    """Validate that ``ndim`` is in ``1..arr_ndim`` (else ``ValueError``)."""
+    """Check that `ndim` is between 1 and the number of axes of the array.
+
+    Parameters
+    ----------
+    ndim : int
+        Number of trailing axes to operate on.
+    arr_ndim : int
+        Number of axes of the array.
+
+    Raises
+    ------
+    ValueError
+        If `ndim` is outside `1..arr_ndim`.
+    """
     if ndim < 1 or ndim > arr_ndim:
         raise ValueError(f"ndim must be in 1..{arr_ndim}, got {ndim}")
 
@@ -304,11 +393,33 @@ def resolve_out_spatial(
     factor: float | Sequence[float] | None,
     shape: int | Sequence[int] | None,
 ) -> tuple[int, ...]:
-    """Resolve the output spatial shape from ``factor`` or ``shape``.
+    """Work out the output size of a resampling call.
 
-    ``factor`` and ``shape`` are mutually exclusive; with neither, the output
-    keeps the input spatial shape (identity). A scalar ``factor`` is broadcast
-    to ``ndim`` entries; each output size is ``max(1, round(in * factor))``.
+    Give `shape` for an explicit size, or `factor` to scale the input size;
+    they are mutually exclusive, and with neither the size is unchanged. A
+    scalar `factor` applies to every axis, and each size becomes `max(1,
+    round(n * factor))`.
+
+    Parameters
+    ----------
+    spatial_in : sequence of int
+        Input sizes of the resampled axes.
+    ndim : int
+        Number of resampled axes.
+    factor : float or sequence of float or None
+        The size multiplier.
+    shape : int or sequence of int or None
+        The output size. When given it takes precedence over `factor`.
+
+    Returns
+    -------
+    tuple of int
+        The output sizes.
+
+    Raises
+    ------
+    ValueError
+        If `shape` or `factor` is a sequence whose length is not `ndim`.
     """
     if shape is not None:
         return tuple(normalize_shape(shape, ndim))
@@ -344,43 +455,45 @@ def anchor_scale_shift(
     outshape: Sequence[int],
     ndim: int,
 ) -> tuple[list[float], float]:
-    """Map a torch-interpol ``anchor`` to a per-dim scale and scalar shift.
+    """Turn an `anchor` into the `scale` and `shift` of the resampling kernel.
 
-    The fastfields resize kernel samples input coordinate
-    ``scale[d] * loc + shift * (scale[d] - 1)`` for output index ``loc``. The
-    four anchors of ``interpol.resize`` map onto ``(scale, shift)`` as:
+    For output index `loc`, the kernel samples the input at
+    `scale[d] * loc + shift * (scale[d] - 1)` along axis `d`. The four anchors
+    choose which points of the two grids line up:
 
-    ==========  =================  =======
-    anchor      scale[d]           shift
-    ==========  =================  =======
-    ``centers`` ``(in-1)/(out-1)`` ``0.0``
-    ``edges``   ``in/out``         ``0.5``
-    ``first``   ``in/out``         ``0.0``
-    ``last``    ``in/out``         ``1.0``
-    ==========  =================  =======
+    | `anchor`    | `scale[d]`          | `shift` |
+    |-------------|---------------------|---------|
+    | `"centers"` | `(in-1) / (out-1)`  | `0.0`   |
+    | `"edges"`   | `in / out`          | `0.5`   |
+    | `"first"`   | `in / out`          | `0.0`   |
+    | `"last"`    | `in / out`          | `1.0`   |
+
+    With `"centers"` the first and last samples coincide; the scale is 1 along
+    an axis where either size is 1. With `"edges"` the outer edges of the
+    voxels coincide, with `"first"` the first voxel is the anchor and with
+    `"last"` the last one. The names follow `interpol.resize`.
 
     Parameters
     ----------
     anchor : str
-        Anchor name or abbreviation (``centers``/``edges``/``first``/``last``
-        or ``c``/``e``/``f``/``l``); matched case-insensitively on the first
-        letter.
+        `"centers"`, `"edges"`, `"first"` or `"last"`, or their initial
+        letters. Only the first letter is looked at, in any case.
     inshape, outshape : sequence of int
-        Input and output spatial sizes (length ``ndim``).
+        Input and output sizes of the resampled axes, `ndim` values each.
     ndim : int
-        Number of spatial dimensions.
+        Number of resampled axes.
 
     Returns
     -------
     scale : list of float
-        Per-dim input-index step per output-index step.
+        Input-index step per output-index step, one value per axis.
     shift : float
-        Scalar sampling shift shared across dimensions.
+        The shift, shared by all axes.
 
     Raises
     ------
     ValueError
-        If ``anchor`` is empty or its first letter is not one of ``c/e/f/l``.
+        If `anchor` does not start with `c`, `e`, `f` or `l`.
     """
     key = str(anchor)[:1].lower()
     if key not in _ANCHORS:

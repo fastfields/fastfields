@@ -1,9 +1,9 @@
-"""Compact-symmetric linear-algebra wrappers (numpy).
+"""Compact-symmetric matrix operations for NumPy.
 
-A compact-symmetric matrix of channel size ``C`` is stored along the last axis
-as ``C*(C+1)//2`` values: the diagonal first, then the rows of the upper
-triangle. ``mat`` therefore has trailing dim ``C*(C+1)//2`` and vectors have
-trailing dim ``C``.
+A matrix with `C` channels is stored along the last axis as `C*(C+1)//2`
+values: the diagonal first, then the rows of the upper triangle. `mat`
+therefore has a last axis of length `C*(C+1)//2` and vectors one of length
+`C`.
 """
 
 from __future__ import annotations

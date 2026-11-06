@@ -1,24 +1,21 @@
-"""Distance-transform wrappers (torch).
+"""Distance-transform wrappers for PyTorch.
 
-Image distance transforms (``dt_euclidean``, ``dt_l1``), point-to-mesh
-distance (``dt_mesh``) and point-to-spline distance
-(``dt_spline_{table,brent,gaussnewton}``).
+Image distance transforms (`dt_euclidean`, `dt_l1`), point-to-mesh distance
+(`dt_mesh`) and point-to-spline distance (`dt_spline_table`, `dt_spline_brent`
+and `dt_spline_gaussnewton`).
 
-These operators are **not differentiable** -- the distance transform / point-
-to-mesh distance have no meaningful gradient. They are still exposed on torch
-(for API parity with ``fastfields.numpy``/``fastfields.cupy``): forward always
-runs, including when an input requires grad, so the output can sit inside a
-larger graph; only calling ``.backward()`` through that output raises a clear
-``RuntimeError`` (see `fastfields.torch._util.raise_not_differentiable`).
-This mirrors how ``jitfields`` guards these ops, but the guard now lives in
-``backward`` instead of at call time -- see ``API_CONTRACT.md``, "In-place
-policy", and fastfields#4.
+None of them is differentiable: a distance transform has no meaningful
+gradient. They are exposed anyway, for parity with `fastfields.numpy` and
+`fastfields.cupy`. The forward pass always runs, even when an input requires
+grad, so the output can sit inside a larger graph, and only a `.backward()`
+through it raises. The check lives in `backward`, not at call time, which lets
+the output serve as a stop-gradient boundary (see `API_CONTRACT.md`, "In-place
+policy").
 
-The underlying bindings mutate their input in place. The out-of-place
-functions (``dt_euclidean``, ``dt_l1``) clone first; the in-place variants
-(``dt_euclidean_``, ``dt_l1_``) write through the caller's tensor, exactly
-like the numpy/cupy ``_``-suffixed forms. On CUDA tensors the current stream
-is forwarded to the binding (see `fastfields.torch._util`).
+The bindings update their input in place. The out-of-place functions clone
+first; the in-place variants write through the caller's tensor, like the
+underscore-suffixed forms of numpy and cupy. On CUDA tensors the current
+stream is forwarded to the binding.
 """
 
 from __future__ import annotations

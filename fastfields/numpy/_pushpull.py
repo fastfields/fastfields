@@ -1,14 +1,14 @@
-"""Spline-interpolation gather / scatter (pushpull) — numpy.
+"""Spline sampling (pushpull) for NumPy.
 
-Channel-last, x-first coordinate convention. For a spatial rank ``D`` (1, 2 or
-3), with ``B`` leading batch dims:
+Coordinates are in voxels, channels come last and the first coordinate is x.
+For a spatial rank `D` of 1, 2 or 3 and leading batch axes `B`:
 
-* ``inp``  : ``(*B, *inshape,  C)``  — the volume (spline coefficients)
-* ``grid`` : ``(*B, *outshape, D)``  — sampling coordinates, in voxels
-* ``out``  : ``(*B, *outshape, C)``  — the pulled samples (``pull``)
+- `inp` has shape `(*B, *inshape, C)` and holds spline coefficients;
+- `grid` has shape `(*B, *outshape, D)`;
+- `pull` returns `(*B, *outshape, C)`.
 
-``inp`` and ``grid`` must share the same rank ``B + D + 1``; ``D`` is taken
-from ``grid``'s trailing axis. ``push`` is the numerical adjoint of ``pull``.
+`inp` and `grid` must have the same number of axes; `D` is read from the last
+axis of `grid`. `push` is the adjoint of `pull`.
 """
 
 from __future__ import annotations

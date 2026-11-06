@@ -1,12 +1,10 @@
-"""Shared dispatch machinery for [`fastfields.auto`][fastfields.auto].
+"""Dispatch machinery for `fastfields.auto`.
 
-Every public wrapper dispatches on the **type of the first array argument** and
-forwards the call to the matching backend package
-([`fastfields.numpy`][fastfields.numpy] /
-[`fastfields.torch`][fastfields.torch] / [`fastfields.cupy`][fastfields.cupy]).
-Backends are imported **lazily**: only the backend for the array type actually
-passed is imported, so ``fastfields.auto`` works with any subset of the
-optional backends installed.
+Every public wrapper looks at the type of its first array argument and
+forwards the call to the matching backend package: `fastfields.numpy`,
+`fastfields.torch` or `fastfields.cupy`. A backend is imported only when an
+array of its type is passed, so the package works with any subset of them
+installed.
 """
 
 from __future__ import annotations
@@ -188,28 +186,20 @@ def make_dispatcher(name: str, table: dict[str, str]) -> Callable[..., Any]:
 
 
 def dlpack_backend() -> "str | None":
-    """Report the compute backend of the installed compiled bindings.
+    """Report the compute backend of the installed `fastfields-dlpack`.
 
-    ``fastfields.auto`` works against whichever backend is installed and never
-    requires a particular one, so -- unlike
-    [`fastfields.cupy`][fastfields.cupy] (which refuses to import on a CPU-only
-    build) and [`fastfields.torch`][fastfields.torch] (which refuses a CUDA
-    tensor on one) -- it only reports. This is the one place to ask "which lane
-    did I end up on?" without knowing which wrapper to interrogate.
-
-    It is a function rather than a module attribute mirroring
-    ``fastfields.dlpack.backend`` on purpose: ``fastfields.auto`` must not
-    import the compiled bindings at import time (it dispatches lazily and is
-    usable with no array backend at all), and a module attribute would have to
-    be computed at import.
+    This namespace works with whatever backend is installed and never insists
+    on a particular one; this is the place to ask which one that is, without
+    knowing which wrapper to interrogate. It is a function and not a module
+    attribute so that importing `fastfields.auto` does not have to import the
+    compiled bindings.
 
     Returns
     -------
     str or None
-        ``"cpu"``, ``"cu126"``, ... for a labelled build of
-        ``fastfields-dlpack``; ``None`` if the installed build carries no
-        label (an unversioned source checkout) or if ``fastfields.dlpack``
-        cannot be imported at all.
+        `"cpu"`, `"cu126"` and so on for a labelled build. `None` if the build
+        carries no label (an unversioned source checkout), or if
+        `fastfields.dlpack` cannot be imported at all.
     """
     try:
         import fastfields.dlpack as _ff

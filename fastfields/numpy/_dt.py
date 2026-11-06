@@ -1,6 +1,6 @@
-"""Distance-transform wrappers (numpy).
+"""Distance-transform wrappers for NumPy.
 
-Euclidean / L1 distance transforms along the last axis, plus point-to-spline
+Euclidean and L1 distance transforms along the last axis, and point-to-spline
 and point-to-mesh distances.
 """
 

@@ -1,35 +1,13 @@
-"""Spatial regularisers — torch.
+"""Spatial regularisers for PyTorch.
 
-* **field** — multi-channel field ``(*batch, *spatial, C)``; per-channel
-  ``absolute`` / ``membrane`` / ``bending`` (a scalar broadcasts to ``C``).
-* **flow** — vector flow field; scalar penalties.
+The same `field_*` and `flow_*` families as `fastfields.numpy`, with matching
+signatures so that `fastfields.auto` can dispatch to either.
 
-The ``*_matvec`` operators are symmetric, so they are differentiable wrt the
-input field via the same (self-adjoint) operator. The ``*_diag``
-preconditioners have no differentiable input.
-
-!!! note "Why ``*_forward`` / ``*_precond`` stay compositions here"
-    ``fastfields-lib`` has fused kernels for ``(H + L) x`` and ``(H +
-    diag(L))^-1 g``, bound as ``fastfields.dlpack.{field,flow}_forward`` and
-    ``...precond``, and [`fastfields.numpy`][fastfields.numpy] /
-    [`fastfields.cupy`][fastfields.cupy] call them directly -- one kernel
-    instead of a temporary and two traversals.
-
-    This backend deliberately does **not**. Here ``field_forward`` is
-    ``sym_matvec`` + ``field_matvec`` and ``field_precond`` is ``field_diag`` +
-    ``sym_solve``, and every one of those is an ``autograd.Function``: the
-    composition is what makes these two differentiable wrt ``mat`` and ``vec``.
-    Calling the raw fused binding instead would be faster and would silently
-    drop the gradient -- the forward would still run, the graph would just end
-    there. Trading autograd for a saved allocation is not a trade this wrapper
-    should make on the caller's behalf.
-
-    A fused *and* differentiable version is possible (a ``Function`` whose
-    ``forward`` calls ``field_forward`` and whose ``backward`` calls it again,
-    the operator being self-adjoint), and is the right follow-up; it is a
-    different change from exposing the op. Until then, reach for
-    ``fastfields.dlpack.field_forward`` directly if you want the fused kernel
-    and have no use for gradients.
+The `*_matvec` operators are symmetric, so their backward pass applies the
+same operator. The diagonal and stencil builders take no tensor input and are
+not differentiable. `*_forward` and `*_precond` are compositions of other
+differentiable operations rather than calls to the fused kernels of numpy and
+cupy; the reason is given in their docstrings.
 """
 
 from __future__ import annotations
@@ -1036,7 +1014,7 @@ def field_kernel(
     dtype : dtype, default=torch.float64
         Data type of the result.
     device : torch.device, optional
-        Device of the result.
+        Device of the result; torch's default device if omitted.
 
     Returns
     -------
@@ -1119,7 +1097,7 @@ def field_diag(
     dtype : dtype, default=torch.float64
         Data type of the result.
     device : torch.device, optional
-        Device of the result.
+        Device of the result; torch's default device if omitted.
 
     Returns
     -------
@@ -1350,7 +1328,7 @@ def field_diag_rls(
     dtype : dtype, default=torch.float64
         Data type of the result.
     device : torch.device, optional
-        Device of the result.
+        Device of the result; the device of `wgt` if omitted.
 
     Returns
     -------
@@ -1528,7 +1506,7 @@ def flow_diag(
     dtype : dtype, default=torch.float64
         Data type of the result.
     device : torch.device, optional
-        Device of the result.
+        Device of the result; torch's default device if omitted.
 
     Returns
     -------
@@ -1602,7 +1580,7 @@ def flow_kernel(
     dtype : dtype, default=torch.float64
         Data type of the result.
     device : torch.device, optional
-        Device of the result.
+        Device of the result; torch's default device if omitted.
 
     Returns
     -------
@@ -1851,7 +1829,7 @@ def flow_diag_rls(
     dtype : dtype, default=torch.float64
         Data type of the result.
     device : torch.device, optional
-        Device of the result.
+        Device of the result; the device of `wgt` if omitted.
 
     Returns
     -------
@@ -2004,6 +1982,13 @@ def flow_precond(
     Differentiable with respect to `vec`, through the self-adjoint solve. `mat`
     must not require grad, as for [`sym_solve`][fastfields.torch.sym_solve].
 
+    !!! note "Composed, not fused"
+        numpy and cupy call a single fused kernel here. This wrapper
+        instead composes `flow_diag` and `sym_solve`, which are
+        differentiable, so the gradient flows.
+        `fastfields.dlpack.flow_precond` is the fused kernel, but calling
+        it directly drops the gradient.
+
     Parameters
     ----------
     mat : torch.Tensor
@@ -2084,6 +2069,14 @@ def flow_forward(
     axes and the last axis must match.
 
     Differentiable with respect to both `mat` and `vec`.
+
+    !!! note "Composed, not fused"
+        numpy and cupy call a single fused kernel here. This wrapper
+        instead composes `sym_matvec` and `flow_matvec`, which are
+        differentiable, so the gradient flows. That costs a temporary and a
+        second pass over the data. `fastfields.dlpack.flow_forward` is the
+        fused kernel, but calling it directly drops the gradient: the
+        forward pass runs and the graph ends there.
 
     Parameters
     ----------
@@ -2768,6 +2761,13 @@ def field_precond(
     Differentiable with respect to `vec`, through the self-adjoint solve. `mat`
     must not require grad, as for [`sym_solve`][fastfields.torch.sym_solve].
 
+    !!! note "Composed, not fused"
+        numpy and cupy call a single fused kernel here. This wrapper
+        instead composes `field_diag` and `sym_solve`, which are
+        differentiable, so the gradient flows.
+        `fastfields.dlpack.field_precond` is the fused kernel, but calling
+        it directly drops the gradient.
+
     Parameters
     ----------
     mat : torch.Tensor
@@ -2842,6 +2842,14 @@ def field_forward(
     axes and the last axis must match.
 
     Differentiable with respect to both `mat` and `vec`.
+
+    !!! note "Composed, not fused"
+        numpy and cupy call a single fused kernel here. This wrapper
+        instead composes `sym_matvec` and `field_matvec`, which are
+        differentiable, so the gradient flows. That costs a temporary and a
+        second pass over the data. `fastfields.dlpack.field_forward` is the
+        fused kernel, but calling it directly drops the gradient: the
+        forward pass runs and the graph ends there.
 
     Parameters
     ----------

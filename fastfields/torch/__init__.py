@@ -1,101 +1,60 @@
-"""fastfields.torch: an autograd-enabled torch interface over the bindings.
+"""PyTorch interface to the fastfields operators, with autograd.
 
-A user-friendly, autograd-enabled torch interface over the
-``fastfields.dlpack`` bindings.
+Functions take tensors and return newly allocated tensors. Most of them are
+differentiable, so they can sit inside a model and gradients flow through them.
+Functions whose name ends in an underscore update their first argument in place
+and return it. CPU tensors work with any build of `fastfields-dlpack`. A CUDA
+tensor needs a CUDA build; handing one to a CPU-only build raises
+`RuntimeError` at the call, naming the wheel-index lane to install.
 
-!!! note "Public API"
-    Differentiable (``torch.autograd.Function``-backed):
+**Differentiable operations.** Gradients are available with respect to the
+following arguments.
 
-    - [`sym_matvec`][fastfields.torch.sym_matvec] -- ``mat @ vec`` (grad wrt
-      ``mat`` and ``vec``)
-    - [`sym_solve`][fastfields.torch.sym_solve]  -- ``(mat + diag(weight)) \\
-      vec`` (grad wrt ``vec``)
-    - [`sym_solve_`][fastfields.torch.sym_solve_] -- in-place
-      [`sym_solve`][fastfields.torch.sym_solve] (grad wrt the mutated
-      right-hand side; safe under autograd, see ``API_CONTRACT.md``)
-    - [`resample`][fastfields.torch.resample]   -- spline prolongation
-      (backward: ``restriction``)
-    - [`restriction`][fastfields.torch.restriction]-- adjoint of resample
-      (backward: ``resample``)
-    - [`spline_coeff`][fastfields.torch.spline_coeff] --
-      interpolating-coefficient prefilter
-    - [`spline_coeff_`][fastfields.torch.spline_coeff_] -- in-place
-      [`spline_coeff`][fastfields.torch.spline_coeff] (self-adjoint, safe under
-      autograd)
+- `sym_matvec`: `mat` and `vec`.
+- `sym_solve` and `sym_solve_`: `vec` (the right-hand side) only.
+- `resample`, `restriction`, `spline_coeff` and `spline_coeff_`: the input.
+- `pull`, `push` and `grad`: the field and the sampling `grid`. `count`:
+  `grid`. `grad` is itself a derivative operator, so differentiating it gives
+  the second-order terms that an image gradient computed inside a loss needs.
+- The regulariser operators: `field_matvec` and `flow_matvec` with respect to
+  the input; their accumulate forms (`*_add*` and `*_sub*` of the product, the
+  diagonal and the stencil) with respect to the accumulator and, for the
+  product, the array it is applied to; and `field_forward`, `field_precond`
+  and their flow twins, as described in each function.
 
-    - [`pull`][fastfields.torch.pull], [`push`][fastfields.torch.push] --
-      spline gather/scatter (grad wrt the field *and* the sampling ``grid``)
-    - [`count`][fastfields.torch.count] -- splat ones (grad wrt ``grid``)
-    - [`grad`][fastfields.torch.grad] -- sample spatial gradients (grad wrt the
-      field and ``grid``; this is the second-order term a learned deformation
-      needs)
-    - the regulariser operators:
-      [`field_matvec`][fastfields.torch.field_matvec] /
-      [`flow_matvec`][fastfields.torch.flow_matvec], their ``_add``/``_sub``
-      accumulate forms over the operator, the diagonal and the stencil,
-      [`field_forward`][fastfields.torch.field_forward] /
-      [`field_precond`][fastfields.torch.field_precond] and their flow twins
-
-    Not differentiable, but still exposed for parity with
-    ``fastfields.numpy``/``fastfields.cupy``: forward always runs (even when an
-    input requires grad), and only calling ``.backward()`` through the output
-    raises a clear ``RuntimeError`` naming the op -- see each function's
-    docstring, and ``API_CONTRACT.md`` ("In-place policy") for why this differs
-    from earlier revisions that omitted these ops or rejected grad-requiring
-    inputs at call time:
-
-    - [`dt_euclidean`][fastfields.torch.dt_euclidean],
-      [`dt_euclidean_`][fastfields.torch.dt_euclidean_]
-    - [`dt_l1`][fastfields.torch.dt_l1], [`dt_l1_`][fastfields.torch.dt_l1_]
-    - [`dt_mesh`][fastfields.torch.dt_mesh] (no in-place form on any backend)
-    - [`dt_spline_table`][fastfields.torch.dt_spline_table],
-      [`dt_spline_brent`][fastfields.torch.dt_spline_brent],
-      [`dt_spline_gaussnewton`][fastfields.torch.dt_spline_gaussnewton] -- the
-      value at an argmin found by an inner optimisation, which the library does
-      not differentiate
-    - [`sym_invert`][fastfields.torch.sym_invert],
-      [`sym_invert_`][fastfields.torch.sym_invert_]
-    - [`sym_addmatvec_`][fastfields.torch.sym_addmatvec_],
-      [`sym_submatvec_`][fastfields.torch.sym_submatvec_] -- differentiable wrt
-      the accumulator, but not wrt ``mat``/``vec``; the out-of-place ``out0 +
-      sym_matvec(mat, vec)`` is differentiable wrt all three
-
-    Re-exported enums: [`Spline`][fastfields.torch.Spline],
-    [`Bound`][fastfields.torch.Bound].
+**Operations that are not differentiable** are still exposed, for parity with
+`fastfields.numpy` and `fastfields.cupy`. Their forward pass always runs, even
+when an input requires grad; only calling `.backward()` through the output
+raises `RuntimeError`, naming the operation. They are the distance transforms
+(`dt_*`), `sym_invert` and `sym_invert_`, the iterative solvers `field_relax`,
+`flow_relax` and their `*_relax_rls` variants, the stencil and diagonal
+builders, and the gradients of `sym_addmatvec_` and `sym_submatvec_` with
+respect to `mat` and `vec`.
 
 !!! note "What this wrapper deliberately does not expose"
     Of the 58 public operations of the C++ hub, this package wraps all but
-    nine. ``tools/api_inventory.py`` in ``fastfields-dlpack`` prints the full
-    matrix; the omissions are:
+    eight, in two groups.
 
-    ``pull_backward``, ``push_backward``, ``count_backward``,
-    ``grad_backward``, ``sym_matvec_backward``
-        Used, not re-exported. These are the adjoints behind the
-        ``autograd.Function`` of the corresponding forward op, which is the
-        supported way to reach them: call [`pull`][fastfields.torch.pull] /
-        [`push`][fastfields.torch.push] / [`count`][fastfields.torch.count] /
-        [`grad`][fastfields.torch.grad] /
-        [`sym_matvec`][fastfields.torch.sym_matvec] and ``.backward()``.
-        Re-exporting them as functions would mean a second, unchecked spelling
-        of a gradient computation, with five pre-zeroed buffers and an
-        accumulate-vs-overwrite contract for the caller to get right.
-        ``fastfields.dlpack`` has them raw for anyone who wants that.
+    **Adjoints, used but not re-exported.** `pull_backward`, `push_backward`,
+    `count_backward`, `grad_backward` and `sym_matvec_backward` are the
+    gradients behind the `autograd.Function` of each forward operation. The
+    supported way to reach them is to call `pull`, `push`, `count`, `grad` or
+    `sym_matvec` and then `.backward()`. Re-exporting them would offer a
+    second, unchecked spelling of a gradient, with pre-zeroed buffers and an
+    accumulate-or-overwrite contract for the caller to get right.
+    `fastfields.dlpack` has them raw.
 
-    ``field_precond_``, ``flow_precond_``, ``field_cg``
-        In-place preconditioner solves and the CG driver. The in-place forms
-        would have to resolve against autograd's rules for a mutated buffer
-        (``API_CONTRACT.md``, "In-place policy") and ``field_cg`` runs an
-        iterative solver whose gradient is a solve with the same operator --
-        both worth doing, neither a mechanical wrapper, and both separate from
-        exposing the ops. [`field_relax`][fastfields.torch.field_relax] is the
-        differentiable-free in-place solver available today;
-        ``fastfields.numpy`` has all three.
+    **Solver entry points that need an autograd decision first.**
+    `field_precond_`, `flow_precond_` and `field_cg`. The in-place
+    preconditioner solves would have to settle how autograd treats a mutated
+    buffer (`API_CONTRACT.md`, "In-place policy"), and `field_cg` runs an
+    iterative solver whose gradient is a solve with the same operator. Both
+    are worth doing and neither is a mechanical wrapper. `field_relax` is the
+    in-place solver available today, and `fastfields.numpy` has all three for
+    the case without autograd.
 
-    The implementation is split by category into `._util` (shared helpers
-    and CUDA-stream resolution), `._dt` (distance transforms), `._sym`
-    (compact-symmetric linear algebra), `._resample` (spline coefficients
-    and resampling/restriction), `._pushpull` (spline gather/scatter) and
-    `._reg` (spatial regularisers).
+    `tests/test_api_coverage_torch.py` fails if the set of omitted operations
+    ever changes by accident.
 """
 
 from __future__ import annotations

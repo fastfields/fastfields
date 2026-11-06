@@ -1,9 +1,7 @@
-"""Spline-interpolation gather / scatter (pushpull) — cupy.
+"""Spline sampling (pushpull) for CuPy.
 
-Channel-last, x-first coordinate convention. The spatial rank ``D`` is taken
-from ``grid``'s trailing axis; ``inp`` and ``grid`` must share the same rank.
-Signatures match the numpy/torch wrappers so ``fastfields.auto`` dispatches
-consistently.
+The same layout and signatures as `fastfields.numpy`: coordinates in voxels,
+channels last, x first, with `D` read from the last axis of `grid`.
 """
 
 from __future__ import annotations

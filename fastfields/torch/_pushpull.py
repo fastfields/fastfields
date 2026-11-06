@@ -1,28 +1,14 @@
-"""Spline-interpolation gather / scatter (pushpull) — torch.
+"""Spline sampling (pushpull) for PyTorch, with autograd.
 
-Channel-last, x-first coordinate convention (spatial rank ``D`` = ``grid``'s
-trailing axis; ``B`` leading batch dims):
+The same layout as `fastfields.numpy`: coordinates in voxels, channels last, x
+first, with `D` read from the last axis of `grid`.
 
-* ``inp``  : ``(*B, *inshape,  C)``   — the volume (spline coefficients)
-* ``grid`` : ``(*B, *outshape, D)``   — sampling coordinates, in voxels
-
-``pull`` and ``push`` are differentiable with respect to **both** the field and
-the ``grid``: differentiating through the sample positions is what makes them
-usable inside a learned deformation / registration model.
-
-``count`` is differentiable with respect to ``grid`` (its only input) and
-``grad`` with respect to both ``inp`` and ``grid`` -- via the hub's
-``count_backward`` / ``grad_backward`` adjoints, which this module had been
-leaving on the table. ``grad`` is already a derivative operator, so
-differentiating *it* gives second-order terms; that is exactly what a
-registration model computing an image gradient inside its loss needs, and
-``grad_backward`` is the kernel for it.
-
-Every one of the four operators is therefore differentiable here, and all
-four pushpull adjoints in ``fastfields.dlpack`` now have a user. The ``abs``
-flag of ``grad`` is the one caveat: it replaces the signed spline derivative
-by its absolute value (a majorisation trick), and ``grad_backward`` must be
-called with the same flag -- these wrappers do that for you.
+All four operators are differentiable. `pull` and `push` are differentiable
+with respect to the field and to `grid`; differentiating through the sample
+positions is what makes them usable in a learned deformation model. `count` is
+differentiable with respect to `grid`, its only input, and `grad` with respect
+to both. The backward passes are the hub's `*_backward` adjoints, and the
+`abs` flag of `grad` is forwarded to them.
 """
 
 from __future__ import annotations

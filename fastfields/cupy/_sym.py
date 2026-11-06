@@ -1,12 +1,9 @@
-"""Compact-symmetric matrix operations (cupy).
+"""Compact-symmetric matrix operations for CuPy.
 
-The Hessian ``H`` is stored in a compact, diagonal-then-rows packing. For a
-per-batch ``C x C`` symmetric matrix the packed length is ``C*(C+1)/2``:
-
-* ``C == 2`` -> ``[h00, h11, h01]``
-* ``C == 3`` -> ``[h00, h11, h22, h01, h02, h12]``
-
-``vec`` / ``out`` vectors are shaped ``(..., C)``.
+A matrix with `C` channels is stored as `C*(C+1)//2` values along the last
+axis, the diagonal first and then the rows of the upper triangle. For example
+`C == 2` is `[h00, h11, h01]` and `C == 3` is
+`[h00, h11, h22, h01, h02, h12]`. Vectors have a last axis of length `C`.
 """
 
 from __future__ import annotations

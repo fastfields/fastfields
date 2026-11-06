@@ -1,15 +1,11 @@
-"""Spatial regularisers — numpy.
+"""Spatial regularisers for NumPy.
 
-Two operator families over the last ``ndim`` spatial axes:
-
-* **field** — a multi-channel field ``(*batch, *spatial, C)``. The
-  ``absolute`` / ``membrane`` / ``bending`` penalties are **per-channel**
-  (a scalar broadcasts to all ``C`` channels, or pass a length-``C`` sequence).
-* **flow** — a vector flow field. The penalties are **scalars**.
-
-Each family offers the operator (``*_matvec``, apply the regulariser) and its
-diagonal (``*_diag``, a preconditioner). With ``voxel_size=None`` all voxels
-are unit size; with only ``absolute`` the operator is a per-channel scaling.
+Two families of operators act on the last `ndim` spatial axes: `field_*` on a
+multi-channel field `(*batch, *spatial, C)`, whose penalties are given per
+channel, and `flow_*` on a vector flow, whose penalties are scalars. Each
+family offers the operator (`*_matvec`), its diagonal (`*_diag`), its stencil
+(`*_kernel`), accumulate forms of each, weighted `*_rls` variants and the
+regularised system `(H + L) x = g` (`*_forward`, `*_precond`, `*_relax`).
 """
 
 from __future__ import annotations
@@ -3024,6 +3020,10 @@ def flow_precond_(
 class CGInfo(NamedTuple):
     """Convergence diagnostics returned by
     [`field_cg`][fastfields.numpy.field_cg].
+
+    The two fields are `iterations`, the number of iterations actually run,
+    which is at most the requested `nb_iter`, and `residual`, the final
+    relative residual `||g - (M + L) x|| / ||g||`.
     """
 
     #: Number of CG iterations actually run (<= the requested ``nb_iter``).

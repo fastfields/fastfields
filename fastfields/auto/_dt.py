@@ -1,17 +1,13 @@
-"""Backend-dispatching distance-transform wrappers
-([`fastfields.auto`][fastfields.auto]).
+"""Dispatchers for the distance transforms.
 
-Each name here forwards to the matching backend function; every backend now
-exposes the canonical ``dt_*`` names, so the per-name tables below map each
-unified name onto the same attribute in each backend package.
+Each name forwards to the function of the same name in the matching backend;
+the tables below map every unified name onto the attribute of each backend.
 
-The three ``dt_spline_*`` operators return a 2-tuple, and every backend
-returns it as ``(dist, time)``. ``fastfields.cupy`` used to return
-``(time, dist)``, which made the meaning of a dispatched result depend on
-which array type was passed -- a dispatcher that forwards arguments unchanged
-has nowhere to normalise a *result*. Resolved in favour of ``(dist, time)``
-(fastfields#38). The three names are in ``tests/test_conformance.py``'s
-canonical list now; their absence from it is how the divergence got in.
+The three `dt_spline_*` operators return a 2-tuple, and every backend returns
+it as `(dist, time)`. `fastfields.cupy` used to return `(time, dist)`, which
+made the meaning of a dispatched result depend on the array type: a dispatcher
+that forwards arguments unchanged has nowhere to normalise a result. The order
+is now fixed by the conformance suite (fastfields#38).
 """
 
 from __future__ import annotations

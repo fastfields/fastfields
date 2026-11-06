@@ -1,9 +1,9 @@
 # fastfields.numpy
 
-**`fastfields.numpy`** brings the fastfields field operators to plain **NumPy
-arrays** on the CPU. Every function takes NumPy arrays in and returns fresh
-NumPy arrays out — your inputs are left untouched unless you explicitly ask for
-an in-place variant.
+`fastfields.numpy` runs the fastfields operators on NumPy arrays, on the CPU.
+Arrays go in and freshly allocated arrays come out. Your inputs are left alone
+unless you call one of the in-place variants, whose names end in an
+underscore.
 
 ## Install
 
@@ -12,65 +12,83 @@ pip install "fastfields[numpy]" \
     --extra-index-url https://fastfields.github.io/whl/cpu/
 ```
 
-The `numpy` extra pulls NumPy itself; the `fastfields` distribution
-ships this subpackage along with `fastfields.torch`,
-`fastfields.cupy`, `fastfields.auto` and `fastfields.helpers`. The
-`--extra-index-url` is what selects the compiled
-`fastfields-dlpack` lane -- `cpu` is the right one here.
+The `numpy` extra installs NumPy itself. The `--extra-index-url` is what
+selects the compiled `fastfields-dlpack` build, and `cpu` is the right one
+here. The same `fastfields` distribution also ships `fastfields.torch`,
+`fastfields.cupy`, `fastfields.auto` and `fastfields.helpers`.
 
-## Use it
+## A first example
 
 ```python
 import numpy as np
 import fastfields.numpy as ff
 
-mask = np.zeros((256, 256), "float32")
-mask[:, 128] = 1.0
+feature = np.full((256, 256), np.inf, dtype="float32")
+feature[:, 128] = 0.0  # features are 0, everything else is +inf
 
-dist = ff.dt_euclidean(mask)      # squared Euclidean distance along the last axis
+dist = ff.dt_euclidean(feature)  # squared distance to column 128, per row
 ```
+
+Distance transforms work along the last axis and expect `0` at the features
+and `+inf` elsewhere. `dt_euclidean` returns squared distances.
 
 ## What's inside
 
 | Operation | Functions |
 |---|---|
-| **Distance transforms** | `dt_euclidean`, `dt_l1` (along the last axis); point-to-spline `dt_spline_table` / `dt_spline_brent` / `dt_spline_gaussnewton`; point-to-mesh `dt_mesh` |
-| **Positive-definite linear algebra** | `sym_matvec`, `sym_addmatvec_`, `sym_submatvec_`, `sym_solve`, `sym_invert` over whole fields of small symmetric matrices |
-| **Resampling** | `resample` (spline up/down-sampling), `restriction` (its adjoint), `spline_coeff` (coefficient prefilter) |
-| **Spline gather/scatter** | `pull`, `push`, `count`, `grad` |
-| **Regularisers** | `field_*` (multi-channel field, per-channel penalties) and `flow_*` (vector flow, scalar penalties + the Lamé `shears`/`div` terms): the operator `*_matvec`, its diagonal `*_diag`, its stencil `*_kernel`, the `*_add…`/`*_sub…` accumulate forms of each, the RLS/JRLS-weighted `*_rls` variants, and the regularised system below |
+| **Distance transforms** | [`dt_euclidean`][fastfields.numpy.dt_euclidean] and [`dt_l1`][fastfields.numpy.dt_l1] along the last axis; point-to-spline [`dt_spline_table`][fastfields.numpy.dt_spline_table], [`dt_spline_brent`][fastfields.numpy.dt_spline_brent] and [`dt_spline_gaussnewton`][fastfields.numpy.dt_spline_gaussnewton]; point-to-mesh [`dt_mesh`][fastfields.numpy.dt_mesh] |
+| **Positive-definite linear algebra** | [`sym_matvec`][fastfields.numpy.sym_matvec], [`sym_addmatvec_`][fastfields.numpy.sym_addmatvec_], [`sym_submatvec_`][fastfields.numpy.sym_submatvec_], [`sym_solve`][fastfields.numpy.sym_solve] and [`sym_invert`][fastfields.numpy.sym_invert], over whole fields of small symmetric matrices |
+| **Resampling** | [`resample`][fastfields.numpy.resample] (spline up- and down-sampling), [`restriction`][fastfields.numpy.restriction] (its adjoint) and [`spline_coeff`][fastfields.numpy.spline_coeff] (the coefficient prefilter) |
+| **Spline sampling (pushpull)** | [`pull`][fastfields.numpy.pull] (gather), [`push`][fastfields.numpy.push] (scatter), [`count`][fastfields.numpy.count] and [`grad`][fastfields.numpy.grad] |
+| **Regularisers** | `field_*` for a multi-channel field, with one penalty per channel, and `flow_*` for a vector flow, with scalar penalties plus the Lamé `shears` and `div` terms. Each family has the operator (`*_matvec`), its diagonal (`*_diag`), its stencil (`*_kernel`), accumulate forms of each (`*_add…` and `*_sub…`), weighted variants (`*_rls`) and the regularised system described below |
 
-Spline order and boundary arguments accept an `int`, a `Spline` / `Bound` enum,
-or a friendly string like `"cubic"` or `"dct2"`.
+Anything that selects a spline order or a boundary condition (`order`,
+`bound`) accepts an `int`, a [`Spline`][fastfields.numpy.Spline] or
+[`Bound`][fastfields.numpy.Bound] member, or a name such as `"cubic"` or
+`"dct2"`.
+
+A *field* is a multi-channel array with any number of channels. A *flow* is a
+vector field whose number of channels equals the number of spatial dimensions.
+The regularisers act on the `ndim` axes just before the channel axis, and
+`ndim` is not inferred: it defaults to 1, so pass `ndim=2` for a 2D image.
 
 ### Solving the regularised system
 
-With `H` the per-voxel data-term Hessian (compact-symmetric packing) and `L` a
-regulariser:
+Let `H` be the per-voxel Hessian of a data term, stored as compact-symmetric
+matrices, and `L` a regulariser. These functions apply and solve the system
+`(H + L) x = g`:
 
 | call | what it does |
 |---|---|
-| `field_forward` / `flow_forward` | apply `(H + L) x` |
-| `field_precond` / `flow_precond` | apply `(H + diag(L))⁻¹ g` (Jacobi) |
-| `field_precond_` / `flow_precond_` | the same, in place |
-| `field_relax` / `flow_relax` | Gauss-Seidel sweeps on `(H + L) x = g` |
-| `field_cg` | preconditioned conjugate gradients on the same system |
+| [`field_forward`][fastfields.numpy.field_forward], [`flow_forward`][fastfields.numpy.flow_forward] | apply `(H + L) x` |
+| [`field_precond`][fastfields.numpy.field_precond], [`flow_precond`][fastfields.numpy.flow_precond] | apply `(H + diag(L))⁻¹ g`, the Jacobi preconditioner |
+| [`field_precond_`][fastfields.numpy.field_precond_], [`flow_precond_`][fastfields.numpy.flow_precond_] | the same, in place |
+| [`field_relax`][fastfields.numpy.field_relax], [`flow_relax`][fastfields.numpy.flow_relax] | Gauss-Seidel sweeps on the system |
+| [`field_cg`][fastfields.numpy.field_cg] | preconditioned conjugate gradients on the same system |
 
-`field_cg` mutates `sol` in place and returns it, like `field_relax`; pass
-`return_info=True` to also get the iteration count and final relative
-residual. It is CPU-only in the underlying library (`fastfields.cupy` has no
-`field_cg` for that reason).
+`field_cg` updates `sol` in place and returns it, like `field_relax`. Pass
+`return_info=True` to also get the iteration count and the final relative
+residual. The solver is CPU-only in the underlying library, which is why
+`fastfields.cupy` has no `field_cg`.
 
-## What this wrapper does not expose
+## Batch axes and memory
 
-Of the 58 operations in the underlying C++ hub, this package wraps all but
+Leading axes are batch axes, and they broadcast: you can combine a single
+matrix field with a stack of vector fields, and the result carries the
+broadcast batch shape. The broadcast is a view with zero strides, so nothing is
+copied. Inputs are likewise passed with their own strides instead of being made
+contiguous. Only read-only arrays are copied, because NumPy cannot export them
+through DLPack.
+
+## What this package does not wrap
+
+Of the 58 operations of the underlying C++ library, this package wraps all but
 four: `pull_backward`, `push_backward`, `count_backward` and `grad_backward`.
-Those are the adjoints of the gather/scatter operators with respect to both
-the sampled field and the sampling coordinates, and they exist so an autograd
-engine can differentiate through `grid` — which only `fastfields.torch` does.
-There is no automatic differentiation on numpy, so they stay at the raw layer:
-call `fastfields.dlpack.pull_backward(...)` if you need them.
+They are the adjoints of the sampling operators with respect to both the
+sampled field and the sampling coordinates, and they exist so that an autograd
+engine can differentiate through `grid`. Only `fastfields.torch` has one, so
+NumPy has no use for them. They stay at the raw layer, as
+`fastfields.dlpack.pull_backward(...)` and so on.
+`tests/test_api_coverage_numpy.py` fails if that list ever changes by accident.
 
-`tests/test_api_coverage.py` fails if that list ever changes by accident.
-
-See the [API reference](api/numpy.md) for full signatures and options.
+See the [API reference](api/numpy.md) for the full signatures.

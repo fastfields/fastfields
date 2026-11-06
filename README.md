@@ -52,14 +52,15 @@ the **type of the first array argument**:
 import numpy as np
 import fastfields.auto as ff
 
-mat = np.random.randn(5, 6).astype(np.float64)   # packed C=3 symmetric
+mat = np.random.randn(5, 6).astype(np.float64)  # packed C=3 symmetric
 vec = np.random.randn(5, 3)
-out = ff.sym_matvec(mat, vec)      # -> fastfields.numpy.sym_matvec
+out = ff.sym_matvec(mat, vec)  # -> fastfields.numpy.sym_matvec
 
 import torch
+
 t_mat = torch.randn(5, 6, dtype=torch.float64)
 t_vec = torch.randn(5, 3, dtype=torch.float64)
-out_t = ff.sym_matvec(t_mat, t_vec)   # -> fastfields.torch.sym_matvec
+out_t = ff.sym_matvec(t_mat, t_vec)  # -> fastfields.torch.sym_matvec
 ```
 
 * `numpy.ndarray` -> `fastfields.numpy`

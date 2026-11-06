@@ -1,11 +1,7 @@
-"""Spatial regularisers — cupy.
+"""Spatial regularisers for CuPy.
 
-* **field** — multi-channel field ``(*batch, *spatial, C)``; per-channel
-  ``absolute`` / ``membrane`` / ``bending`` (a scalar broadcasts to ``C``).
-* **flow** — vector flow field; scalar penalties.
-
-Signatures match the numpy/torch wrappers so ``fastfields.auto`` dispatches
-consistently.
+The same `field_*` and `flow_*` families as `fastfields.numpy`, with matching
+signatures so that `fastfields.auto` can dispatch to either.
 """
 
 from __future__ import annotations

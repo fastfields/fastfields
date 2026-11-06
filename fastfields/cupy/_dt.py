@@ -1,4 +1,8 @@
-"""Distance-transform wrappers (cupy)."""
+"""Distance-transform wrappers for CuPy.
+
+Euclidean and L1 distance transforms along the last axis, and point-to-spline
+and point-to-mesh distances.
+"""
 
 from __future__ import annotations
 
