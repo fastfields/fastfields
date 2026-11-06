@@ -18,16 +18,16 @@ itself for ``replicate``/``dct2``/``dft``, but **not** for ``dct1``, whose
 operator is only self-adjoint under the endpoint-weighted inner product
 ``W = diag(1/2, 1, ..., 1, 1/2)`` -- see ``_spline_coeff_adjoint``.
 
-Notes
------
-* ``scale`` uses the binding convention "input-index per output-index".
-* This wrapper always passes the binding an explicit per-dim ``scale`` --
-  derived from ``anchor`` and the shapes, or from an explicit ``scale``
-  override (see :func:`resample`). (The binding itself now handles
-  ``scale=None`` by defaulting to ``inshape / outshape``; the wrapper resolves
-  the scale up front so the ``anchor`` conventions are applied consistently.)
-* On CUDA tensors the current stream is forwarded to the binding (see
-  :mod:`fastfields.torch._util`).
+!!! note
+    * ``scale`` uses the binding convention "input-index per output-index".
+    * This wrapper always passes the binding an explicit per-dim ``scale`` --
+      derived from ``anchor`` and the shapes, or from an explicit ``scale``
+      override (see [`resample`][fastfields.torch.resample]). (The binding
+      itself now handles ``scale=None`` by defaulting to ``inshape /
+      outshape``; the wrapper resolves the scale up front so the ``anchor``
+      conventions are applied consistently.)
+    * On CUDA tensors the current stream is forwarded to the binding (see
+      `fastfields.torch._util`).
 """
 
 from __future__ import annotations
@@ -101,52 +101,72 @@ def resample(
     shift: Optional[float] = None,
     scale: Optional[Sequence[float]] = None,
 ) -> Tensor:
-    """Spline resample (prolongation) of the last ``ndim`` axes.
+    """Resample the trailing axes of an array with splines.
 
-    Differentiable with respect to ``inp`` (backward is ``restriction``). The
-    signature matches the numpy/cupy wrappers so ``fastfields.auto.resample``
-    dispatches consistently.
+    Resamples `inp` onto a new grid with splines of order `order`, along the
+    last `ndim` axes; leading axes are batch axes. Give either a size `factor`
+    or an explicit output `shape`, not both.
+
+    Which points of the two grids line up is set by `anchor`; with `"centers"`,
+    the default, the first and last samples coincide. The `anchor` determines
+    the sampling `scale` and `shift` for the kernel, and either can be
+    overridden.
+
+    [`restriction`][fastfields.torch.restriction] is the adjoint operation.
+
+    Differentiable with respect to `inp`; the backward pass is
+    [`restriction`][fastfields.torch.restriction].
+
+    !!! tip "Interpolating resize"
+        `resample` does not prefilter its input. For a true interpolating
+        resize, pass the coefficients computed by
+        [`spline_coeff`][fastfields.torch.spline_coeff] instead of the raw
+        samples.
 
     Parameters
     ----------
     inp : torch.Tensor
-        Input tensor, shape ``(..., *inshape)``.
+        Input, shape `(*batch, *spatial_in)`; the last `ndim` axes are
+        resampled.
     factor : float or sequence of float, optional
-        Per-axis resize multiplier (scalar or sequence). Mutually exclusive
-        with ``shape``; with neither, this is the identity.
+        Size multiplier, one per resampled axis or a single value for all.
+        Exclusive with `shape`; with neither, the spatial shape is
+        unchanged. Each output size is `max(1, round(n * factor))`.
     shape : int or sequence of int, optional
-        Explicit output spatial size (the last ``ndim`` axes of the result).
+        Output spatial size, one per resampled axis or a single value for
+        all. Exclusive with `factor`.
     order : int or str, default=2
-        Spline order (int ``0..7``, a :class:`Spline` enum, or a name such as
-        ``"cubic"``).
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition (int, a :class:`Bound` enum, or a name such as
-        ``"dct2"``/``"wrap"``).
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
     ndim : int, optional
-        Number of trailing spatial dimensions (inferred from ``shape``/
-        ``factor`` when omitted, else 1).
+        Number of trailing axes to resample. When omitted it is the length
+        of `shape` or `factor` if either is a sequence, and 1 otherwise.
     anchor : {"centers", "edges", "first", "last"}, default="centers"
-        Sampling-grid convention, matching ``interpol.resize``. Sets the
-        default per-dim ``scale`` and ``shift`` (see
-        :func:`fastfields.helpers.anchor_scale_shift`). Abbreviations
-        (``"c"``/``"e"``/``"f"``/
-        ``"l"``) are accepted.
+        Which points of the input and output grids are aligned; the initial
+        letter is enough. See
+        [`anchor_scale_shift`][fastfields.helpers.anchor_scale_shift] for
+        the exact `scale` and `shift` each choice implies.
     shift : float, optional
-        Sampling-shift override (default: the shift implied by ``anchor``).
+        Sampling shift, replacing the one implied by `anchor`.
     scale : sequence of float, optional
-        Per-dim scale override (default: derived from ``anchor`` and the
-        shapes), length ``ndim``.
+        Input-index step per output-index step, one value per resampled
+        axis, replacing the one derived from `anchor` and the shapes.
 
     Returns
     -------
     torch.Tensor
-        Resampled tensor, shape ``(..., *outshape)``.
+        The resampled tensor, shape `(*batch, *spatial_out)`.
 
     Raises
     ------
     ValueError
-        If ``ndim`` is outside ``1..inp.dim()``, ``anchor``/``order``/``bound``
-        is unknown, or ``factor``/``shape`` has the wrong length.
+        If `ndim` is outside `1..inp.dim()`, `anchor`, `order` or `bound`
+        is unknown, or `factor`, `shape` or `scale` has the wrong length.
     """
     check_dtype(inp)
     ndim = infer_ndim(ndim, factor, shape)
@@ -183,48 +203,63 @@ def restriction(
     shift: Optional[float] = None,
     scale: Optional[Sequence[float]] = None,
 ) -> Tensor:
-    """Restriction (adjoint of :func:`resample`) of the last ``ndim`` axes.
+    """Adjoint of `resample`, along the trailing axes of an array.
 
-    The binding accumulates into a buffer, which this wrapper pre-zeroes.
-    Differentiable with respect to ``inp`` (backward is ``resample``). Shares
-    :func:`resample`'s ``factor``/``shape``/``order`` signature.
+    Transposes the linear map of [`resample`][fastfields.torch.resample] for
+    the same arguments: values on the finer grid are accumulated onto the
+    coarser one. The `scale` is derived from this call's own input and output
+    shapes, so a `resample` and a `restriction` with matching shapes use
+    reciprocal scales and the same shift.
 
-    The ``anchor`` convention matches :func:`resample`; because the scale is
-    derived from this call's own (input, output) shapes, a ``resample`` and a
-    matching ``restriction`` use reciprocal scales and the same shift -- the
-    adjoint relationship the binding expects.
+    The binding accumulates into its output buffer, which is why the buffer is
+    allocated zero-filled here. When calling `fastfields.dlpack.restriction`
+    yourself, pre-zero `out`.
+
+    `factor`, `shape`, `order`, `bound`, `ndim`, `anchor`, `shift` and `scale`
+    are exactly as for [`resample`][fastfields.torch.resample].
+
+    Differentiable with respect to `inp`; the backward pass is
+    [`resample`][fastfields.torch.resample].
 
     Parameters
     ----------
     inp : torch.Tensor
-        Input tensor, shape ``(..., *inshape)``.
+        Input, shape `(*batch, *spatial_in)`; the last `ndim` axes are
+        resampled.
     factor : float or sequence of float, optional
-        Per-axis resize multiplier (mutually exclusive with ``shape``).
+        Size multiplier, as for [`resample`][fastfields.torch.resample].
+        Exclusive with `shape`.
     shape : int or sequence of int, optional
-        Explicit output spatial size.
+        Output spatial size, as for
+        [`resample`][fastfields.torch.resample]. Exclusive with `factor`.
     order : int or str, default=2
-        Spline order (see :func:`resample`).
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition (see :func:`resample`).
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
     ndim : int, optional
-        Number of trailing spatial dimensions (inferred when omitted).
+        Number of trailing axes, as for
+        [`resample`][fastfields.torch.resample].
     anchor : {"centers", "edges", "first", "last"}, default="centers"
-        Sampling-grid convention (see :func:`resample`).
+        Grid alignment, as for [`resample`][fastfields.torch.resample].
     shift : float, optional
-        Sampling-shift override (see :func:`resample`).
+        Sampling shift, as for [`resample`][fastfields.torch.resample].
     scale : sequence of float, optional
-        Per-dim scale override (see :func:`resample`).
+        Per-axis scale, as for [`resample`][fastfields.torch.resample].
 
     Returns
     -------
     torch.Tensor
-        Restricted tensor, shape ``(..., *outshape)``.
+        The restricted tensor, shape `(*batch, *spatial_out)`.
 
     Raises
     ------
     ValueError
-        If ``ndim`` is outside ``1..inp.dim()``, ``anchor``/``order``/``bound``
-        is unknown, or ``factor``/``shape`` has the wrong length.
+        If `ndim` is outside `1..inp.dim()`, `anchor`, `order` or `bound`
+        is unknown, or `factor`, `shape` or `scale` has the wrong length.
     """
     check_dtype(inp)
     ndim = infer_ndim(ndim, factor, shape)
@@ -252,29 +287,45 @@ def restriction(
 def spline_coeff(
     inp: Tensor, order: int | str = 3, bound: int | str = "dct2"
 ) -> Tensor:
-    """Compute interpolating spline coefficients along the last axis.
+    """Spline coefficients of a signal, along the last axis.
 
-    Returns a new tensor (does not modify ``inp``), so it is safe for autograd.
-    Differentiable with respect to ``inp``. Only the boundary conditions the
-    prefilter implements are accepted (``dct1``/``dct2``/``dft``/
-    ``replicate``); anything else -- in particular ``zero`` -- raises
-    ``ValueError``.
+    Converts samples into the coefficients of the interpolating spline of order
+    `order`, so that evaluating that spline at the sample positions gives the
+    samples back. For orders 0 and 1 the coefficients are the samples. Only the
+    last axis is filtered.
+
+    For orders above 1 only the boundary conditions `dct1`, `dct2`, `dft` and
+    `replicate` are implemented; any other is rejected. The coefficients are
+    what [`pull`][fastfields.torch.pull], [`push`][fastfields.torch.push] and
+    [`grad`][fastfields.torch.grad] expect as their volume.
+
+    [`spline_coeff_`][fastfields.torch.spline_coeff_] is the in-place version.
+
+    Differentiable with respect to `inp`. An unimplemented boundary condition
+    raises `ValueError`.
 
     Parameters
     ----------
     inp : torch.Tensor
-        Input samples, shape ``(..., N)``.
+        Samples; the transform runs along the last axis.
     order : int or str, default=3
-        Spline order (orders 0 and 1 are no-ops); accepts an int, a
-        :class:`Spline` enum, or a name such as ``"cubic"`` (unified with the
-        numpy/cupy wrappers).
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition (int, a :class:`Bound` enum, or a name).
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
 
     Returns
     -------
     torch.Tensor
-        Spline coefficients, shape ``(..., N)``.
+        The coefficients, a new tensor the shape of `inp`.
+
+    Raises
+    ------
+    ValueError
+        If `bound` is not an implemented boundary condition.
     """
     check_dtype(inp)
     spline, bound = as_spline(order), as_bound(bound)
@@ -285,44 +336,42 @@ def spline_coeff(
 def spline_coeff_(
     inp_out: Tensor, order: int | str = 3, bound: int | str = "dct2"
 ) -> Tensor:
-    """In-place interpolating spline-coefficient prefilter, last axis.
+    """Spline coefficients of a signal along the last axis, in place.
 
-    Differentiable with respect to ``inp_out`` (mirrors :func:`spline_coeff`):
-    the prefilter is linear, so its backward applies the prefilter's
-    transpose to the gradient and never reads the pre-mutation ``inp_out`` --
-    only the saved ``order``/``bound`` scalars -- so overwriting ``inp_out`` in
-    place destroys no information backward needs (see ``API_CONTRACT.md``,
-    "In-place policy"). As with any in-place op, a leaf tensor with
-    ``requires_grad=True`` cannot be mutated (torch's ordinary leaf rule);
-    that is checked before ``inp_out`` is touched, so the call raises without
-    corrupting it.
+    The in-place version of [`spline_coeff`][fastfields.torch.spline_coeff]:
+    the samples in `inp_out` are replaced by the coefficients. For orders above
+    1 only the boundary conditions `dct1`, `dct2`, `dft` and `replicate` are
+    implemented; any other is rejected.
 
-    Only the boundary conditions the prefilter actually implements are
-    accepted (``dct1``/``dct2``/``dft``/``replicate``); anything else -- in
-    particular ``zero`` -- raises ``ValueError``.
-
-    Raises
-    ------
-    ValueError
-        If ``bound`` is not an implemented boundary condition.
-    RuntimeError
-        If ``inp_out`` is a leaf tensor that requires grad.
+    Differentiable with respect to `inp_out`: the prefilter is linear, and its
+    backward pass never reads the overwritten values. An unimplemented boundary
+    condition raises `ValueError`. A leaf tensor that requires grad cannot be
+    modified in place; this is checked before `inp_out` is touched.
 
     Parameters
     ----------
     inp_out : torch.Tensor
-        Input samples, shape ``(..., N)``. Mutated in place and returned.
+        Samples on entry, spline coefficients on exit. Updated in place.
     order : int or str, default=3
-        Spline order (orders 0 and 1 are no-ops); accepts an int, a
-        :class:`Spline` enum, or a name such as ``"cubic"``.
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition (int, a :class:`Bound` enum, or a name).
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
 
     Returns
     -------
     torch.Tensor
-        ``inp_out`` (the same tensor object), now holding the spline
-        coefficients.
+        `inp_out` itself, now holding the coefficients.
+
+    Raises
+    ------
+    ValueError
+        If `bound` is not an implemented boundary condition.
+    RuntimeError
+        If `inp_out` is a leaf tensor that requires grad.
     """
     check_dtype(inp_out)
     check_inplace_leaf("spline_coeff_", inp_out)
@@ -528,7 +577,7 @@ class _SplineCoeff(torch.autograd.Function):
 class _SplineCoeffInPlace(torch.autograd.Function):
     """``inp <- spline_coeff(inp)`` in place.
 
-    Autograd-safe for the same reason as :class:`_SplineCoeff`: the
+    Autograd-safe for the same reason as `_SplineCoeff`: the
     prefilter is linear and its backward only needs the saved
     ``spline``/``bound`` scalars, never the pre-mutation ``inp`` --
     ``ctx.mark_dirty(inp)`` bumps the version counter so a stale save

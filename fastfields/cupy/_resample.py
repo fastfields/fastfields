@@ -42,9 +42,9 @@ def _resolve(
     """Resolve (full output shape, per-dim scale, scalar shift) for a call.
 
     The order/bound normalisation and the anchor/factor/shape resolution come
-    from :mod:`fastfields.helpers` so every backend shares one implementation.
-    Raises ``ValueError`` if ``ndim`` is outside ``1..inp.ndim`` or an explicit
-    ``scale`` has the wrong length.
+    from [`fastfields.helpers`][fastfields.helpers] so every backend shares one
+    implementation. Raises ``ValueError`` if ``ndim`` is outside
+    ``1..inp.ndim`` or an explicit ``scale`` has the wrong length.
     """
     ndim = infer_ndim(ndim, factor, shape)
     check_ndim(ndim, inp.ndim)
@@ -77,37 +77,71 @@ def resample(
     shift: Optional[float] = None,
     scale: Optional[Sequence[float]] = None,
 ) -> Any:
-    """Spline resample (prolongation) of the last ``ndim`` axes.
+    """Resample the trailing axes of an array with splines.
 
-    Allocates and returns the output array. The signature matches the
-    numpy/torch wrappers so ``fastfields.auto.resample`` dispatches
-    consistently.
+    Resamples `inp` onto a new grid with splines of order `order`, along the
+    last `ndim` axes; leading axes are batch axes. Give either a size `factor`
+    or an explicit output `shape`, not both.
+
+    Which points of the two grids line up is set by `anchor`; with `"centers"`,
+    the default, the first and last samples coincide. The `anchor` determines
+    the sampling `scale` and `shift` for the kernel, and either can be
+    overridden.
+
+    [`restriction`][fastfields.cupy.restriction] is the adjoint operation.
+
+    !!! tip "Interpolating resize"
+        `resample` does not prefilter its input. For a true interpolating
+        resize, pass the coefficients computed by
+        [`spline_coeff`][fastfields.cupy.spline_coeff] instead of the raw
+        samples.
 
     Parameters
     ----------
     inp : cupy.ndarray
-        Input array, shape ``(..., *inshape)``.
+        Input, shape `(*batch, *spatial_in)`; the last `ndim` axes are
+        resampled.
     factor : float or sequence of float, optional
-        Per-axis resize multiplier (mutually exclusive with ``shape``; with
-        neither, this is the identity).
+        Size multiplier, one per resampled axis or a single value for all.
+        Exclusive with `shape`; with neither, the spatial shape is
+        unchanged. Each output size is `max(1, round(n * factor))`.
     shape : int or sequence of int, optional
-        Explicit output spatial size (the last ``ndim`` axes of the result).
+        Output spatial size, one per resampled axis or a single value for
+        all. Exclusive with `factor`.
     order : int or str, default=2
-        Spline order (int ``0..7``, a :class:`Spline` enum, or a name such as
-        ``"cubic"``).
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition (int, a :class:`Bound` enum, or a name such as
-        ``"dct2"``/``"wrap"``).
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
     ndim : int, optional
-        Number of trailing spatial dimensions (inferred when omitted).
+        Number of trailing axes to resample. When omitted it is the length
+        of `shape` or `factor` if either is a sequence, and 1 otherwise.
     anchor : {"centers", "edges", "first", "last"}, default="centers"
-        Sampling-grid convention, matching ``interpol.resize`` (see
-        :func:`fastfields.helpers.anchor_scale_shift`). Abbreviations
-        accepted.
+        Which points of the input and output grids are aligned; the initial
+        letter is enough. See
+        [`anchor_scale_shift`][fastfields.helpers.anchor_scale_shift] for
+        the exact `scale` and `shift` each choice implies.
     shift : float, optional
-        Sampling-shift override (default: the shift implied by ``anchor``).
+        Sampling shift, replacing the one implied by `anchor`.
     scale : sequence of float, optional
-        Per-dim scale override (default: derived from ``anchor``).
+        Input-index step per output-index step, one value per resampled
+        axis, replacing the one derived from `anchor` and the shapes.
+
+    Returns
+    -------
+    cupy.ndarray
+        The resampled array, shape `(*batch, *spatial_out)`.
+
+    Raises
+    ------
+    ValueError
+        If `ndim` is outside `1..inp.ndim`, `anchor` is unknown, or
+        `factor`, `shape` or `scale` has the wrong length.
+    TypeError
+        If `inp` is not a float32 or float64 CuPy array.
     """
     cp = cupy()
     inp = as_gpu_array(inp, name="inp")
@@ -141,34 +175,62 @@ def restriction(
     shift: Optional[float] = None,
     scale: Optional[Sequence[float]] = None,
 ) -> Any:
-    """Restriction (adjoint of :func:`resample`) of the last ``ndim`` axes.
+    """Adjoint of `resample`, along the trailing axes of an array.
 
-    The binding *accumulates* into the output, so the freshly allocated array
-    is zero-initialised here. Shares :func:`resample`'s ``factor``/``shape``/
-    ``order`` signature; because the scale is derived from this call's own
-    (input, output) shapes, a ``resample`` and a matching ``restriction`` use
-    reciprocal scales and the same shift -- the adjoint the binding expects.
+    Transposes the linear map of [`resample`][fastfields.cupy.resample] for the
+    same arguments: values on the finer grid are accumulated onto the coarser
+    one. The `scale` is derived from this call's own input and output shapes,
+    so a `resample` and a `restriction` with matching shapes use reciprocal
+    scales and the same shift.
+
+    The binding accumulates into its output buffer, which is why the buffer is
+    allocated zero-filled here. When calling `fastfields.dlpack.restriction`
+    yourself, pre-zero `out`.
+
+    `factor`, `shape`, `order`, `bound`, `ndim`, `anchor`, `shift` and `scale`
+    are exactly as for [`resample`][fastfields.cupy.resample].
 
     Parameters
     ----------
     inp : cupy.ndarray
-        Input array, shape ``(..., *inshape)``.
+        Input, shape `(*batch, *spatial_in)`; the last `ndim` axes are
+        resampled.
     factor : float or sequence of float, optional
-        Per-axis resize multiplier (mutually exclusive with ``shape``).
+        Size multiplier, as for [`resample`][fastfields.cupy.resample].
+        Exclusive with `shape`.
     shape : int or sequence of int, optional
-        Explicit output spatial size.
+        Output spatial size, as for [`resample`][fastfields.cupy.resample].
+        Exclusive with `factor`.
     order : int or str, default=2
-        Spline order (see :func:`resample`).
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition (see :func:`resample`).
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
     ndim : int, optional
-        Number of trailing spatial dimensions (inferred when omitted).
+        Number of trailing axes, as for
+        [`resample`][fastfields.cupy.resample].
     anchor : {"centers", "edges", "first", "last"}, default="centers"
-        Sampling-grid convention (see :func:`resample`).
+        Grid alignment, as for [`resample`][fastfields.cupy.resample].
     shift : float, optional
-        Sampling-shift override (see :func:`resample`).
+        Sampling shift, as for [`resample`][fastfields.cupy.resample].
     scale : sequence of float, optional
-        Per-dim scale override (see :func:`resample`).
+        Per-axis scale, as for [`resample`][fastfields.cupy.resample].
+
+    Returns
+    -------
+    cupy.ndarray
+        The restricted array, shape `(*batch, *spatial_out)`.
+
+    Raises
+    ------
+    ValueError
+        If `ndim` is outside `1..inp.ndim`, `anchor` is unknown, or
+        `factor`, `shape` or `scale` has the wrong length.
+    TypeError
+        If `inp` is not a float32 or float64 CuPy array.
     """
     cp = cupy()
     inp = as_gpu_array(inp, name="inp")
@@ -193,9 +255,42 @@ def restriction(
 def spline_coeff(
     inp: Any, order: int | str = 3, bound: int | str = "dct2"
 ) -> Any:
-    """Spline-coefficient prefilter along the last axis (functional).
+    """Spline coefficients of a signal, along the last axis.
 
-    Orders 0/1 are no-ops. Returns a new array; ``inp`` is unmodified.
+    Converts samples into the coefficients of the interpolating spline of order
+    `order`, so that evaluating that spline at the sample positions gives the
+    samples back. For orders 0 and 1 the coefficients are the samples. Only the
+    last axis is filtered.
+
+    For orders above 1 only the boundary conditions `dct1`, `dct2`, `dft` and
+    `replicate` are implemented; any other is rejected. The coefficients are
+    what [`pull`][fastfields.cupy.pull], [`push`][fastfields.cupy.push] and
+    [`grad`][fastfields.cupy.grad] expect as their volume.
+
+    [`spline_coeff_`][fastfields.cupy.spline_coeff_] is the in-place version.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Samples; the transform runs along the last axis.
+    order : int or str, default=3
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+
+    Returns
+    -------
+    cupy.ndarray
+        The coefficients, a new array the shape of `inp`.
+
+    Raises
+    ------
+    TypeError
+        If `inp` is not a float32 or float64 CuPy array.
     """
     out = as_gpu_array(inp, name="inp").copy()
     _ff.spline_coeff(
@@ -207,7 +302,36 @@ def spline_coeff(
 def spline_coeff_(
     inp_out: Any, order: int | str = 3, bound: int | str = "dct2"
 ) -> Any:
-    """In-place spline-coeff prefilter (last axis); returns ``inp_out``."""
+    """Spline coefficients of a signal along the last axis, in place.
+
+    The in-place version of [`spline_coeff`][fastfields.cupy.spline_coeff]: the
+    samples in `inp_out` are replaced by the coefficients. For orders above 1
+    only the boundary conditions `dct1`, `dct2`, `dft` and `replicate` are
+    implemented; any other is rejected.
+
+    Parameters
+    ----------
+    inp_out : cupy.ndarray
+        Samples on entry, spline coefficients on exit. Updated in place.
+    order : int or str, default=3
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp_out` itself, now holding the coefficients.
+
+    Raises
+    ------
+    TypeError
+        If `inp_out` is not a float32 or float64 CuPy array.
+    """
     inp_out = require_gpu_writethrough(inp_out, name="inp_out")
     _ff.spline_coeff(
         inp_out, as_spline(order), as_bound(bound), current_stream_ptr()

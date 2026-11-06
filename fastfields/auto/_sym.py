@@ -1,13 +1,12 @@
-"""Backend-dispatching compact-symmetric ops (:mod:`fastfields.auto`).
+"""Dispatchers for the compact-symmetric operations.
 
-Both spellings of each in-place op are dispatched: the trailing-underscore
-forms mutate their first argument, which is also the array the backend is
-chosen from, so they dispatch as cleanly as the functional ones.
+Both spellings of each in-place operation are dispatched. The underscore forms
+update their first argument, which is also the array that selects the backend,
+so they dispatch as cleanly as the functional ones.
 
-``sym_matvec_backward`` is listed for numpy/cupy only. On torch it is not a
-public function at all -- it is the adjoint wired into ``sym_matvec``'s
-``autograd.Function``, and the supported way to reach it there is
-``sym_matvec(...).backward()``.
+`sym_matvec_backward` is listed for numpy and cupy only. On torch it is not a
+public function: it is the adjoint wired into the autograd support of
+`sym_matvec`, reached with `sym_matvec(...).backward()`.
 """
 
 from __future__ import annotations

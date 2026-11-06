@@ -18,20 +18,21 @@ the out-of-place ``sym_solve(mat, vec, weight=None)``). Whether an in-place
 form is differentiable follows the per-op rule in ``API_CONTRACT.md``
 ("In-place policy"):
 
-* :func:`sym_solve_` **is** differentiable (w.r.t. the mutated right-hand
-  side): the backward of :func:`sym_solve` never reads the pre-mutation
+* [`sym_solve_`][fastfields.torch.sym_solve_] **is** differentiable (w.r.t. the
+  mutated right-hand side): the backward of
+  [`sym_solve`][fastfields.torch.sym_solve] never reads the pre-mutation
   right-hand side, only the saved ``mat``/``weight``, so overwriting it in
   place destroys no information backward needs.
-* :func:`sym_invert_` is **not** differentiable -- for the same reason as
-  :func:`sym_invert`: no gradient is implemented for the packed inverse on
-  this backend at all, mirroring ``jitfields`` (which rejects a
-  grad-requiring ``mat`` outright). This is an *implementation gap*, not a
-  mathematical obstruction: the matrix inverse is perfectly differentiable
-  (``dL/dA = -B (dL/dB) B`` for ``B = A^-1``, symmetric), and note that
-  formula needs only the **inverse** -- i.e. the value this op leaves
-  behind -- so even the in-place form could support a gradient if one were
-  implemented. Calling ``.backward()`` through either form's output raises
-  ``RuntimeError``.
+* [`sym_invert_`][fastfields.torch.sym_invert_] is **not** differentiable --
+  for the same reason as [`sym_invert`][fastfields.torch.sym_invert]: no
+  gradient is implemented for the packed inverse on this backend at all,
+  mirroring ``jitfields`` (which rejects a grad-requiring ``mat`` outright).
+  This is an *implementation gap*, not a mathematical obstruction: the matrix
+  inverse is perfectly differentiable (``dL/dA = -B (dL/dB) B`` for ``B =
+  A^-1``, symmetric), and note that formula needs only the **inverse** -- i.e.
+  the value this op leaves behind -- so even the in-place form could support a
+  gradient if one were implemented. Calling ``.backward()`` through either
+  form's output raises ``RuntimeError``.
 """
 
 from __future__ import annotations
@@ -114,26 +115,27 @@ def _check_sym(mat: Tensor, vec: Tensor) -> int:
 
 
 def sym_matvec(mat: Tensor, vec: Tensor) -> Tensor:
-    """Matrix-vector product ``out = mat @ vec`` for compact-symmetric ``mat``.
+    """Product of compact-symmetric matrices with vectors.
 
-    Differentiable with respect to both ``mat`` and ``vec``. The batch
-    (leading) dims of ``mat`` and ``vec`` are broadcast together; the broadcast
-    uses
-    ``Tensor.expand`` (0-stride views, no copy) which the stride-aware binding
-    consumes directly, and autograd reduces the broadcast gradients back to the
-    original operand shapes.
+    A compact-symmetric matrix with `C` channels is stored along the last axis
+    as `C*(C+1)//2` values: the diagonal first, then the rows of the upper
+    triangle. Vectors have a last axis of length `C`.
+
+    Batch axes of `mat` and `vec` are broadcast against each other.
+
+    Differentiable with respect to both `mat` and `vec`.
 
     Parameters
     ----------
-    mat : `(..., C*(C+1)//2) tensor`
-        Compact-symmetric matrix (diagonal, then upper-triangle rows).
-    vec : `(..., C) tensor`
-        Vector.
+    mat : torch.Tensor
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`.
+    vec : torch.Tensor
+        Vectors, shape `(*B, C)`.
 
     Returns
     -------
-    out : `(..., C) tensor`
-        Matrix-vector product (broadcast batch shape + ``(C,)``).
+    torch.Tensor
+        `mat @ vec`, shape `(*B, C)` with the broadcast batch shape.
     """
     check_dtype(mat, vec)
     _check_sym(mat, vec)
@@ -144,7 +146,9 @@ def sym_matvec(mat: Tensor, vec: Tensor) -> Tensor:
 
 
 def _matvec_acc(out0: Tensor, mat: Tensor, vec: Tensor, sub: bool) -> Tensor:
-    """Shared body of :func:`sym_addmatvec_` / :func:`sym_submatvec_`."""
+    """Shared body of [`sym_addmatvec_`][fastfields.torch.sym_addmatvec_] /
+    [`sym_submatvec_`][fastfields.torch.sym_submatvec_].
+    """
     name = "sym_submatvec_" if sub else "sym_addmatvec_"
     check_dtype(out0, mat, vec)
     _check_sym(mat, vec)
@@ -164,38 +168,61 @@ def _matvec_acc(out0: Tensor, mat: Tensor, vec: Tensor, sub: bool) -> Tensor:
 
 
 def sym_addmatvec_(out0: Tensor, mat: Tensor, vec: Tensor) -> Tensor:
-    """Accumulate ``out0 += mat @ vec`` **in place**; returns ``out0``.
+    """Accumulate a matrix-vector product in place: `out0 += mat @ vec`.
 
-    Argument order matches ``fastfields.numpy`` / ``fastfields.cupy``
-    exactly -- accumulator first -- which is *not* the order of the
-    out-of-place :func:`sym_matvec`.
+    `out0` fixes the batch shape; `mat` and `vec` are broadcast to it. Note
+    that the accumulator comes first, unlike in
+    [`sym_matvec`][fastfields.torch.sym_matvec].
 
-    Differentiable wrt ``out0`` (identity pass-through). A ``.backward()``
-    that needs a gradient wrt ``mat`` or ``vec`` raises ``RuntimeError``
-    naming the differentiable alternative, ``out0 + sym_matvec(mat, vec)``;
-    see :class:`_MatVecAcc` for why.
+    Differentiable with respect to `out0` only. A backward pass that needs the
+    gradient with respect to `mat` or `vec` raises `RuntimeError`; use `out0 +
+    sym_matvec(mat, vec)` when you need those.
 
     Parameters
     ----------
-    out0 : `(*B, C) tensor`
-        Accumulator, mutated in place. Fixes the batch shape.
-    mat : `(*B, C*(C+1)//2) tensor`
-        Compact-symmetric matrix, broadcast to ``out0``'s batch shape.
-    vec : `(*B, C) tensor`
-        Vector, broadcast to ``out0``'s batch shape.
+    out0 : torch.Tensor
+        Accumulator, shape `(*B, C)`. Updated in place. It fixes the batch
+        shape of the call.
+    mat : torch.Tensor
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`, broadcast to
+        the batch shape of `out0`.
+    vec : torch.Tensor
+        Vectors, shape `(*B, C)`, broadcast to the batch shape of `out0`.
 
     Returns
     -------
-    out0 : `(*B, C) tensor`
-        The same tensor object, now holding ``out0 + mat @ vec``.
+    torch.Tensor
+        `out0` itself, now holding `out0 + mat @ vec`.
     """
     return _matvec_acc(out0, mat, vec, sub=False)
 
 
 def sym_submatvec_(out0: Tensor, mat: Tensor, vec: Tensor) -> Tensor:
-    """Accumulate ``out0 -= mat @ vec`` **in place**; returns ``out0``.
+    """Subtract a matrix-vector product in place: `out0 -= mat @ vec`.
 
-    The subtracting twin of :func:`sym_addmatvec_`; same contract.
+    The subtracting twin of
+    [`sym_addmatvec_`][fastfields.torch.sym_addmatvec_], with the same
+    contract.
+
+    Differentiable with respect to `out0` only. A backward pass that needs the
+    gradient with respect to `mat` or `vec` raises `RuntimeError`; use `out0 +
+    sym_matvec(mat, vec)` when you need those.
+
+    Parameters
+    ----------
+    out0 : torch.Tensor
+        Accumulator, shape `(*B, C)`. Updated in place. It fixes the batch
+        shape of the call.
+    mat : torch.Tensor
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`, broadcast to
+        the batch shape of `out0`.
+    vec : torch.Tensor
+        Vectors, shape `(*B, C)`, broadcast to the batch shape of `out0`.
+
+    Returns
+    -------
+    torch.Tensor
+        `out0` itself, now holding `out0 - mat @ vec`.
     """
     return _matvec_acc(out0, mat, vec, sub=True)
 
@@ -203,26 +230,40 @@ def sym_submatvec_(out0: Tensor, mat: Tensor, vec: Tensor) -> Tensor:
 def sym_solve(
     mat: Tensor, vec: Tensor, weight: Optional[Tensor] = None
 ) -> Tensor:
-    """Solve the symmetric system ``out = (mat + diag(weight)) \\ vec``.
+    """Solve compact-symmetric systems, optionally with a diagonal added.
 
-    Differentiable with respect to ``vec`` (and ``weight`` is treated as a
-    constant). As in ``jitfields``, the solve does **not** backpropagate
-    through ``mat``: pass a matrix that does not require grad (detach it).
-    See :func:`sym_solve_` for the in-place variant.
+    A compact-symmetric matrix with `C` channels is stored along the last axis
+    as `C*(C+1)//2` values: the diagonal first, then the rows of the upper
+    triangle. Vectors have a last axis of length `C`. Solves `(mat +
+    diag(weight)) x = vec` for `x`, voxel by voxel. Batch axes of all inputs
+    are broadcast against each other.
+
+    [`sym_solve_`][fastfields.torch.sym_solve_] is the in-place version.
+
+    Differentiable with respect to `vec` only; `weight` is treated as a
+    constant. The solve does not backpropagate through `mat`, which therefore
+    must not require grad: pass `mat.detach()`.
 
     Parameters
     ----------
-    mat : `(..., C*(C+1)//2) tensor`
-        Compact-symmetric matrix.
-    vec : `(..., C) tensor`
-        Right-hand side.
-    weight : `(..., C) tensor`, optional
-        Diagonal regularizer added to ``mat`` before solving.
+    mat : torch.Tensor
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`.
+    vec : torch.Tensor
+        Right-hand sides, shape `(*B, C)`.
+    weight : torch.Tensor, optional
+        Diagonal added to `mat` before solving, shape `(*B, C)`.
 
     Returns
     -------
-    out : `(..., C) tensor`
-        Solution of the linear system.
+    torch.Tensor
+        The solution `x`, shape `(*B, C)` with the broadcast batch shape.
+
+    Raises
+    ------
+    TypeError
+        If an argument is not float32 or float64.
+    ValueError
+        If `mat` requires grad.
     """
     check_dtype(mat, vec)
     if weight is not None:
@@ -247,42 +288,40 @@ def sym_solve(
 def sym_solve_(
     inp_out: Tensor, mat: Tensor, weight: Optional[Tensor] = None
 ) -> Tensor:
-    """In-place solve: ``inp_out <- (mat + diag(weight)) \\ inp_out``.
+    """Solve compact-symmetric linear systems in place.
 
-    Note the argument order -- ``inp_out`` first, then ``mat`` -- matches the
-    numpy/cupy ``sym_solve_`` convention, not :func:`sym_solve`'s
-    ``(mat, vec, ...)`` order.
+    Solves `(mat + diag(weight)) x = inp_out` for `x` and stores `x` in
+    `inp_out`. `inp_out` fixes the batch shape; `mat` and `weight` are
+    broadcast to it. Note that the right-hand side comes first, unlike in
+    [`sym_solve`][fastfields.torch.sym_solve].
 
-    Differentiable with respect to ``inp_out`` (mirrors :func:`sym_solve`);
-    ``weight`` is a constant and ``mat`` must not require grad (as in
-    :func:`sym_solve`). Safe under autograd: the backward of
-    :func:`sym_solve` never reads the pre-mutation right-hand side -- only
-    the saved ``mat``/``weight`` -- so overwriting ``inp_out`` in place
-    destroys no information backward needs (see ``API_CONTRACT.md``,
-    "In-place policy"). As with any in-place op, a leaf tensor with
-    ``requires_grad=True`` cannot be mutated (torch's ordinary leaf rule).
+    Differentiable with respect to `inp_out`, like
+    [`sym_solve`][fastfields.torch.sym_solve], whose backward pass never reads
+    the overwritten right-hand side. `weight` is a constant and `mat` must not
+    require grad. A leaf tensor that requires grad cannot be modified in place.
 
     Parameters
     ----------
-    inp_out : `(..., C) tensor`
-        Right-hand side on input, solution on output. Mutated in place and
-        returned; fixes the batch (leading) shape.
-    mat : `(..., C*(C+1)//2) tensor`
-        Compact-symmetric matrix, broadcast to ``inp_out``'s batch shape.
-        Must not require grad.
-    weight : `(..., C) tensor`, optional
-        Diagonal regularizer added to ``mat``, broadcast to ``inp_out``'s
-        batch shape.
+    inp_out : torch.Tensor
+        Right-hand sides, shape `(*B, C)`, on entry; the solutions on exit.
+    mat : torch.Tensor
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`, broadcast to
+        the batch shape of `inp_out`.
+    weight : torch.Tensor, optional
+        Diagonal added to `mat`, shape `(*B, C)`, broadcast to the batch
+        shape of `inp_out`.
 
     Returns
     -------
-    out : `(..., C) tensor`
-        ``inp_out`` (the same tensor object), now holding the solution.
+    torch.Tensor
+        `inp_out` itself, now holding the solution.
 
     Raises
     ------
     ValueError
-        If ``mat`` requires grad, or channel counts disagree.
+        If `mat` requires grad, or the channel counts disagree.
+    RuntimeError
+        If `inp_out` is a leaf tensor that requires grad.
     """
     check_dtype(mat, inp_out)
     check_inplace_leaf("sym_solve_", inp_out)
@@ -302,59 +341,64 @@ def sym_solve_(
 
 
 def sym_invert(mat: Tensor) -> Tensor:
-    """Invert a compact-symmetric matrix (``out = inv(mat)``).
+    """Invert compact-symmetric matrices.
 
-    Not differentiable -- calling ``.backward()`` through this raises
-    ``RuntimeError``. Forward still runs normally (including when ``mat``
-    requires grad); only an actual backward call fails. See
-    :func:`sym_invert_` for the in-place variant.
+    A compact-symmetric matrix with `C` channels is stored along the last axis
+    as `C*(C+1)//2` values: the diagonal first, then the rows of the upper
+    triangle. Vectors have a last axis of length `C`. The inverse is symmetric
+    too and is returned in the same packing.
+
+    [`sym_invert_`][fastfields.torch.sym_invert_] is the in-place version.
+
+    Not differentiable: the forward pass runs normally, even when an input
+    requires grad, but calling `.backward()` through the result raises
+    `RuntimeError`.
 
     Parameters
     ----------
-    mat : `(..., C*(C+1)//2) tensor`
-        Compact-symmetric matrix.
+    mat : torch.Tensor
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`.
 
     Returns
     -------
-    out : `(..., C*(C+1)//2) tensor`
-        The packed inverse, same shape as ``mat``.
+    torch.Tensor
+        The packed inverses, with the shape of `mat`.
 
     Raises
     ------
     RuntimeError
-        If ``.backward()`` is called through the output.
+        If `.backward()` is called through the result.
     """
     check_dtype(mat)
     return _Invert.apply(mat)
 
 
 def sym_invert_(mat: Tensor) -> Tensor:
-    """In-place invert a compact-symmetric matrix (``mat <- inv(mat)``).
+    """Invert compact-symmetric matrices in place.
 
-    Not differentiable -- calling ``.backward()`` through this raises
-    ``RuntimeError`` (mirrors :func:`sym_invert`: no gradient is implemented
-    for the packed inverse on this backend). That is an implementation gap
-    rather than a mathematical one -- the inverse is differentiable, and its
-    backward ``-B (dL/dB) B`` needs only ``B``, the value this op leaves
-    behind. As with any in-place op, a leaf tensor with
-    ``requires_grad=True`` cannot be mutated (torch's ordinary leaf rule);
-    that is checked before ``mat`` is touched, so the call raises without
-    corrupting it.
+    The inverse is symmetric too and replaces `mat` in the same packing.
+
+    Not differentiable: the forward pass runs normally, even when an input
+    requires grad, but calling `.backward()` through the result raises
+    `RuntimeError`. A leaf tensor that requires grad cannot be modified in
+    place; this is checked before `mat` is touched.
 
     Parameters
     ----------
-    mat : `(..., C*(C+1)//2) tensor`
-        Compact-symmetric matrix. Mutated in place and returned.
+    mat : torch.Tensor
+        Compact-symmetric matrices, shape `(*B, C*(C+1)//2)`, on entry;
+        their inverses on exit.
 
     Returns
     -------
-    out : `(..., C*(C+1)//2) tensor`
-        ``mat`` (the same tensor object), now holding its packed inverse.
+    torch.Tensor
+        `mat` itself, now holding the packed inverses.
 
     Raises
     ------
     RuntimeError
-        If ``.backward()`` is called through the output.
+        If `.backward()` is called through the result, or `mat` is a leaf
+        tensor that requires grad.
     """
     check_dtype(mat)
     check_inplace_leaf("sym_invert_", mat)
@@ -397,7 +441,7 @@ class _MatVecAcc(torch.autograd.Function):
     The gradient wrt the accumulator is the identity pass-through, so the
     useful case -- accumulating into a tensor that is itself part of a graph
     -- works. Gradients wrt ``mat``/``vec`` are *not* implemented here even
-    though :class:`_MatVec` has them: an in-place accumulate consumes
+    though `_MatVec` has them: an in-place accumulate consumes
     ``out0``'s storage, and plumbing the matvec adjoints through a
     ``mark_dirty`` node correctly (so that ``out0``'s own history and the
     matvec's contribution are both honoured) is a separate piece of work
@@ -408,7 +452,7 @@ class _MatVecAcc(torch.autograd.Function):
 
     Not a mathematical obstruction: for ``y = out0 +/- M v`` the gradients are
     ``dL/dout0 = g``, ``dL/dv = +/- M g`` (M self-adjoint) and ``dL/dM`` the
-    usual outer product, i.e. exactly what :class:`_MatVec` already computes.
+    usual outer product, i.e. exactly what `_MatVec` already computes.
     The out-of-place spelling is ``out0 +/- sym_matvec(mat, vec)``, which is
     fully differentiable today.
     """
@@ -479,7 +523,7 @@ class _Solve(torch.autograd.Function):
 class _SolveInPlace(torch.autograd.Function):
     """``inp_out <- (mat + diag(weight)) \\ inp_out`` in place.
 
-    Autograd-safe: the backward below is identical to :class:`_Solve`'s and
+    Autograd-safe: the backward below is identical to `_Solve`'s and
     never reads the pre-mutation ``inp_out`` -- only the saved ``mat``/
     ``weight`` -- so mutating ``inp_out`` in place loses nothing backward
     needs. ``ctx.mark_dirty(inp_out)`` bumps its version counter so that if

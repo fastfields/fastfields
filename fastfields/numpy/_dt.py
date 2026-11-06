@@ -1,6 +1,6 @@
-"""Distance-transform wrappers (numpy).
+"""Distance-transform wrappers for NumPy.
 
-Euclidean / L1 distance transforms along the last axis, plus point-to-spline
+Euclidean and L1 distance transforms along the last axis, and point-to-spline
 and point-to-mesh distances.
 """
 
@@ -44,20 +44,28 @@ __all__ = [
 
 
 def dt_euclidean(inp: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
-    """Squared Euclidean distance transform along the **last** axis.
+    """Squared Euclidean distance transform along the last axis.
+
+    The input marks the features with `0` and everything else with `+inf`. Each
+    position of the result holds the squared distance to the nearest feature in
+    the same row along the last axis, in units set by `voxel_spacing`. Only the
+    last axis is transformed.
+
+    [`dt_euclidean_`][fastfields.numpy.dt_euclidean_] is the in-place version,
+    which overwrites its input.
 
     Parameters
     ----------
     inp : numpy.ndarray
-        Input holding ``0`` at feature locations and ``+inf`` elsewhere.
+        Features are `0`, background is `+inf`. Arrays that are not float32
+        or float64 are converted to float64.
     voxel_spacing : float, default=1.0
-        Physical spacing between samples along the last axis.
+        Physical distance between neighbouring samples along the last axis.
 
     Returns
     -------
     numpy.ndarray
-        The distance transform, a newly allocated array; ``inp`` is left
-        untouched. See :func:`dt_euclidean_` for the in-place variant.
+        The distance transform, a new array the shape of `inp`.
     """
     out = _as_float_array(inp, "inp", copy=True)
     _ff.dt_euclidean(out, float(voxel_spacing))
@@ -67,22 +75,33 @@ def dt_euclidean(inp: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
 def dt_euclidean_(
     inp_out: np.ndarray, voxel_spacing: float = 1.0
 ) -> np.ndarray:
-    """In-place squared Euclidean distance transform along the **last** axis.
+    """Squared Euclidean distance transform along the last axis, in place.
+
+    The input marks the features with `0` and everything else with `+inf`. Each
+    position of the result holds the squared distance to the nearest feature in
+    the same row along the last axis, in units set by `voxel_spacing`. Only the
+    last axis is transformed.
+
+    [`dt_euclidean`][fastfields.numpy.dt_euclidean] is the version that returns
+    a new array and leaves its input untouched.
 
     Parameters
     ----------
     inp_out : numpy.ndarray
-        Input holding ``0`` at feature locations and ``+inf`` elsewhere.
-        Must be a float32/float64 array; mutated in place and returned. Any
-        memory layout is fine -- the write is zero-copy via DLPack strides.
+        Features are `0`, background is `+inf`. Must be float32 or float64.
+        Overwritten with the result.
     voxel_spacing : float, default=1.0
-        Physical spacing between samples along the last axis.
+        Physical distance between neighbouring samples along the last axis.
 
     Returns
     -------
     numpy.ndarray
-        ``inp_out`` (the same array object), now holding the distance
-        transform.
+        `inp_out` itself, now holding the distance transform.
+
+    Raises
+    ------
+    TypeError
+        If `inp_out` is not a float32 or float64 NumPy array.
     """
     _validate_inplace(inp_out, "inp_out")
     _ff.dt_euclidean(inp_out, float(voxel_spacing))
@@ -90,23 +109,28 @@ def dt_euclidean_(
 
 
 def dt_l1(inp: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
-    """L1 distance transform along the **last** axis.
+    """L1 distance transform along the last axis.
 
-    See :func:`dt_euclidean` for the input convention and the meaning of the
-    parameters.
+    The input marks the features with `0` and everything else with `+inf`. Each
+    position of the result holds the distance to the nearest feature in the
+    same row along the last axis, in units set by `voxel_spacing`. Only the
+    last axis is transformed.
+
+    [`dt_l1_`][fastfields.numpy.dt_l1_] is the in-place version, which
+    overwrites its input.
 
     Parameters
     ----------
     inp : numpy.ndarray
-        Input holding ``0`` at feature locations and ``+inf`` elsewhere.
+        Features are `0`, background is `+inf`. Arrays that are not float32
+        or float64 are converted to float64.
     voxel_spacing : float, default=1.0
-        Physical spacing between samples along the last axis.
+        Physical distance between neighbouring samples along the last axis.
 
     Returns
     -------
     numpy.ndarray
-        The distance transform, a newly allocated array; ``inp`` is left
-        untouched. See :func:`dt_l1_` for the in-place variant.
+        The distance transform, a new array the shape of `inp`.
     """
     out = _as_float_array(inp, "inp", copy=True)
     _ff.dt_l1(out, float(voxel_spacing))
@@ -114,21 +138,33 @@ def dt_l1(inp: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
 
 
 def dt_l1_(inp_out: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
-    """In-place L1 distance transform along the **last** axis.
+    """L1 distance transform along the last axis, in place.
+
+    The input marks the features with `0` and everything else with `+inf`. Each
+    position of the result holds the distance to the nearest feature in the
+    same row along the last axis, in units set by `voxel_spacing`. Only the
+    last axis is transformed.
+
+    [`dt_l1`][fastfields.numpy.dt_l1] is the version that returns a new array
+    and leaves its input untouched.
 
     Parameters
     ----------
     inp_out : numpy.ndarray
-        Input holding ``0`` at feature locations and ``+inf`` elsewhere.
-        Must be a float32/float64 array; mutated in place and returned.
+        Features are `0`, background is `+inf`. Must be float32 or float64.
+        Overwritten with the result.
     voxel_spacing : float, default=1.0
-        Physical spacing between samples along the last axis.
+        Physical distance between neighbouring samples along the last axis.
 
     Returns
     -------
     numpy.ndarray
-        ``inp_out`` (the same array object), now holding the distance
-        transform.
+        `inp_out` itself, now holding the distance transform.
+
+    Raises
+    ------
+    TypeError
+        If `inp_out` is not a float32 or float64 NumPy array.
     """
     _validate_inplace(inp_out, "inp_out")
     _ff.dt_l1(inp_out, float(voxel_spacing))
@@ -153,32 +189,44 @@ def dt_spline_table(
     order: int | str = 3,
     bound: int | str = "dct2",
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Point-to-spline (squared) distance via a dictionary of candidate times.
+    """Squared distance from points to a spline, over candidate parameters.
+
+    The curve is a spline with `N` coefficients in `D` dimensions. For each
+    query point the closest point of the curve is searched for. The result is
+    the pair ``(dist, time)``: the squared distance and the curve parameter at
+    which it is attained. Batch axes of all inputs are broadcast against each
+    other.
+
+    The closest point is the best of the candidate parameters in `times`, so
+    the accuracy is limited by how finely they sample the curve.
+    [`dt_spline_brent`][fastfields.numpy.dt_spline_brent] and
+    [`dt_spline_gaussnewton`][fastfields.numpy.dt_spline_gaussnewton] refine
+    the parameter iteratively instead.
 
     Parameters
     ----------
     loc : numpy.ndarray
-        Query points, shape ``(*B, D)``.
+        Query points, shape `(*B, D)`.
     coeff : numpy.ndarray
-        Spline coefficients, shape ``(*B, N, D)``.
+        Spline coefficients of the curve, shape `(*B, N, D)`: `N`
+        coefficients, each a `D`-dimensional vector.
     times : numpy.ndarray
-        Candidate times, shape ``(*B, K)``.
+        Candidate curve parameters to try, shape `(*B, K)`.
     order : int or str, default=3
-        Spline order.
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition.
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
 
     Returns
     -------
     dist : numpy.ndarray
-        Squared distance per query point, shape ``(*B,)``.
+        Squared distance from each query point to the curve, shape `(*B,)`.
     time : numpy.ndarray
-        Best time per query point, shape ``(*B,)``.
-
-    Notes
-    -----
-    Batch dims of ``loc``/``coeff``/``times`` (core dims ``(D,)``, ``(N, D)``,
-    ``(K,)``) are broadcast; outputs use the broadcast batch shape.
+        Curve parameter of the closest point found, shape `(*B,)`.
     """
     loc = _as_float_array(loc, "loc")
     coeff = _as_float_array(coeff, "coeff", dtype=loc.dtype)
@@ -210,36 +258,49 @@ def dt_spline_brent(
     order: int | str = 3,
     bound: int | str = "dct2",
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Point-to-spline (squared) distance via Brent's method.
+    """Squared distance from points to a spline, refined with Brent's method.
+
+    The curve is a spline with `N` coefficients in `D` dimensions. For each
+    query point the closest point of the curve is searched for. The result is
+    the pair ``(dist, time)``: the squared distance and the curve parameter at
+    which it is attained. Batch axes of all inputs are broadcast against each
+    other.
+
+    The curve parameter is refined by Brent's method, which needs a bracket
+    around the optimum; `step` sets how wide the initial one is.
+    [`dt_spline_table`][fastfields.numpy.dt_spline_table] and
+    [`dt_spline_gaussnewton`][fastfields.numpy.dt_spline_gaussnewton] are the
+    alternatives.
 
     Parameters
     ----------
     loc : numpy.ndarray
-        Query points, shape ``(*B, D)``.
+        Query points, shape `(*B, D)`.
     coeff : numpy.ndarray
-        Spline coefficients, shape ``(*B, N, D)``.
+        Spline coefficients of the curve, shape `(*B, N, D)`: `N`
+        coefficients, each a `D`-dimensional vector.
     max_iter : int, default=64
-        Maximum number of Brent iterations.
-    tol : float, default=1e-6
+        Maximum number of iterations.
+    tol : float, default=1e-06
         Convergence tolerance.
     step : float, default=0.1
-        Initial bracketing step.
+        Initial bracketing step; it must be wide enough to bracket the
+        optimum.
     order : int or str, default=3
-        Spline order.
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition.
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
 
     Returns
     -------
     dist : numpy.ndarray
-        Squared distance per query point, shape ``(*B,)``.
+        Squared distance from each query point to the curve, shape `(*B,)`.
     time : numpy.ndarray
-        Best time per query point, shape ``(*B,)``.
-
-    Notes
-    -----
-    Batch dims of ``loc`` (core ``(D,)``) and ``coeff`` (core ``(N, D)``) are
-    broadcast together.
+        Curve parameter of the closest point found, shape `(*B,)`.
     """
     loc = _as_float_array(loc, "loc")
     coeff = _as_float_array(coeff, "coeff", dtype=loc.dtype)
@@ -269,34 +330,44 @@ def dt_spline_gaussnewton(
     order: int | str = 3,
     bound: int | str = "dct2",
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Point-to-spline (squared) distance via Gauss-Newton.
+    """Squared distance from points to a spline, refined with Gauss-Newton.
+
+    The curve is a spline with `N` coefficients in `D` dimensions. For each
+    query point the closest point of the curve is searched for. The result is
+    the pair ``(dist, time)``: the squared distance and the curve parameter at
+    which it is attained. Batch axes of all inputs are broadcast against each
+    other.
+
+    The curve parameter is refined by Gauss-Newton iterations.
+    [`dt_spline_table`][fastfields.numpy.dt_spline_table] and
+    [`dt_spline_brent`][fastfields.numpy.dt_spline_brent] are the alternatives.
 
     Parameters
     ----------
     loc : numpy.ndarray
-        Query points, shape ``(*B, D)``.
+        Query points, shape `(*B, D)`.
     coeff : numpy.ndarray
-        Spline coefficients, shape ``(*B, N, D)``.
+        Spline coefficients of the curve, shape `(*B, N, D)`: `N`
+        coefficients, each a `D`-dimensional vector.
     max_iter : int, default=64
-        Maximum number of Gauss-Newton iterations.
-    tol : float, default=1e-6
+        Maximum number of iterations.
+    tol : float, default=1e-06
         Convergence tolerance.
     order : int or str, default=3
-        Spline order.
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
     bound : int or str, default="dct2"
-        Boundary condition.
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
 
     Returns
     -------
     dist : numpy.ndarray
-        Squared distance per query point, shape ``(*B,)``.
+        Squared distance from each query point to the curve, shape `(*B,)`.
     time : numpy.ndarray
-        Best time per query point, shape ``(*B,)``.
-
-    Notes
-    -----
-    Batch dims of ``loc`` (core ``(D,)``) and ``coeff`` (core ``(N, D)``) are
-    broadcast together.
+        Curve parameter of the closest point found, shape `(*B,)`.
     """
     loc = _as_float_array(loc, "loc")
     coeff = _as_float_array(coeff, "coeff", dtype=loc.dtype)
@@ -324,50 +395,46 @@ def dt_mesh(
     naive: bool = False,
     return_nearest: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
-    """Point-to-triangular-mesh (squared) distance.
+    """Distance from points to a triangular mesh.
 
-    ``signed``/``naive``/``return_nearest`` are positional-or-keyword (not
-    keyword-only) to match the torch and cupy wrappers -- an earlier revision
-    made them keyword-only here only, which meant a positional call worked on
-    two backends and raised a ``TypeError`` on the third. See fastfields#4.
+    A single mesh is queried by any number of points: only `loc` has batch
+    axes, and the result has shape `loc.shape[:-1]`. `vertices` and `faces` are
+    not broadcast against that batch and must be exactly two-dimensional.
+
+    The distance is the plain Euclidean point-to-triangle distance, not
+    squared, unlike the point-to-spline distances. With `signed=True` it is
+    negative inside the surface.
 
     Parameters
     ----------
     loc : numpy.ndarray
-        Query points, shape ``(*B, D)``.
+        Query points, shape `(*B, D)`.
     vertices : numpy.ndarray
-        Mesh vertices, shape ``(N, D)``.
+        Mesh vertices, shape `(V, D)`.
     faces : numpy.ndarray
-        Triangle vertex indices, shape ``(M, D)`` (cast to int64).
+        Triangles as indices into `vertices`, shape `(F, D)`. Converted to
+        int64.
     signed : bool, default=True
-        Return signed distances.
+        Return signed distances, negative inside the surface.
     naive : bool, default=False
-        Use the naive (brute-force) algorithm.
+        Use the brute-force algorithm instead of the acceleration
+        structure.
     return_nearest : bool, default=False
-        Also return the nearest-vertex index per query point.
+        Also return the index of the nearest mesh vertex for every query
+        point.
 
     Returns
     -------
     dist : numpy.ndarray
-        (Squared) distance per query point, shape ``(*B,)``.
-    nearest : numpy.ndarray, optional
-        Nearest-vertex index per query point, only if ``return_nearest`` is
-        ``True``.
+        Distance from each query point to the mesh, shape `(*B,)`.
+    nearest : numpy.ndarray
+        Index of the vertex nearest to each query point, shape `(*B,)`,
+        int64. Returned only if `return_nearest` is true.
 
     Raises
     ------
     ValueError
-        If ``vertices`` or ``faces`` is not 2D.
-
-    Notes
-    -----
-    A **single** mesh is queried by an arbitrarily batched point set: only
-    ``loc`` carries batch dims, and the outputs take ``loc.shape[:-1]``. The
-    mesh operands are *not* broadcast against that batch -- ``vertices`` and
-    ``faces`` must be exactly ``(N, D)`` / ``(M, D)``, matching jitfields'
-    ``mesh_distance`` and the ``ff::dt_mesh`` contract. (An earlier revision
-    broadcast them to ``(*B, N, D)``, which the binding rejects outright; see
-    fastfields#32.)
+        If `vertices` or `faces` is not two-dimensional.
     """
     loc = _as_float_array(loc, "loc")
     vertices = _as_float_array(vertices, "vertices", dtype=loc.dtype)

@@ -1,28 +1,14 @@
-"""Spline-interpolation gather / scatter (pushpull) — torch.
+"""Spline sampling (pushpull) for PyTorch, with autograd.
 
-Channel-last, x-first coordinate convention (spatial rank ``D`` = ``grid``'s
-trailing axis; ``B`` leading batch dims):
+The same layout as `fastfields.numpy`: coordinates in voxels, channels last, x
+first, with `D` read from the last axis of `grid`.
 
-* ``inp``  : ``(*B, *inshape,  C)``   — the volume (spline coefficients)
-* ``grid`` : ``(*B, *outshape, D)``   — sampling coordinates, in voxels
-
-``pull`` and ``push`` are differentiable with respect to **both** the field and
-the ``grid``: differentiating through the sample positions is what makes them
-usable inside a learned deformation / registration model.
-
-``count`` is differentiable with respect to ``grid`` (its only input) and
-``grad`` with respect to both ``inp`` and ``grid`` -- via the hub's
-``count_backward`` / ``grad_backward`` adjoints, which this module had been
-leaving on the table. ``grad`` is already a derivative operator, so
-differentiating *it* gives second-order terms; that is exactly what a
-registration model computing an image gradient inside its loss needs, and
-``grad_backward`` is the kernel for it.
-
-Every one of the four operators is therefore differentiable here, and all
-four pushpull adjoints in ``fastfields.dlpack`` now have a user. The ``abs``
-flag of ``grad`` is the one caveat: it replaces the signed spline derivative
-by its absolute value (a majorisation trick), and ``grad_backward`` must be
-called with the same flag -- these wrappers do that for you.
+All four operators are differentiable. `pull` and `push` are differentiable
+with respect to the field and to `grid`; differentiating through the sample
+positions is what makes them usable in a learned deformation model. `count` is
+differentiable with respect to `grid`, its only input, and `grad` with respect
+to both. The backward passes are the hub's `*_backward` adjoints, and the
+`abs` flag of `grad` is forwarded to them.
 """
 
 from __future__ import annotations
@@ -299,9 +285,44 @@ def pull(
     *,
     extrapolate: int = 1,
 ) -> Tensor:
-    """Sample (pull) ``inp`` at ``grid``.
+    """Sample a spline volume at arbitrary coordinates (gather).
 
-    Differentiable wrt ``inp`` and ``grid``.
+    Coordinates are in voxels, channels come last and the first coordinate is
+    x. For a spatial rank `D` of 1, 2 or 3 and any number of leading batch axes
+    `B`, the volume `inp` is `(*B, *inshape, C)` and the coordinates `grid` are
+    `(*B, *outshape, D)`; `D` is read from the last axis of `grid`.
+
+    `inp` holds spline coefficients, which
+    [`spline_coeff`][fastfields.torch.spline_coeff] computes from samples.
+    [`push`][fastfields.torch.push] is the adjoint operation.
+
+    Differentiable with respect to both `inp` and `grid`, which is what makes
+    it usable inside a learned deformation model.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Volume of spline coefficients, shape `(*B, *inshape, C)`.
+    grid : torch.Tensor
+        Sampling coordinates in voxels, x first, shape `(*B, *outshape,
+        D)`. `D` is the spatial rank (1, 2 or 3) and `grid` must have the
+        same number of axes as `inp`.
+    order : int or str, default=2
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    extrapolate : int, default=1
+        How far outside the field of view samples still count: `1` always,
+        `0` not past the voxel centres, `-1` not past the voxel edges.
+
+    Returns
+    -------
+    torch.Tensor
+        The sampled values, shape `(*B, *outshape, C)`.
     """
     check_dtype(inp, grid)
     if grid.ndim != inp.ndim:
@@ -320,9 +341,48 @@ def push(
     *,
     extrapolate: int = 1,
 ) -> Tensor:
-    """Splat (push) ``inp`` into a volume of spatial size ``shape``.
+    """Splat values into a spline volume (scatter).
 
-    Adjoint of :func:`pull`; differentiable wrt ``inp`` and ``grid``.
+    Coordinates are in voxels, channels come last and the first coordinate is
+    x. For a spatial rank `D` of 1, 2 or 3 and any number of leading batch axes
+    `B`, the volume `inp` is `(*B, *inshape, C)` and the coordinates `grid` are
+    `(*B, *outshape, D)`; `D` is read from the last axis of `grid`. Here `inp`
+    holds one value per coordinate, `(*B, *outshape, C)`, and the result is a
+    volume `(*B, *shape, C)`.
+
+    The adjoint of [`pull`][fastfields.torch.pull]. Values landing on the same
+    voxel are summed; the result starts from zero.
+
+    Differentiable with respect to both `inp` and `grid`.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Values to splat, shape `(*B, *outshape, C)`, one per coordinate in
+        `grid`.
+    grid : torch.Tensor
+        Sampling coordinates in voxels, x first, shape `(*B, *outshape,
+        D)`. `D` is the spatial rank (1, 2 or 3) and `grid` must have the
+        same number of axes as `inp`.
+    shape : int or sequence of int
+        Spatial size of the target volume, one value per spatial axis or a
+        single value for all.
+    order : int or str, default=2
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    extrapolate : int, default=1
+        How far outside the field of view samples still count: `1` always,
+        `0` not past the voxel centres, `-1` not past the voxel edges.
+
+    Returns
+    -------
+    torch.Tensor
+        The volume, shape `(*B, *shape, C)`.
     """
     check_dtype(inp, grid)
     if grid.ndim != inp.ndim:
@@ -341,10 +401,41 @@ def count(
     *,
     extrapolate: int = 1,
 ) -> Tensor:
-    """Splat ones into a volume of spatial size ``shape``.
+    """Splat ones into a volume: how many samples land on each voxel.
 
-    ``push`` of an all-ones input: the weight each voxel receives from the
-    sampling pattern. Differentiable wrt ``grid``.
+    Coordinates are in voxels, channels come last and the first coordinate is
+    x. The coordinates `grid` are `(*B, *outshape, D)`; `D` is read from their
+    last axis.
+
+    Equivalent to [`push`][fastfields.torch.push] of an all-ones input: the
+    weight each voxel receives from the sampling pattern.
+
+    Differentiable with respect to `grid`, its only input.
+
+    Parameters
+    ----------
+    grid : torch.Tensor
+        Sampling coordinates in voxels, x first, shape `(*B, *outshape,
+        D)`; `D` is the spatial rank (1, 2 or 3).
+    shape : int or sequence of int
+        Spatial size of the target volume, one value per spatial axis or a
+        single value for all.
+    order : int or str, default=2
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    extrapolate : int, default=1
+        How far outside the field of view samples still count: `1` always,
+        `0` not past the voxel centres, `-1` not past the voxel edges.
+
+    Returns
+    -------
+    torch.Tensor
+        The weights, shape `(*B, *shape, 1)`.
     """
     check_dtype(grid)
     spatial = _spatial(shape, grid.shape[-1])
@@ -362,18 +453,53 @@ def grad(
     extrapolate: int = 1,
     abs: bool = False,
 ) -> Tensor:
-    """Sample spatial gradients of ``inp`` at ``grid`` -> ``(*B,*out,C,D)``.
+    """Sample the spatial gradient of a spline volume at arbitrary coordinates.
 
-    Differentiable wrt ``inp`` and ``grid``. ``grad`` is itself a derivative
-    operator, so its adjoint contributes second-order terms -- which is the
-    point: an image gradient computed inside a loss has to be
-    differentiable for the deformation that produced ``grid`` to be learnable.
+    Coordinates are in voxels, channels come last and the first coordinate is
+    x. For a spatial rank `D` of 1, 2 or 3 and any number of leading batch axes
+    `B`, the volume `inp` is `(*B, *inshape, C)` and the coordinates `grid` are
+    `(*B, *outshape, D)`; `D` is read from the last axis of `grid`. The result
+    holds, for every coordinate and channel, the vector of the `D` spatial
+    derivatives.
 
-    ``abs`` replaces the signed spline derivative by its absolute value (a
-    majorisation trick); the backward pass is run with the same flag. Note
-    that with ``abs=True`` the backward is the adjoint of the *majorised*
-    operator, which is deliberately not the Jacobian of the forward map --
-    use it as the majorisation it is, not as a gradient to validate.
+    With `abs=True` the absolute value of each spline derivative is used
+    instead of its signed value.
+
+    Differentiable with respect to both `inp` and `grid`. Because `grad` is
+    itself a derivative operator, differentiating it yields second-order terms;
+    that is what lets an image gradient computed inside a loss train the
+    deformation that produced `grid`.
+
+    With `abs=True` the backward pass is the adjoint of the absolute-value
+    operator, which is a majorisation and deliberately not the Jacobian of the
+    forward map.
+
+    Parameters
+    ----------
+    inp : torch.Tensor
+        Volume of spline coefficients, shape `(*B, *inshape, C)`.
+    grid : torch.Tensor
+        Sampling coordinates in voxels, x first, shape `(*B, *outshape,
+        D)`. `D` is the spatial rank (1, 2 or 3) and `grid` must have the
+        same number of axes as `inp`.
+    order : int or str, default=2
+        Spline order: an integer from 0 to 7, a
+        [`Spline`][fastfields.helpers.Spline] member, or a name such as
+        `"cubic"`.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    extrapolate : int, default=1
+        How far outside the field of view samples still count: `1` always,
+        `0` not past the voxel centres, `-1` not past the voxel edges.
+    abs : bool, default=False
+        Take the absolute value of each spline derivative.
+
+    Returns
+    -------
+    torch.Tensor
+        The gradients, shape `(*B, *outshape, C, D)`.
     """
     check_dtype(inp, grid)
     if grid.ndim != inp.ndim:

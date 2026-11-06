@@ -1,29 +1,16 @@
-"""Backend-dispatching regulariser wrappers (fastfields.auto).
+"""Dispatchers for the spatial regularisers.
 
-Operators that take a field/matrix as their first array argument are dispatched
-here (``field_matvec``, ``flow_matvec`` and its ``_add``/``_sub``/in-place
-accumulate forms, ``flow_diag`` accumulate forms, ``field_relax`` /
-``flow_relax``, ``flow_precond``, ``flow_forward``) — the backend is
-unambiguous from that array. The plain ``*_diag`` / ``flow_kernel`` builders
-allocate from a *shape* (no array to dispatch on); call them on a concrete
-backend (``fastfields.numpy`` / ``.torch`` / ``.cupy``) directly.
+An operator is dispatched when its first argument is an array, which is the
+case for `field_matvec` and `flow_matvec`, their accumulate forms, the
+relaxation and preconditioning operators, the weighted `*_rls` variants and
+the `*_addkernel` and `*_subkernel` accumulators. The builders `field_diag`,
+`flow_diag`, `field_kernel` and `flow_kernel` take a shape or a rank and
+penalty weights instead, so there is nothing to dispatch on; call them on a
+concrete backend.
 
-The RLS/JRLS-weighted variants (``{field,flow}_matvec_rls``,
-``{field,flow}_relax_rls`` and ``{field,flow}_diag_rls``) all take a real
-``wgt`` array as an argument -- unlike the plain ``*_diag`` builders,
-``field_diag_rls``/``flow_diag_rls`` *are* dispatchable here (their first
-argument is ``wgt``, not a shape).
-
-The ``*_addkernel`` / ``*_subkernel`` accumulate forms take the stencil array
-as their first argument, so they dispatch here too; the ``*_kernel``
-*builders* they accumulate over do not, for the same reason ``*_diag`` does
-not -- they are given a rank and penalty weights, not an array.
-
-Not every operator exists on every backend. Those are in :data:`_PARTIAL`
-with the reason, and a call that lands on a backend without one raises
-``NotImplementedError`` naming the backends that do have it -- rather than
-being silently missing from this module, which would make the omission
-invisible from here.
+Not every operator exists on every backend. Those that do not are listed in
+`_PARTIAL` with the reason, and a call that lands on a backend without one
+raises `NotImplementedError` naming the backends that have it.
 """
 
 from __future__ import annotations

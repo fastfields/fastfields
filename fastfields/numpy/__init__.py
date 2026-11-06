@@ -1,57 +1,50 @@
-"""fastfields.numpy: a friendly numpy interface over ``fastfields.dlpack``.
+"""NumPy interface to the fastfields operators.
 
-The underlying bindings operate *in place* / write through pre-allocated output
-arrays. This package wraps them so every public function takes numpy arrays and
-**returns** freshly allocated numpy arrays, never clobbering the caller's
-input -- unless it is one of the trailing-underscore (``_``) variants, e.g.
-``dt_euclidean_``/``sym_solve_``/``spline_coeff_``, which mutate their first
-argument in place and return it. This mirrors the cupy backend's convention
-exactly (``fastfields.cupy``'s docstring: "Trailing-underscore wrappers ...
-operate in place"); torch omits the in-place spelling for ops whose backward
-would need the pre-mutation value (see ``API_CONTRACT.md``, "In-place
-policy").
+Every function takes NumPy arrays and returns newly allocated NumPy arrays; its
+inputs are never modified. The exceptions are the functions whose name ends in
+an underscore, such as `dt_euclidean_`, `sym_solve_` and `spline_coeff_`: they
+update their first argument in place and return it. `fastfields.cupy` follows
+the same rule, while `fastfields.torch` leaves out the in-place spelling of
+operations whose backward pass would need the value being overwritten (see
+`API_CONTRACT.md`, "In-place policy").
 
-Batch (leading) dimensions are **broadcast**: the raw bindings require every
-input tensor of an op to share the same batch dims (they do not broadcast), so
-these wrappers normalise inputs to a common broadcast batch shape and allocate
-outputs with that shape. The broadcast is done **zero-copy**: each input is
-re-strided to the target batch shape with 0-strides on the broadcast axes (a
-view that shares memory with the original), which the stride-aware C++ library
-consumes directly without any copy. Returned outputs therefore carry the
-broadcast batch shape.
+The operations fall into five groups: distance transforms (`dt_*`), linear
+algebra on fields of small symmetric matrices (`sym_*`), spline resampling and
+prefiltering (`resample`, `restriction`, `spline_coeff`), spline sampling
+(`pull`, `push`, `count`, `grad`) and spatial regularisers (`field_*` and
+`flow_*`). A *field* is a multi-channel image with any number of channels. A
+*flow* is a vector field with one component per spatial dimension.
 
-Read-only inputs are likewise passed with their native strides (no contiguous
-copy is forced); only freshly allocated outputs and in-place (``_``-suffixed)
-buffers are materialised as contiguous arrays.
+**Batch axes are broadcast.** The compiled library wants every input of an
+operation to have the same batch shape, so the wrappers first expand each
+input to the common one. The expansion gives the broadcast axes a stride of
+zero, which makes it a view of the original memory: nothing is copied. Outputs
+carry the broadcast batch shape.
 
-Spline order and boundary condition arguments accept an ``int``, one of the
-re-exported :class:`Spline` / :class:`Bound` enums, or a friendly string
-(e.g. ``"cubic"``, ``"dct2"``).
+**Inputs are not copied if it can be avoided.** They are passed with their own
+strides, contiguous or not. The exceptions are read-only arrays, which NumPy
+cannot export through DLPack and which are therefore copied, and arrays of a
+dtype other than float32 or float64, which are converted to float64. The
+in-place functions never convert; they raise `TypeError` instead.
 
-The implementation is split by category into :mod:`._util` (validation and
-batch-broadcast helpers), :mod:`._dt` (distance transforms), :mod:`._sym`
-(compact-symmetric linear algebra), :mod:`._resample` (spline coefficients
-and resampling), :mod:`._pushpull` (spline gather/scatter) and :mod:`._reg`
-(spatial regularisers).
+**Spline orders and boundary conditions** are chosen with `order` and `bound`.
+Either accepts an integer, a `Spline` or `Bound` member, or a name such as
+`"cubic"` or `"dct2"`.
 
-What this wrapper deliberately does not expose
-----------------------------------------------
-Of the 58 public operations of the C++ hub, this package wraps all but four.
-``tools/api_inventory.py`` in ``fastfields-dlpack`` prints the full matrix;
-the omissions are:
+!!! note "What this wrapper deliberately does not expose"
+    Of the 58 public operations of the C++ hub, this package wraps all but
+    four: `pull_backward`, `push_backward`, `count_backward` and
+    `grad_backward`. They are the adjoints of the sampling operators with
+    respect to both the sampled field and the sampling coordinates, and they
+    exist so that an autograd engine can differentiate through `grid`. Only
+    `fastfields.torch` has one. A wrapper here would be a function that
+    nothing calls, with several pre-zeroed buffers for the caller to get
+    right. They remain available through the raw bindings, as
+    `fastfields.dlpack.pull_backward(...)` and so on.
 
-``pull_backward``, ``push_backward``, ``count_backward``, ``grad_backward``
-    The adjoints of the pushpull operators, with respect to both the sampled
-    field and the sampling coordinates. They exist so that an autograd engine
-    can differentiate through ``grid``, which only :mod:`fastfields.torch`
-    has; there is no automatic differentiation on numpy, so a wrapper here
-    would be a bare function nothing calls, with five pre-zeroed buffers for
-    the caller to get right. They stay reachable through the raw bindings --
-    ``fastfields.dlpack.pull_backward(...)`` and friends -- which is the
-    honest layer for them.
-
-This is checked rather than asserted: ``tests/test_api_coverage.py`` fails if
-the set of operations this package omits ever differs from the list above.
+    `tests/test_api_coverage_numpy.py` fails if the set of omitted operations
+    ever changes by accident, and `tools/api_inventory.py` in
+    `fastfields-dlpack` prints the full matrix.
 """
 
 from __future__ import annotations

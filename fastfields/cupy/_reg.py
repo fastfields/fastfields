@@ -1,11 +1,7 @@
-"""Spatial regularisers — cupy.
+"""Spatial regularisers for CuPy.
 
-* **field** — multi-channel field ``(*batch, *spatial, C)``; per-channel
-  ``absolute`` / ``membrane`` / ``bending`` (a scalar broadcasts to ``C``).
-* **flow** — vector flow field; scalar penalties.
-
-Signatures match the numpy/torch wrappers so ``fastfields.auto`` dispatches
-consistently.
+The same `field_*` and `flow_*` families as `fastfields.numpy`, with matching
+signatures so that `fastfields.auto` can dispatch to either.
 """
 
 from __future__ import annotations
@@ -323,7 +319,55 @@ def field_matvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Apply the field regulariser (same shape as ``inp``)."""
+    """Apply the field regulariser to a multi-channel field.
+
+    Computes `L @ inp` for the field regulariser `L`, the sum of the requested
+    penalties. Each penalty is given per channel and the regulariser never
+    couples channels. The highest-order penalty that is set decides the
+    finite-difference stencil.
+
+    With unit voxels and only `absolute`, the operator scales each channel by
+    its weight; with only `membrane` it is the discrete negative Laplacian.
+
+    The `*_addmatvec`, `*_submatvec` and `*_rls` families accumulate or
+    reweight this operator.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        The field to filter, shape `(*batch, *spatial, C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `L @ inp`, a new array the shape of `inp`.
+
+    Raises
+    ------
+    TypeError
+        If `inp` is not a float32 or float64 CuPy array.
+    """
     cp = cupy()
     inp = as_gpu_array(inp, name="inp")
     channels = inp.shape[-1]
@@ -354,10 +398,55 @@ def flow_matvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Apply the flow regulariser (scalar penalties; same shape as ``inp``).
+    """Apply the flow regulariser to a vector flow field.
 
-    ``shears`` (Lamé mu) and ``div`` (Lamé lambda) add the linear-elastic
-    penalty coupling the flow channels.
+    Computes `L @ inp` for the flow regulariser `L`, the sum of the requested
+    penalties. The penalties are scalars. A non-zero `shears` or `div` adds the
+    linear-elastic terms, which couple the flow components. The highest-order
+    penalty that is set decides the finite-difference stencil.
+
+    With unit voxels and only `absolute`, the operator scales each channel by
+    its weight; with only `membrane` it is the discrete negative Laplacian.
+
+    The `*_addmatvec`, `*_submatvec` and `*_rls` families accumulate or
+    reweight this operator.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        The flow to filter, shape `(*batch, *spatial, ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `L @ inp`, a new array the shape of `inp`.
+
+    Raises
+    ------
+    TypeError
+        If `inp` is not a float32 or float64 CuPy array.
     """
     cp = cupy()
     inp = as_gpu_array(inp, name="inp")
@@ -399,13 +488,45 @@ def field_kernel(
     bound: int | str = "dct2",
     dtype: Any = None,
 ) -> Any:
-    """Materialise the field regulariser's per-channel Toeplitz stencil.
+    """Convolution stencil of the field regulariser.
 
     Returns the small centred kernel that, convolved with a field, reproduces
-    :func:`field_matvec`. The shape is ``(*k, C)`` (channels are independent),
-    with ``k`` the stencil width per spatial dim: 1 (absolute), 3 (membrane) or
-    5 (bending). ``C`` is ``channels`` if given, else inferred from the
-    per-channel penalty lengths (default 1).
+    [`field_matvec`][fastfields.cupy.field_matvec] with the same penalties. Its
+    shape is `(*k, C)`: one independent stencil per channel. `k` is the stencil
+    width along each spatial axis: 1 if only `absolute` is set, 3 with
+    `membrane`, 5 with `bending`.
+
+    Parameters
+    ----------
+    ndim : int
+        Number of spatial axes of the stencil.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    channels : int, optional
+        Number of channels `C`. When omitted it is the length of the first
+        penalty given as a sequence, and 1 if there is none.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    dtype : dtype, optional
+        Data type of the result.
+
+    Returns
+    -------
+    cupy.ndarray
+        The stencil, with the shape described above.
     """
     cp = cupy()
     ndim = int(ndim)
@@ -443,7 +564,48 @@ def field_diag(
     ndim: int = 1,
     dtype: Any = None,
 ) -> Any:
-    """Diagonal (preconditioner) of the field regulariser, shaped ``shape``."""
+    """Diagonal of the field regulariser.
+
+    Builds the diagonal of the field regulariser `L`, which is a cheap Jacobi
+    preconditioner. Each penalty is given per channel and the regulariser never
+    couples channels.
+
+    The result is allocated from `shape`; for a version that accumulates onto
+    an existing array see [`field_adddiag`][fastfields.cupy.field_adddiag].
+
+    Parameters
+    ----------
+    shape : sequence of int
+        Shape of the result, `(*batch, *spatial, C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    dtype : dtype, optional
+        Data type of the result.
+
+    Returns
+    -------
+    cupy.ndarray
+        The diagonal of `L`, shape `shape`.
+    """
     cp = cupy()
     out = cp.zeros(tuple(int(s) for s in shape), dtype=dtype or cp.float64)
     channels = out.shape[-1]
@@ -473,11 +635,57 @@ def field_relax(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Any:
-    """Refine ``field`` in place with ``nb_iter`` relaxation sweeps.
+    """Solve the regularised system `(H + L) x = g` by relaxation sweeps.
 
-    Solves ``(H + L) x = g`` with per-voxel compact-symmetric Hessian ``hes``
-    (packed ``C*(C+1)/2`` last axis), the per-channel field regulariser ``L``
-    and gradient ``grd``; ``field`` is the warm start, mutated and returned.
+    Runs `nb_iter` Gauss-Seidel sweeps on `(H + L) x = g`, where `H` is the
+    per-voxel Hessian `hes` and `L` is the field regulariser `L`. Each penalty
+    is given per channel and the regulariser never couples channels.
+
+    `field` is the starting point and receives the result: it is updated in
+    place and returned.
+
+    Parameters
+    ----------
+    field : cupy.ndarray
+        Starting point, shape `(*batch, *spatial, C)`. Updated in place.
+    hes : cupy.ndarray
+        Per-voxel Hessian `H` in compact-symmetric packing, shape `(*batch,
+        *spatial, C*(C+1)//2)`.
+    grd : cupy.ndarray
+        Gradient `g`, same shape as `field`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    nb_iter : int, default=1
+        Number of relaxation sweeps.
+
+    Returns
+    -------
+    cupy.ndarray
+        `field` itself, holding the refined solution.
+
+    Raises
+    ------
+    TypeError
+        If an argument is not a float32 or float64 CuPy array.
     """
     field = as_gpu_array(field, name="field")
     hes = as_gpu_array(hes, name="hes")
@@ -510,12 +718,53 @@ def field_matvec_rls(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """RLS/JRLS-weighted variant of :func:`field_matvec`.
+    """Apply the weighted (RLS/JRLS) field regulariser.
 
-    ``wgt`` has shape ``(*batch, *spatial, 1)`` for a single weight shared
-    across all channels (JRLS), or ``(*batch, *spatial, C)`` for a genuine
-    per-channel weight (RLS, ``C`` matching ``inp``'s channel count) --
-    the trailing dimension of ``wgt`` selects which mode is used.
+    The reweighted form of [`field_matvec`][fastfields.cupy.field_matvec]. The
+    weight map `wgt` modulates the strength of the penalties voxel by voxel,
+    for edge-preserving or robust regularisation. Its last axis decides the
+    mode: 1 for one weight shared by all channels (JRLS), `C` for one per
+    channel (RLS).
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        The field to filter, shape `(*batch, *spatial, C)`.
+    wgt : cupy.ndarray
+        Weight map. Its shape is `(*batch, *spatial, 1)` for one weight
+        shared by all channels (JRLS) or `(*batch, *spatial, C)` for one
+        weight per channel (RLS); the last axis decides which.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        The filtered result, a new array the shape of `inp`.
+
+    Raises
+    ------
+    TypeError
+        If an argument is not a float32 or float64 CuPy array.
     """
     cp = cupy()
     inp = as_gpu_array(inp, name="inp")
@@ -549,13 +798,59 @@ def field_diag_rls(
     ndim: int = 1,
     dtype: Any = None,
 ) -> Any:
-    """Diagonal (preconditioner) of :func:`field_matvec_rls`.
+    """Diagonal of the weighted (RLS/JRLS) field regulariser.
 
-    ``wgt`` selects JRLS (trailing dim 1) vs RLS (trailing dim ``C``), same
-    as :func:`field_matvec_rls`. The output channel count ``C`` is taken
-    from ``channels`` if given, else from ``wgt``'s trailing dimension when
-    it is not 1 (RLS), else inferred from the per-channel penalty lengths
-    (default 1), exactly as :func:`field_kernel` does.
+    The diagonal of the operator of
+    [`field_matvec_rls`][fastfields.cupy.field_matvec_rls]. Unlike
+    [`field_diag`][fastfields.cupy.field_diag] it is shaped by the weight map
+    and not by a `shape` argument. The weight map `wgt` modulates the strength
+    of the penalties voxel by voxel, for edge-preserving or robust
+    regularisation. Its last axis decides the mode: 1 for one weight shared by
+    all channels (JRLS), `C` for one per channel (RLS).
+
+    Parameters
+    ----------
+    wgt : cupy.ndarray
+        Weight map. Its shape is `(*batch, *spatial, 1)` for one weight
+        shared by all channels (JRLS) or `(*batch, *spatial, C)` for one
+        weight per channel (RLS); the last axis decides which.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    channels : int, optional
+        Number of channels `C`. When omitted it is the last axis of `wgt`
+        if that is not 1, otherwise the length of the first penalty given
+        as a sequence, and 1 if there is none.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    dtype : dtype, optional
+        Data type of the result.
+
+    Returns
+    -------
+    cupy.ndarray
+        The diagonal, shape `(*batch, *spatial, C)`.
+
+    Raises
+    ------
+    TypeError
+        If `wgt` is not a float32 or float64 CuPy array.
     """
     cp = cupy()
     wgt = as_gpu_array(wgt, name="wgt")
@@ -596,12 +891,66 @@ def field_relax_rls(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Any:
-    """RLS/JRLS-weighted variant of :func:`field_relax`.
+    """Solve the weighted system `(H + L(w)) x = g` by relaxation sweeps.
 
-    Refines ``field`` in place with ``nb_iter`` relaxation sweeps of
-    ``(H + L(w)) x = g``, same ``wgt`` conventions as
-    :func:`field_matvec_rls`. ``field`` is the warm start, mutated in place
-    and returned.
+    The reweighted form of [`field_relax`][fastfields.cupy.field_relax]:
+    `nb_iter` Gauss-Seidel sweeps on `(H + L(w)) x = g`, where `L(w)` is the
+    weighted regulariser of
+    [`field_matvec_rls`][fastfields.cupy.field_matvec_rls]. The weight map
+    `wgt` modulates the strength of the penalties voxel by voxel, for
+    edge-preserving or robust regularisation. Its last axis decides the mode: 1
+    for one weight shared by all channels (JRLS), `C` for one per channel
+    (RLS).
+
+    `field` is the starting point and receives the result: it is updated in
+    place and returned.
+
+    Parameters
+    ----------
+    field : cupy.ndarray
+        Starting point, shape `(*batch, *spatial, C)`. Updated in place.
+    hes : cupy.ndarray
+        Per-voxel Hessian `H` in compact-symmetric packing, shape `(*batch,
+        *spatial, C*(C+1)//2)`.
+    grd : cupy.ndarray
+        Gradient `g`, same shape as `field`.
+    wgt : cupy.ndarray
+        Weight map. Its shape is `(*batch, *spatial, 1)` for one weight
+        shared by all channels (JRLS) or `(*batch, *spatial, C)` for one
+        weight per channel (RLS); the last axis decides which.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    nb_iter : int, default=1
+        Number of relaxation sweeps.
+
+    Returns
+    -------
+    cupy.ndarray
+        `field` itself, holding the refined solution.
+
+    Raises
+    ------
+    TypeError
+        If an argument is not a float32 or float64 CuPy array.
     """
     field = as_gpu_array(field, name="field")
     hes = as_gpu_array(hes, name="hes")
@@ -638,7 +987,49 @@ def flow_diag(
     ndim: int = 1,
     dtype: Any = None,
 ) -> Any:
-    """Diagonal (preconditioner) of the flow regulariser, shaped ``shape``."""
+    """Diagonal of the flow regulariser.
+
+    Builds the diagonal of the flow regulariser `L`, which is a cheap Jacobi
+    preconditioner. The penalties are scalars. A non-zero `shears` or `div`
+    adds the linear-elastic terms, which couple the flow components.
+
+    The result is allocated from `shape`; for a version that accumulates onto
+    an existing array see [`flow_adddiag`][fastfields.cupy.flow_adddiag].
+
+    Parameters
+    ----------
+    shape : sequence of int
+        Shape of the result, `(*batch, *spatial, ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    dtype : dtype, optional
+        Data type of the result.
+
+    Returns
+    -------
+    cupy.ndarray
+        The diagonal of `L`, shape `shape`.
+    """
     cp = cupy()
     out = cp.zeros(tuple(int(s) for s in shape), dtype=dtype or cp.float64)
     _ff.flow_diag(
@@ -668,13 +1059,45 @@ def flow_kernel(
     bound: int | str = "dct2",
     dtype: Any = None,
 ) -> Any:
-    """Materialise the flow regulariser's Toeplitz convolution stencil.
+    """Convolution stencil of the flow regulariser.
 
-    Returns the small centred kernel that, convolved with a flow field,
-    reproduces :func:`flow_matvec`. The shape is ``(*k, ndim)`` for the
-    per-channel vector stencil, or ``(*k, ndim, ndim)`` when ``shears``/``div``
-    select the cross-channel (Lamé) matrix stencil, where ``k`` is the stencil
-    width per spatial dim: 1 (absolute only), 3 (membrane/Lamé) or 5 (bending).
+    Returns the small centred kernel that, convolved with a flow, reproduces
+    [`flow_matvec`][fastfields.cupy.flow_matvec] with the same penalties. Its
+    shape is `(*k, ndim)` for the per-component stencil, or `(*k, ndim, ndim)`
+    when `shears` or `div` select the matrix stencil that couples components.
+    `k` is the stencil width along each spatial axis: 1 if only `absolute` is
+    set, 3 with `membrane` or the elastic terms, 5 with `bending`.
+
+    Parameters
+    ----------
+    ndim : int
+        Number of spatial axes, which is also the number of flow
+        components.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    dtype : dtype, optional
+        Data type of the result.
+
+    Returns
+    -------
+    cupy.ndarray
+        The stencil, with the shape described above.
     """
     cp = cupy()
     ndim = int(ndim)
@@ -719,10 +1142,59 @@ def flow_relax(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Any:
-    """Refine ``flow`` in place with ``nb_iter`` relaxation sweeps.
+    """Solve the regularised system `(H + L) x = g` by relaxation sweeps.
 
-    Solves ``(H + L) x = g`` with per-voxel symmetric Hessian ``hes`` and
-    gradient ``grd``; ``flow`` is the warm start, mutated and returned.
+    Runs `nb_iter` Gauss-Seidel sweeps on `(H + L) x = g`, where `H` is the
+    per-voxel Hessian `hes` and `L` is the flow regulariser `L`. The penalties
+    are scalars. A non-zero `shears` or `div` adds the linear-elastic terms,
+    which couple the flow components.
+
+    `flow` is the starting point and receives the result: it is updated in
+    place and returned.
+
+    Parameters
+    ----------
+    flow : cupy.ndarray
+        Starting point, shape `(*batch, *spatial, ndim)`. Updated in place.
+    hes : cupy.ndarray
+        Per-voxel Hessian `H` in compact-symmetric packing, shape `(*batch,
+        *spatial, ndim*(ndim+1)//2)`.
+    grd : cupy.ndarray
+        Gradient `g`, same shape as `flow`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    nb_iter : int, default=1
+        Number of relaxation sweeps.
+
+    Returns
+    -------
+    cupy.ndarray
+        `flow` itself, holding the refined solution.
+
+    Raises
+    ------
+    TypeError
+        If an argument is not a float32 or float64 CuPy array.
     """
     flow = as_gpu_array(flow, name="flow")
     hes = as_gpu_array(hes, name="hes")
@@ -758,15 +1230,53 @@ def flow_matvec_rls(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """RLS/JRLS-weighted variant of :func:`flow_matvec`.
+    """Apply the weighted (RLS/JRLS) flow regulariser.
 
-    ``wgt`` has shape ``(*batch, *spatial, 1)``: unlike the field family, the
-    flow weighting is always *joint* -- the trailing axis of a flow field
-    holds the components of one displacement vector, so a single weight is
-    shared across them.
+    The reweighted form of [`flow_matvec`][fastfields.cupy.flow_matvec]. The
+    weight map `wgt` modulates the strength of the penalties voxel by voxel,
+    for edge-preserving or robust regularisation. Flow weighting is always
+    joint: one weight per voxel, shared by all flow components. `bending` is
+    not supported with weighting, and a non-zero value is rejected.
 
-    ``bending`` is **not supported** with weighting (no weighted bending
-    kernel exists, as in ``jitfields``); a non-zero value raises.
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        The flow to filter, shape `(*batch, *spatial, ndim)`.
+    wgt : cupy.ndarray
+        Weight map, shape `(*batch, *spatial, 1)`: one weight per voxel,
+        shared by all flow components.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        The filtered result, a new array the shape of `inp`.
+
+    Raises
+    ------
+    TypeError
+        If an argument is not a float32 or float64 CuPy array.
     """
     cp = cupy()
     inp = as_gpu_array(inp, name="inp")
@@ -802,12 +1312,57 @@ def flow_diag_rls(
     ndim: int = 1,
     dtype: Any = None,
 ) -> Any:
-    """Diagonal (preconditioner) of :func:`flow_matvec_rls`.
+    """Diagonal of the weighted (JRLS) flow regulariser.
 
-    Unlike plain :func:`flow_diag`, which builds from a *shape*, this one is
-    driven by the weight map: the output is ``wgt.shape[:-1] + (ndim,)``,
-    since a flow field's channel count is ``ndim``. Same ``wgt`` conventions
-    as :func:`flow_matvec_rls`.
+    The diagonal of the operator of
+    [`flow_matvec_rls`][fastfields.cupy.flow_matvec_rls]. Unlike
+    [`flow_diag`][fastfields.cupy.flow_diag] it is shaped by the weight map and
+    not by a `shape` argument. The weight map `wgt` modulates the strength of
+    the penalties voxel by voxel, for edge-preserving or robust regularisation.
+    Flow weighting is always joint: one weight per voxel, shared by all flow
+    components. `bending` is not supported with weighting, and a non-zero value
+    is rejected.
+
+    Parameters
+    ----------
+    wgt : cupy.ndarray
+        Weight map, shape `(*batch, *spatial, 1)`: one weight per voxel,
+        shared by all flow components.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    dtype : dtype, optional
+        Data type of the result.
+
+    Returns
+    -------
+    cupy.ndarray
+        The diagonal, shape `(*batch, *spatial, ndim)`: the shape of `wgt`
+        with its last axis replaced by the number of flow components.
+
+    Raises
+    ------
+    TypeError
+        If `wgt` is not a float32 or float64 CuPy array.
     """
     cp = cupy()
     wgt = as_gpu_array(wgt, name="wgt")
@@ -846,12 +1401,66 @@ def flow_relax_rls(
     ndim: int = 1,
     nb_iter: int = 1,
 ) -> Any:
-    """RLS/JRLS-weighted variant of :func:`flow_relax`.
+    """Solve the weighted system `(H + L(w)) x = g` by relaxation sweeps.
 
-    Refines ``flow`` in place with ``nb_iter`` relaxation sweeps of
-    ``(H + L(w)) x = g``, same ``wgt`` conventions as
-    :func:`flow_matvec_rls`. ``flow`` is the warm start, mutated in place
-    and returned.
+    The reweighted form of [`flow_relax`][fastfields.cupy.flow_relax]:
+    `nb_iter` Gauss-Seidel sweeps on `(H + L(w)) x = g`, where `L(w)` is the
+    weighted regulariser of
+    [`flow_matvec_rls`][fastfields.cupy.flow_matvec_rls]. The weight map `wgt`
+    modulates the strength of the penalties voxel by voxel, for edge-preserving
+    or robust regularisation. Flow weighting is always joint: one weight per
+    voxel, shared by all flow components. `bending` is not supported with
+    weighting, and a non-zero value is rejected.
+
+    `flow` is the starting point and receives the result: it is updated in
+    place and returned.
+
+    Parameters
+    ----------
+    flow : cupy.ndarray
+        Starting point, shape `(*batch, *spatial, ndim)`. Updated in place.
+    hes : cupy.ndarray
+        Per-voxel Hessian `H` in compact-symmetric packing, shape `(*batch,
+        *spatial, ndim*(ndim+1)//2)`.
+    grd : cupy.ndarray
+        Gradient `g`, same shape as `flow`.
+    wgt : cupy.ndarray
+        Weight map, shape `(*batch, *spatial, 1)`: one weight per voxel,
+        shared by all flow components.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+    nb_iter : int, default=1
+        Number of relaxation sweeps.
+
+    Returns
+    -------
+    cupy.ndarray
+        `flow` itself, holding the refined solution.
+
+    Raises
+    ------
+    TypeError
+        If an argument is not a float32 or float64 CuPy array.
     """
     flow = as_gpu_array(flow, name="flow")
     hes = as_gpu_array(hes, name="hes")
@@ -889,13 +1498,57 @@ def flow_precond(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Apply the preconditioner ``(M + diag(R)) \\ vec``.
+    """Jacobi preconditioner of the regularised system.
 
-    ``M`` is the per-voxel compact-symmetric matrix ``mat``; ``diag(R)`` is the
-    diagonal of the flow regulariser (same penalties as :func:`flow_matvec`).
-    One kernel (``fastfields.dlpack.flow_precond``). Leading batch dims of
-    ``mat``/``vec`` broadcast; the ``ndim`` spatial axes and the component axis
-    must match. See :func:`flow_precond_` for the in-place form.
+    Solves `(M + diag(L)) x = vec` voxel by voxel, where `M` is the per-voxel
+    matrix `mat` and `diag(L)` is the diagonal of the flow regulariser `L`. It
+    approximates the inverse of the operator of
+    [`flow_forward`][fastfields.cupy.flow_forward]. The penalties are scalars.
+    A non-zero `shears` or `div` adds the linear-elastic terms, which couple
+    the flow components.
+
+    Batch axes of `mat` and `vec` are broadcast against each other; the spatial
+    axes and the last axis must match.
+
+    [`flow_precond_`][fastfields.cupy.flow_precond_] is the in-place version.
+
+    Parameters
+    ----------
+    mat : cupy.ndarray
+        Per-voxel matrix `M` in compact-symmetric packing, shape `(*batch,
+        *spatial, ndim*(ndim+1)//2)`. Batch axes are broadcast against
+        those of `vec`.
+    vec : cupy.ndarray
+        Right-hand side, shape `(*batch, *spatial, ndim)`. Batch axes are
+        broadcast against those of `mat`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        The solution `x`, shape `(*batch, *spatial, ndim)` with the
+        broadcast batch shape.
     """
     cp = cupy()
     batch, mat, vec = _reg_broadcast(mat, vec, ndim)
@@ -931,12 +1584,54 @@ def flow_forward(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Apply the forward matrix-vector product ``(M + R) @ vec``.
+    """Apply the regularised system: `(M + L) @ vec`.
 
-    ``M`` is the per-voxel compact-symmetric matrix ``mat`` and ``R`` the flow
-    regulariser operator. One kernel
-    (``fastfields.dlpack.flow_forward``). Leading batch dims of ``mat``/``vec``
-    broadcast; the ``ndim`` spatial axes and the component axis must match.
+    Computes `(M + L) @ vec`, where `M` is the per-voxel matrix `mat` and `L`
+    is the flow regulariser `L`. This is the operator that
+    [`flow_relax`][fastfields.cupy.flow_relax] solves. The penalties are
+    scalars. A non-zero `shears` or `div` adds the linear-elastic terms, which
+    couple the flow components.
+
+    Batch axes of `mat` and `vec` are broadcast against each other; the spatial
+    axes and the last axis must match.
+
+    Parameters
+    ----------
+    mat : cupy.ndarray
+        Per-voxel matrix `M` in compact-symmetric packing, shape `(*batch,
+        *spatial, ndim*(ndim+1)//2)`. Batch axes are broadcast against
+        those of `vec`.
+    vec : cupy.ndarray
+        Vector field, shape `(*batch, *spatial, ndim)`. Batch axes are
+        broadcast against those of `mat`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `(M + L) @ vec`, shape `(*batch, *spatial, ndim)` with the
+        broadcast batch shape.
     """
     cp = cupy()
     batch, mat, vec = _reg_broadcast(mat, vec, ndim)
@@ -978,9 +1673,51 @@ def flow_addmatvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp + L @ flow`` as a **new** array.
+    """Add the flow regulariser applied to a flow: `inp + L @ flow`.
 
-    Copies ``inp`` and runs the in-place accumulate primitive on the copy.
+    Computes `inp + L @ flow` for the flow regulariser `L`. The penalties are
+    scalars. A non-zero `shears` or `div` adds the linear-elastic terms, which
+    couple the flow components.
+
+    `inp` is copied, never modified;
+    [`flow_addmatvec_`][fastfields.cupy.flow_addmatvec_] is the version that
+    updates it in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the result is accumulated onto, shape `(*batch, *spatial,
+        ndim)`.
+    flow : cupy.ndarray
+        The flow the operator is applied to, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp + L @ flow`, a new array the shape of `inp`.
     """
     return _flow_matvec_acc(
         inp,
@@ -1011,9 +1748,51 @@ def flow_submatvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp - L @ flow`` as a **new** array.
+    """Subtract the flow regulariser applied to a flow: `inp - L @ flow`.
 
-    Copies ``inp`` and runs the in-place accumulate primitive on the copy.
+    Computes `inp - L @ flow` for the flow regulariser `L`. The penalties are
+    scalars. A non-zero `shears` or `div` adds the linear-elastic terms, which
+    couple the flow components.
+
+    `inp` is copied, never modified;
+    [`flow_submatvec_`][fastfields.cupy.flow_submatvec_] is the version that
+    updates it in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the result is accumulated onto, shape `(*batch, *spatial,
+        ndim)`.
+    flow : cupy.ndarray
+        The flow the operator is applied to, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp - L @ flow`, a new array the shape of `inp`.
     """
     return _flow_matvec_acc(
         inp,
@@ -1044,9 +1823,50 @@ def flow_addmatvec_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place ``inp += L @ flow``; returns ``inp``.
+    """Accumulate the flow regulariser in place: `inp += L @ flow`.
 
-    Calls the fused in-place C primitive directly.
+    Updates `inp` with `inp += L @ flow` for the flow regulariser `L`, in one
+    kernel and without a temporary for the product. The penalties are scalars.
+    A non-zero `shears` or `div` adds the linear-elastic terms, which couple
+    the flow components.
+
+    [`flow_addmatvec`][fastfields.cupy.flow_addmatvec] is the version that
+    returns a new array.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shape `(*batch, *spatial, ndim)`. Updated in place.
+    flow : cupy.ndarray
+        The flow the operator is applied to, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
     """
     return _flow_matvec_acc(
         inp,
@@ -1077,9 +1897,50 @@ def flow_submatvec_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place ``inp -= L @ flow``; returns ``inp``.
+    """Accumulate the flow regulariser in place: `inp -= L @ flow`.
 
-    Calls the fused in-place C primitive directly.
+    Updates `inp` with `inp -= L @ flow` for the flow regulariser `L`, in one
+    kernel and without a temporary for the product. The penalties are scalars.
+    A non-zero `shears` or `div` adds the linear-elastic terms, which couple
+    the flow components.
+
+    [`flow_submatvec`][fastfields.cupy.flow_submatvec] is the version that
+    returns a new array.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shape `(*batch, *spatial, ndim)`. Updated in place.
+    flow : cupy.ndarray
+        The flow the operator is applied to, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
     """
     return _flow_matvec_acc(
         inp,
@@ -1109,9 +1970,47 @@ def flow_adddiag(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp + diag(L)`` as a **new** array, shaped like ``inp``.
+    """Add the diagonal of the flow regulariser: `inp + diag(L)`.
 
-    Copies ``inp`` and runs the in-place accumulate primitive on the copy.
+    Computes `inp + diag(L)` for the flow regulariser `L`. The penalties are
+    scalars. A non-zero `shears` or `div` adds the linear-elastic terms, which
+    couple the flow components.
+
+    `inp` is copied, never modified;
+    [`flow_adddiag_`][fastfields.cupy.flow_adddiag_] updates it in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the diagonal is accumulated onto, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp + diag(L)`, a new array the shape of `inp`.
     """
     return _flow_diag_acc(
         inp,
@@ -1140,9 +2039,47 @@ def flow_subdiag(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp - diag(L)`` as a **new** array, shaped like ``inp``.
+    """Subtract the diagonal of the flow regulariser: `inp - diag(L)`.
 
-    Copies ``inp`` and runs the in-place accumulate primitive on the copy.
+    Computes `inp - diag(L)` for the flow regulariser `L`. The penalties are
+    scalars. A non-zero `shears` or `div` adds the linear-elastic terms, which
+    couple the flow components.
+
+    `inp` is copied, never modified;
+    [`flow_subdiag_`][fastfields.cupy.flow_subdiag_] updates it in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the diagonal is accumulated onto, shape `(*batch, *spatial,
+        ndim)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp - diag(L)`, a new array the shape of `inp`.
     """
     return _flow_diag_acc(
         inp,
@@ -1171,9 +2108,45 @@ def flow_adddiag_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place ``inp += diag(L)``; returns ``inp``.
+    """Accumulate the flow regulariser's diagonal in place: `inp += diag(L)`.
 
-    Calls the fused in-place C primitive directly.
+    Updates `inp` with `inp += diag(L)` for the flow regulariser `L`, in one
+    kernel. The penalties are scalars. A non-zero `shears` or `div` adds the
+    linear-elastic terms, which couple the flow components.
+
+    [`flow_adddiag`][fastfields.cupy.flow_adddiag] returns a new array instead.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shape `(*batch, *spatial, ndim)`. Updated in place.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
     """
     return _flow_diag_acc(
         inp,
@@ -1202,9 +2175,45 @@ def flow_subdiag_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place ``inp -= diag(L)``; returns ``inp``.
+    """Accumulate the flow regulariser's diagonal in place: `inp -= diag(L)`.
 
-    Calls the fused in-place C primitive directly.
+    Updates `inp` with `inp -= diag(L)` for the flow regulariser `L`, in one
+    kernel. The penalties are scalars. A non-zero `shears` or `div` adds the
+    linear-elastic terms, which couple the flow components.
+
+    [`flow_subdiag`][fastfields.cupy.flow_subdiag] returns a new array instead.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shape `(*batch, *spatial, ndim)`. Updated in place.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
     """
     return _flow_diag_acc(
         inp,
@@ -1232,11 +2241,55 @@ def field_precond(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Apply the preconditioner ``(M + diag(R)) \\ vec``.
+    """Jacobi preconditioner of the regularised system.
 
-    One kernel (``fastfields.dlpack.field_precond``). Leading batch dims of
-    ``mat``/``vec`` broadcast; the ``ndim`` spatial axes and the channel axis
-    must match. See :func:`field_precond_` for the in-place form.
+    Solves `(M + diag(L)) x = vec` voxel by voxel, where `M` is the per-voxel
+    matrix `mat` and `diag(L)` is the diagonal of the field regulariser `L`. It
+    approximates the inverse of the operator of
+    [`field_forward`][fastfields.cupy.field_forward]. Each penalty is given per
+    channel and the regulariser never couples channels.
+
+    Batch axes of `mat` and `vec` are broadcast against each other; the spatial
+    axes and the last axis must match.
+
+    [`field_precond_`][fastfields.cupy.field_precond_] is the in-place version.
+
+    Parameters
+    ----------
+    mat : cupy.ndarray
+        Per-voxel matrix `M` in compact-symmetric packing, shape `(*batch,
+        *spatial, C*(C+1)//2)`. Batch axes are broadcast against those of
+        `vec`.
+    vec : cupy.ndarray
+        Right-hand side, shape `(*batch, *spatial, C)`. Batch axes are
+        broadcast against those of `mat`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        The solution `x`, shape `(*batch, *spatial, C)` with the broadcast
+        batch shape.
     """
     cp = cupy()
     batch, mat, vec = _reg_broadcast(mat, vec, ndim)
@@ -1269,11 +2322,52 @@ def field_forward(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Apply the forward matrix-vector product ``(M + R) @ vec``.
+    """Apply the regularised system: `(M + L) @ vec`.
 
-    One kernel (``fastfields.dlpack.field_forward``). Leading batch dims of
-    ``mat``/``vec`` broadcast; the ``ndim`` spatial axes and the channel axis
-    must match.
+    Computes `(M + L) @ vec`, where `M` is the per-voxel matrix `mat` and `L`
+    is the field regulariser `L`. This is the operator that
+    [`field_relax`][fastfields.cupy.field_relax] solves. Each penalty is given
+    per channel and the regulariser never couples channels.
+
+    Batch axes of `mat` and `vec` are broadcast against each other; the spatial
+    axes and the last axis must match.
+
+    Parameters
+    ----------
+    mat : cupy.ndarray
+        Per-voxel matrix `M` in compact-symmetric packing, shape `(*batch,
+        *spatial, C*(C+1)//2)`. Batch axes are broadcast against those of
+        `vec`.
+    vec : cupy.ndarray
+        Vector field, shape `(*batch, *spatial, C)`. Batch axes are
+        broadcast against those of `mat`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `(M + L) @ vec`, shape `(*batch, *spatial, C)` with the broadcast
+        batch shape.
     """
     cp = cupy()
     batch, mat, vec = _reg_broadcast(mat, vec, ndim)
@@ -1306,9 +2400,49 @@ def field_addmatvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp + L @ field`` as a **new** array.
+    """Add the field regulariser applied to a field: `inp + L @ field`.
 
-    Copies ``inp`` and runs the in-place accumulate primitive on the copy.
+    Computes `inp + L @ field` for the field regulariser `L`. Each penalty is
+    given per channel and the regulariser never couples channels.
+
+    `inp` is copied, never modified;
+    [`field_addmatvec_`][fastfields.cupy.field_addmatvec_] is the version that
+    updates it in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the result is accumulated onto, shape `(*batch, *spatial,
+        C)`.
+    field : cupy.ndarray
+        The field the operator is applied to, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp + L @ field`, a new array the shape of `inp`.
     """
     return _field_matvec_acc(
         inp,
@@ -1335,9 +2469,49 @@ def field_submatvec(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp - L @ field`` as a **new** array.
+    """Subtract the field regulariser applied to a field: `inp - L @ field`.
 
-    Copies ``inp`` and runs the in-place accumulate primitive on the copy.
+    Computes `inp - L @ field` for the field regulariser `L`. Each penalty is
+    given per channel and the regulariser never couples channels.
+
+    `inp` is copied, never modified;
+    [`field_submatvec_`][fastfields.cupy.field_submatvec_] is the version that
+    updates it in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the result is accumulated onto, shape `(*batch, *spatial,
+        C)`.
+    field : cupy.ndarray
+        The field the operator is applied to, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp - L @ field`, a new array the shape of `inp`.
     """
     return _field_matvec_acc(
         inp,
@@ -1364,9 +2538,48 @@ def field_addmatvec_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place ``inp += L @ field``; returns ``inp``.
+    """Accumulate the field regulariser in place: `inp += L @ field`.
 
-    Calls the fused in-place C primitive directly.
+    Updates `inp` with `inp += L @ field` for the field regulariser `L`, in one
+    kernel and without a temporary for the product. Each penalty is given per
+    channel and the regulariser never couples channels.
+
+    [`field_addmatvec`][fastfields.cupy.field_addmatvec] is the version that
+    returns a new array.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shape `(*batch, *spatial, C)`. Updated in place.
+    field : cupy.ndarray
+        The field the operator is applied to, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
     """
     return _field_matvec_acc(
         inp,
@@ -1393,9 +2606,48 @@ def field_submatvec_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place ``inp -= L @ field``; returns ``inp``.
+    """Accumulate the field regulariser in place: `inp -= L @ field`.
 
-    Calls the fused in-place C primitive directly.
+    Updates `inp` with `inp -= L @ field` for the field regulariser `L`, in one
+    kernel and without a temporary for the product. Each penalty is given per
+    channel and the regulariser never couples channels.
+
+    [`field_submatvec`][fastfields.cupy.field_submatvec] is the version that
+    returns a new array.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shape `(*batch, *spatial, C)`. Updated in place.
+    field : cupy.ndarray
+        The field the operator is applied to, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
     """
     return _field_matvec_acc(
         inp,
@@ -1421,9 +2673,45 @@ def field_adddiag(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp + diag(L)`` as a **new** array, shaped like ``inp``.
+    """Add the diagonal of the field regulariser: `inp + diag(L)`.
 
-    Copies ``inp`` and runs the in-place accumulate primitive on the copy.
+    Computes `inp + diag(L)` for the field regulariser `L`. Each penalty is
+    given per channel and the regulariser never couples channels.
+
+    `inp` is copied, never modified;
+    [`field_adddiag_`][fastfields.cupy.field_adddiag_] updates it in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the diagonal is accumulated onto, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp + diag(L)`, a new array the shape of `inp`.
     """
     return _field_diag_acc(
         inp,
@@ -1448,9 +2736,45 @@ def field_subdiag(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp - diag(L)`` as a **new** array, shaped like ``inp``.
+    """Subtract the diagonal of the field regulariser: `inp - diag(L)`.
 
-    Copies ``inp`` and runs the in-place accumulate primitive on the copy.
+    Computes `inp - diag(L)` for the field regulariser `L`. Each penalty is
+    given per channel and the regulariser never couples channels.
+
+    `inp` is copied, never modified;
+    [`field_subdiag_`][fastfields.cupy.field_subdiag_] updates it in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the diagonal is accumulated onto, shape `(*batch, *spatial,
+        C)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp - diag(L)`, a new array the shape of `inp`.
     """
     return _field_diag_acc(
         inp,
@@ -1475,9 +2799,45 @@ def field_adddiag_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place ``inp += diag(L)``; returns ``inp``.
+    """Accumulate the field regulariser's diagonal in place: `inp += diag(L)`.
 
-    Calls the fused in-place C primitive directly.
+    Updates `inp` with `inp += diag(L)` for the field regulariser `L`, in one
+    kernel. Each penalty is given per channel and the regulariser never couples
+    channels.
+
+    [`field_adddiag`][fastfields.cupy.field_adddiag] returns a new array
+    instead.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shape `(*batch, *spatial, C)`. Updated in place.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
     """
     return _field_diag_acc(
         inp,
@@ -1502,9 +2862,45 @@ def field_subdiag_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place ``inp -= diag(L)``; returns ``inp``.
+    """Accumulate the field regulariser's diagonal in place: `inp -= diag(L)`.
 
-    Calls the fused in-place C primitive directly.
+    Updates `inp` with `inp -= diag(L)` for the field regulariser `L`, in one
+    kernel. Each penalty is given per channel and the regulariser never couples
+    channels.
+
+    [`field_subdiag`][fastfields.cupy.field_subdiag] returns a new array
+    instead.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shape `(*batch, *spatial, C)`. Updated in place.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
     """
     return _field_diag_acc(
         inp,
@@ -1535,11 +2931,56 @@ def field_precond_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In-place :func:`field_precond`: ``sol = (M + diag(R)) \\ sol``.
+    """Jacobi preconditioner of the regularised system, in place.
 
-    ``sol`` holds the gradient on entry and the preconditioned solution on
-    exit; it is mutated and returned. Nothing is broadcast -- an in-place op
-    writes through the caller's buffer, so its shape is the answer's shape.
+    Solves `(M + diag(L)) x = sol` voxel by voxel and stores `x` in `sol`,
+    where `M` is the per-voxel matrix `mat` and `diag(L)` is the diagonal of
+    the field regulariser `L`. Each penalty is given per channel and the
+    regulariser never couples channels.
+
+    Nothing is broadcast: `sol` is written through, so its shape is the shape
+    of the answer. [`field_precond`][fastfields.cupy.field_precond] is the
+    version that returns a new array.
+
+    Parameters
+    ----------
+    sol : cupy.ndarray
+        The gradient on entry, the preconditioned solution on exit, shape
+        `(*batch, *spatial, C)`. Updated in place.
+    mat : cupy.ndarray
+        Per-voxel matrix `M` in compact-symmetric packing, shape `(*batch,
+        *spatial, C*(C+1)//2)`.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `sol` itself, now holding the solution.
+
+    Raises
+    ------
+    TypeError
+        If an argument is not a float32 or float64 CuPy array.
     """
     sol = require_gpu_writethrough(sol, name="sol")
     mat = as_gpu_array(mat, name="mat")
@@ -1571,10 +3012,57 @@ def flow_precond_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In-place :func:`flow_precond`: ``sol = (M + diag(R)) \\ sol``.
+    """Jacobi preconditioner of the regularised system, in place.
 
-    ``sol`` holds the gradient on entry and the preconditioned solution on
-    exit; it is mutated and returned.
+    Solves `(M + diag(L)) x = sol` voxel by voxel and stores `x` in `sol`,
+    where `M` is the per-voxel matrix `mat` and `diag(L)` is the diagonal of
+    the flow regulariser `L`. The penalties are scalars. A non-zero `shears` or
+    `div` adds the linear-elastic terms, which couple the flow components.
+
+    Nothing is broadcast: `sol` is written through, so its shape is the shape
+    of the answer. [`flow_precond`][fastfields.cupy.flow_precond] is the
+    version that returns a new array.
+
+    Parameters
+    ----------
+    sol : cupy.ndarray
+        The gradient on entry, the preconditioned solution on exit, shape
+        `(*batch, *spatial, ndim)`. Updated in place.
+    mat : cupy.ndarray
+        Per-voxel matrix `M` in compact-symmetric packing, shape `(*batch,
+        *spatial, ndim*(ndim+1)//2)`.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `sol` itself, now holding the solution.
+
+    Raises
+    ------
+    TypeError
+        If an argument is not a float32 or float64 CuPy array.
     """
     sol = require_gpu_writethrough(sol, name="sol")
     mat = as_gpu_array(mat, name="mat")
@@ -1600,7 +3088,7 @@ def flow_precond_(
 #
 # The same `inp ± op(...)` pattern as the *_adddiag / *_subdiag family, for
 # the materialised Toeplitz stencil rather than the diagonal. `inp` is shaped
-# like the output of :func:`field_kernel` / :func:`flow_kernel`.
+# like the output of `field_kernel` / `flow_kernel`.
 
 
 def field_addkernel(
@@ -1613,10 +3101,45 @@ def field_addkernel(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp + K`` as a **new** array, shaped like ``inp``.
+    """Add the stencil of the field regulariser: `inp + K`.
 
-    ``K`` is the field regulariser's stencil (see :func:`field_kernel`, whose
-    output shape ``inp`` must match).
+    Computes `inp + K`, where `K` is the stencil that
+    [`field_kernel`][fastfields.cupy.field_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil and is copied, never
+    modified; [`field_addkernel_`][fastfields.cupy.field_addkernel_] updates it
+    in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the stencil is accumulated onto, shaped like the output of
+        [`field_kernel`][fastfields.cupy.field_kernel].
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp + K`, a new array the shape of `inp`.
     """
     return _field_kernel_acc(
         inp,
@@ -1641,7 +3164,46 @@ def field_subkernel(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp - K`` as a **new** array, shaped like ``inp``."""
+    """Subtract the stencil of the field regulariser: `inp - K`.
+
+    Computes `inp - K`, where `K` is the stencil that
+    [`field_kernel`][fastfields.cupy.field_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil and is copied, never
+    modified; [`field_subkernel_`][fastfields.cupy.field_subkernel_] updates it
+    in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the stencil is accumulated onto, shaped like the output of
+        [`field_kernel`][fastfields.cupy.field_kernel].
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp - K`, a new array the shape of `inp`.
+    """
     return _field_kernel_acc(
         inp,
         absolute,
@@ -1665,7 +3227,46 @@ def field_addkernel_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place: ``inp += K``. Mutates and returns ``inp``."""
+    """Accumulate the field regulariser's stencil in place: `inp += K`.
+
+    Updates `inp` with `inp += K`, where `K` is the stencil that
+    [`field_kernel`][fastfields.cupy.field_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil.
+    [`field_addkernel`][fastfields.cupy.field_addkernel] returns a new array
+    instead.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shaped like the output of
+        [`field_kernel`][fastfields.cupy.field_kernel]. Updated in place.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
+    """
     return _field_kernel_acc(
         inp,
         absolute,
@@ -1689,7 +3290,46 @@ def field_subkernel_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place: ``inp -= K``. Mutates and returns ``inp``."""
+    """Accumulate the field regulariser's stencil in place: `inp -= K`.
+
+    Updates `inp` with `inp -= K`, where `K` is the stencil that
+    [`field_kernel`][fastfields.cupy.field_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil.
+    [`field_subkernel`][fastfields.cupy.field_subkernel] returns a new array
+    instead.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shaped like the output of
+        [`field_kernel`][fastfields.cupy.field_kernel]. Updated in place.
+    absolute : float or sequence of float, optional
+        Weight of the absolute (L2) penalty. A scalar applies to every
+        channel; a sequence gives one weight per channel. `None` disables
+        the penalty.
+    membrane : float or sequence of float, optional
+        Weight of the membrane (first-order) penalty, in the same format as
+        `absolute`.
+    bending : float or sequence of float, optional
+        Weight of the bending (second-order) penalty, in the same format as
+        `absolute`.
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
+    """
     return _field_kernel_acc(
         inp,
         absolute,
@@ -1715,10 +3355,46 @@ def flow_addkernel(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp + K`` as a **new** array, shaped like ``inp``.
+    """Add the stencil of the flow regulariser: `inp + K`.
 
-    ``K`` is the flow regulariser's stencil (see :func:`flow_kernel`, whose
-    output shape ``inp`` must match).
+    Computes `inp + K`, where `K` is the stencil that
+    [`flow_kernel`][fastfields.cupy.flow_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil and is copied, never
+    modified; [`flow_addkernel_`][fastfields.cupy.flow_addkernel_] updates it
+    in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the stencil is accumulated onto, shaped like the output of
+        [`flow_kernel`][fastfields.cupy.flow_kernel].
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp + K`, a new array the shape of `inp`.
     """
     return _flow_kernel_acc(
         inp,
@@ -1747,7 +3423,47 @@ def flow_subkernel(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """Return ``inp - K`` as a **new** array, shaped like ``inp``."""
+    """Subtract the stencil of the flow regulariser: `inp - K`.
+
+    Computes `inp - K`, where `K` is the stencil that
+    [`flow_kernel`][fastfields.cupy.flow_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil and is copied, never
+    modified; [`flow_subkernel_`][fastfields.cupy.flow_subkernel_] updates it
+    in place.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Array the stencil is accumulated onto, shaped like the output of
+        [`flow_kernel`][fastfields.cupy.flow_kernel].
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp - K`, a new array the shape of `inp`.
+    """
     return _flow_kernel_acc(
         inp,
         absolute,
@@ -1775,7 +3491,47 @@ def flow_addkernel_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place: ``inp += K``. Mutates and returns ``inp``."""
+    """Accumulate the flow regulariser's stencil in place: `inp += K`.
+
+    Updates `inp` with `inp += K`, where `K` is the stencil that
+    [`flow_kernel`][fastfields.cupy.flow_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil.
+    [`flow_addkernel`][fastfields.cupy.flow_addkernel] returns a new array
+    instead.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shaped like the output of
+        [`flow_kernel`][fastfields.cupy.flow_kernel]. Updated in place.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
+    """
     return _flow_kernel_acc(
         inp,
         absolute,
@@ -1803,7 +3559,47 @@ def flow_subkernel_(
     bound: int | str = "dct2",
     ndim: int = 1,
 ) -> Any:
-    """In place: ``inp -= K``. Mutates and returns ``inp``."""
+    """Accumulate the flow regulariser's stencil in place: `inp -= K`.
+
+    Updates `inp` with `inp -= K`, where `K` is the stencil that
+    [`flow_kernel`][fastfields.cupy.flow_kernel] returns for the same
+    penalties. `inp` must have the shape of that stencil.
+    [`flow_subkernel`][fastfields.cupy.flow_subkernel] returns a new array
+    instead.
+
+    Parameters
+    ----------
+    inp : cupy.ndarray
+        Accumulator, shaped like the output of
+        [`flow_kernel`][fastfields.cupy.flow_kernel]. Updated in place.
+    absolute : float, default=0.0
+        Weight of the absolute (L2) penalty.
+    membrane : float, default=0.0
+        Weight of the membrane (first-order) penalty.
+    bending : float, default=0.0
+        Weight of the bending (second-order) penalty.
+    shears : float, default=0.0
+        Weight of the linear-elastic shear penalty (Lamé `mu`). Together
+        with `div` it couples the flow components.
+    div : float, default=0.0
+        Weight of the linear-elastic divergence penalty (Lamé `lambda`).
+    voxel_size : float or sequence of float, optional
+        Spatial voxel size: one value per spatial axis, or a single value
+        for all. `None` means unit voxels.
+    bound : int or str, default="dct2"
+        Boundary condition: an integer from 0 to 7, a
+        [`Bound`][fastfields.helpers.Bound] member, or a name such as
+        `"dct2"` or `"wrap"`.
+    ndim : int, default=1
+        Number of spatial axes. They are the `ndim` axes just before the
+        channel axis; this is not inferred, so pass it explicitly for
+        anything but 1D data.
+
+    Returns
+    -------
+    cupy.ndarray
+        `inp` itself, after the update.
+    """
     return _flow_kernel_acc(
         inp,
         absolute,

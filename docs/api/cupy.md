@@ -1,5 +1,7 @@
 # `fastfields.cupy`
 
-Every function in `fastfields.cupy`, with its arguments and options.
+Every function of `fastfields.cupy`, with its arguments, options and
+exceptions. The [overview](../cupy.md) explains the conventions they share and
+what this package needs to import.
 
 ::: fastfields.cupy
