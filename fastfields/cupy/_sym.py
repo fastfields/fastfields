@@ -6,7 +6,7 @@ per-batch ``C x C`` symmetric matrix the packed length is ``C*(C+1)/2``:
 * ``C == 2`` -> ``[h00, h11, h01]``
 * ``C == 3`` -> ``[h00, h11, h22, h01, h02, h12]``
 
-``inp`` / ``out`` vectors are shaped ``(..., C)``.
+``vec`` / ``out`` vectors are shaped ``(..., C)``.
 """
 
 from __future__ import annotations
@@ -36,119 +36,119 @@ __all__ = [
 ]
 
 
-def sym_matvec(hessian: Any, inp: Any) -> Any:
-    """Return ``out = H @ inp`` (functional).
+def sym_matvec(mat: Any, vec: Any) -> Any:
+    """Return ``out = H @ vec`` (functional).
 
-    Batch (leading) dims of ``hessian`` and ``inp`` are broadcast (zero-copy);
-    ``out`` has the broadcast batch shape + ``inp``'s core dim ``(C,)``.
+    Batch (leading) dims of ``mat`` and ``vec`` are broadcast (zero-copy);
+    ``out`` has the broadcast batch shape + ``vec``'s core dim ``(C,)``.
     """
     cp = cupy()
-    hessian = as_gpu_array(hessian, name="hessian")
-    inp = as_gpu_array(inp, name="inp")
-    batch, (hessian_b, inp_b) = broadcast_batch([(hessian, 1), (inp, 1)])
-    out = cp.empty(batch + (inp.shape[-1],), dtype=inp.dtype)
-    _ff.sym_matvec(out, hessian_b, inp_b, current_stream_ptr())
+    mat = as_gpu_array(mat, name="mat")
+    vec = as_gpu_array(vec, name="vec")
+    batch, (mat_b, vec_b) = broadcast_batch([(mat, 1), (vec, 1)])
+    out = cp.empty(batch + (vec.shape[-1],), dtype=vec.dtype)
+    _ff.sym_matvec(out, mat_b, vec_b, current_stream_ptr())
     return out
 
 
-def sym_matvec_backward(grd: Any, inp: Any) -> Any:
+def sym_matvec_backward(grad: Any, vec: Any) -> Any:
     """Backward of :func:`sym_matvec` w.r.t. the matrix.
 
-    ``grd`` and ``inp`` are ``(..., C)`` (batch dims broadcast); returns the
+    ``grad`` and ``vec`` are ``(..., C)`` (batch dims broadcast); returns the
     gradient in the same compact-symmetric packing, shape ``(..., C*(C+1)/2)``.
     """
     cp = cupy()
-    grd = as_gpu_array(grd, name="grd")
-    inp = as_gpu_array(inp, name="inp")
-    c = inp.shape[-1]
+    grad = as_gpu_array(grad, name="grad")
+    vec = as_gpu_array(vec, name="vec")
+    c = vec.shape[-1]
     packed = c * (c + 1) // 2
-    batch, (grd_b, inp_b) = broadcast_batch([(grd, 1), (inp, 1)])
-    out = cp.empty(batch + (packed,), dtype=inp.dtype)
-    _ff.sym_matvec_backward(out, grd_b, inp_b, current_stream_ptr())
+    batch, (grad_b, vec_b) = broadcast_batch([(grad, 1), (vec, 1)])
+    out = cp.empty(batch + (packed,), dtype=vec.dtype)
+    _ff.sym_matvec_backward(out, grad_b, vec_b, current_stream_ptr())
     return out
 
 
-def sym_addmatvec_(out: Any, hessian: Any, inp: Any) -> Any:
-    """In-place accumulate: ``out += H @ inp``. Returns ``out``.
+def sym_addmatvec_(out0: Any, mat: Any, vec: Any) -> Any:
+    """In-place accumulate: ``out0 += H @ vec``. Returns ``out0``.
 
-    ``out`` fixes the batch shape; ``hessian`` and ``inp`` are broadcast to it.
+    ``out0`` fixes the batch shape; ``mat`` and ``vec`` are broadcast to it.
     """
-    out = require_gpu_writethrough(out, name="out")
-    hessian = as_gpu_array(hessian, name="hessian")
-    inp = as_gpu_array(inp, name="inp")
-    batch = out.shape[:-1]
-    hessian_b = broadcast_to_batch(hessian, batch, 1)
-    inp_b = broadcast_to_batch(inp, batch, 1)
-    _ff.sym_addmatvec_(out, hessian_b, inp_b, current_stream_ptr())
-    return out
+    out0 = require_gpu_writethrough(out0, name="out0")
+    mat = as_gpu_array(mat, name="mat")
+    vec = as_gpu_array(vec, name="vec")
+    batch = out0.shape[:-1]
+    mat_b = broadcast_to_batch(mat, batch, 1)
+    vec_b = broadcast_to_batch(vec, batch, 1)
+    _ff.sym_addmatvec_(out0, mat_b, vec_b, current_stream_ptr())
+    return out0
 
 
-def sym_submatvec_(out: Any, hessian: Any, inp: Any) -> Any:
-    """In-place accumulate: ``out -= H @ inp``. Returns ``out``.
+def sym_submatvec_(out0: Any, mat: Any, vec: Any) -> Any:
+    """In-place accumulate: ``out0 -= H @ vec``. Returns ``out0``.
 
-    ``out`` fixes the batch shape; ``hessian`` and ``inp`` are broadcast to it.
+    ``out0`` fixes the batch shape; ``mat`` and ``vec`` are broadcast to it.
     """
-    out = require_gpu_writethrough(out, name="out")
-    hessian = as_gpu_array(hessian, name="hessian")
-    inp = as_gpu_array(inp, name="inp")
-    batch = out.shape[:-1]
-    hessian_b = broadcast_to_batch(hessian, batch, 1)
-    inp_b = broadcast_to_batch(inp, batch, 1)
-    _ff.sym_submatvec_(out, hessian_b, inp_b, current_stream_ptr())
-    return out
+    out0 = require_gpu_writethrough(out0, name="out0")
+    mat = as_gpu_array(mat, name="mat")
+    vec = as_gpu_array(vec, name="vec")
+    batch = out0.shape[:-1]
+    mat_b = broadcast_to_batch(mat, batch, 1)
+    vec_b = broadcast_to_batch(vec, batch, 1)
+    _ff.sym_submatvec_(out0, mat_b, vec_b, current_stream_ptr())
+    return out0
 
 
-def sym_solve(hessian: Any, inp: Any, weight: Any = None) -> Any:
-    """Return ``out = (H + diag(weight)) \\ inp`` (functional).
+def sym_solve(mat: Any, vec: Any, weight: Any = None) -> Any:
+    """Return ``out = (H + diag(weight)) \\ vec`` (functional).
 
-    ``weight`` is optional. Batch dims of ``hessian``/``inp``/``weight`` are
+    ``weight`` is optional. Batch dims of ``mat``/``vec``/``weight`` are
     broadcast (zero-copy).
     """
     cp = cupy()
-    hessian = as_gpu_array(hessian, name="hessian")
-    inp = as_gpu_array(inp, name="inp")
+    mat = as_gpu_array(mat, name="mat")
+    vec = as_gpu_array(vec, name="vec")
     if weight is None:
-        batch, (hessian_b, inp_b) = broadcast_batch([(hessian, 1), (inp, 1)])
-        out = cp.empty(batch + (inp.shape[-1],), dtype=inp.dtype)
-        _ff.sym_solve(out, hessian_b, inp_b, None, current_stream_ptr())
+        batch, (mat_b, vec_b) = broadcast_batch([(mat, 1), (vec, 1)])
+        out = cp.empty(batch + (vec.shape[-1],), dtype=vec.dtype)
+        _ff.sym_solve(out, mat_b, vec_b, None, current_stream_ptr())
     else:
         weight = as_gpu_array(weight, name="weight")
-        batch, (hessian_b, inp_b, weight_b) = broadcast_batch(
-            [(hessian, 1), (inp, 1), (weight, 1)]
+        batch, (mat_b, vec_b, weight_b) = broadcast_batch(
+            [(mat, 1), (vec, 1), (weight, 1)]
         )
-        out = cp.empty(batch + (inp.shape[-1],), dtype=inp.dtype)
-        _ff.sym_solve(out, hessian_b, inp_b, weight_b, current_stream_ptr())
+        out = cp.empty(batch + (vec.shape[-1],), dtype=vec.dtype)
+        _ff.sym_solve(out, mat_b, vec_b, weight_b, current_stream_ptr())
     return out
 
 
-def sym_solve_(inp_out: Any, hessian: Any, weight: Any = None) -> Any:
+def sym_solve_(inp_out: Any, mat: Any, weight: Any = None) -> Any:
     """In-place solve ``inp_out = (H + diag(weight)) \\ inp_out``.
 
-    Returns ``inp_out``. It fixes the batch shape; ``hessian``/``weight`` are
+    Returns ``inp_out``. It fixes the batch shape; ``mat``/``weight`` are
     broadcast to it.
     """
     inp_out = require_gpu_writethrough(inp_out, name="inp_out")
-    hessian = as_gpu_array(hessian, name="hessian")
+    mat = as_gpu_array(mat, name="mat")
     batch = inp_out.shape[:-1]
-    hessian_b = broadcast_to_batch(hessian, batch, 1)
+    mat_b = broadcast_to_batch(mat, batch, 1)
     if weight is not None:
         weight = as_gpu_array(weight, name="weight")
         weight = broadcast_to_batch(weight, batch, 1)
-    _ff.sym_solve_(inp_out, hessian_b, weight, current_stream_ptr())
+    _ff.sym_solve_(inp_out, mat_b, weight, current_stream_ptr())
     return inp_out
 
 
-def sym_invert(hessian: Any) -> Any:
+def sym_invert(mat: Any) -> Any:
     """Return ``inv(H)`` (functional); both compact-symmetric."""
     cp = cupy()
-    hessian = as_gpu_array(hessian, name="hessian")
-    out = cp.empty_like(hessian)
-    _ff.sym_invert(out, hessian, current_stream_ptr())
+    mat = as_gpu_array(mat, name="mat")
+    out = cp.empty_like(mat)
+    _ff.sym_invert(out, mat, current_stream_ptr())
     return out
 
 
-def sym_invert_(hessian: Any) -> Any:
-    """In-place invert: ``hessian = inv(hessian)``. Returns ``hessian``."""
-    hessian = require_gpu_writethrough(hessian, name="hessian")
-    _ff.sym_invert_(hessian, current_stream_ptr())
-    return hessian
+def sym_invert_(mat: Any) -> Any:
+    """In-place invert: ``mat = inv(mat)``. Returns ``mat``."""
+    mat = require_gpu_writethrough(mat, name="mat")
+    _ff.sym_invert_(mat, current_stream_ptr())
+    return mat

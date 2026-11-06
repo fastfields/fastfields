@@ -19,21 +19,21 @@ an `int`, a `Spline`/`Bound` enum, or a friendly string (`"cubic"`, `"dct2"`, �
 
 | Operation | Canonical signature | Notes |
 | --- | --- | --- |
-| `dt_euclidean` | `(x, voxel_spacing=1.0, *, ...)` | Euclidean distance transform along the last axis. |
-| `dt_l1` | `(x, voxel_spacing=1.0, *, ...)` | L1 distance transform. |
-| `dt_mesh` | `(points, vertices, faces, signed=True, naive=False, return_nearest=False, ...)` | Point-to-triangular-mesh distance. `faces` is normalized to int64. `signed`/`naive`/`return_nearest` are positional-or-keyword on every backend (not keyword-only) — see fastfields#4. |
+| `dt_euclidean` | `(inp, voxel_spacing=1.0)` | Euclidean distance transform along the last axis. |
+| `dt_l1` | `(inp, voxel_spacing=1.0)` | L1 distance transform. |
+| `dt_mesh` | `(loc, vertices, faces, signed=True, naive=False, return_nearest=False)` | Point-to-triangular-mesh distance. `faces` is normalized to int64. `signed`/`naive`/`return_nearest` are positional-or-keyword on every backend (not keyword-only) — see fastfields#4. |
 | `dt_spline_table` | `(loc, coeff, times, *, order=3, bound="dct2")` | Point-to-spline distance over a dictionary of candidate times. Returns **`(dist, time)`** — see below. |
 | `dt_spline_brent` | `(loc, coeff, *, max_iter=64, tol=1e-6, step=0.1, order=3, bound="dct2")` | Same, by Brent's method. Returns **`(dist, time)`**. |
 | `dt_spline_gaussnewton` | `(loc, coeff, *, max_iter=64, tol=1e-6, order=3, bound="dct2")` | Same, by Gauss-Newton. Returns **`(dist, time)`**. |
 | `sym_matvec` | `(mat, vec)` | Compact-symmetric matrix-vector product. |
 | `sym_solve` | `(mat, vec, weight=None)` | Solve `(mat + diag(weight)) x = vec`. |
 | `sym_invert` | `(mat)` | Invert a compact-symmetric matrix. |
-| `resample` | `(x, factor=None, shape=None, *, order=2, bound="dct2", ndim=None, anchor="centers", shift=None, scale=None)` | Spline resample. `factor` **or** `shape` (mutually exclusive); a positional `2` is a **factor** on every backend. |
+| `resample` | `(inp, factor=None, shape=None, *, order=2, bound="dct2", ndim=None, anchor="centers", shift=None, scale=None)` | Spline resample. `factor` **or** `shape` (mutually exclusive); a positional `2` is a **factor** on every backend. |
 | `restriction` | same as `resample` | Adjoint of `resample` at reciprocal scale. |
-| `spline_coeff` | `(x, order=3, bound="dct2", *, ...)` | Spline-coefficient prefilter along the last axis. |
+| `spline_coeff` | `(inp, order=3, bound="dct2")` | Spline-coefficient prefilter along the last axis. |
 | `Spline`, `Bound` | enums | Re-exported by every backend. |
 
-Positional call `resample(x, 2)` therefore means *factor 2* on numpy, torch and
+Positional call `resample(inp, 2)` therefore means *factor 2* on numpy, torch and
 cupy alike — the historical footgun (a bare `2` meaning an output shape on
 torch/cupy) is gone (see fastfields-lib#17 C2).
 
@@ -70,12 +70,68 @@ Two things worth being exact about:
   statically instead. The names are nonetheless canonical now — their absence
   from `CANONICAL` is how the divergence survived to need an issue.
 
-**Signatures do not yet agree, and that is a separate open divergence.** numpy
-and torch spell these as in the table; `fastfields.cupy` spells them
-`(loc, coeff, times, spline=3, bound=3)` with `max_iter`/`tol`/`step`
-*required and positional*. The canonical signature above is the numpy/torch
-one; cupy does not conform to it yet. That needs its own decision rather than
-being quietly papered over here.
+**Signatures now agree too.** They did not when fastfields#38 landed:
+`fastfields.cupy` spelled these `(loc, coeff, times, spline=3, bound=3)`,
+with `max_iter`/`tol`/`step` *required and positional*. cupy has moved to the
+numpy/torch signature in the table — `order` keyword-only with a default,
+`bound` taking the friendly `"dct2"` spelling, and the three refiner knobs
+keyword-only with the same defaults the other two backends use.
+
+`order` rather than `spline` deserves a word, because the C++ layer says
+`spline`: every `ff::` hub entry point spells the spline order `spline`
+(`int8_t spline = spline_t::Cubic`, 15 declarations, no `order` anywhere),
+and the raw `fastfields.dlpack` binding keeps that name. But the **wrapper**
+layer settled on `order` long ago and settled on it everywhere —
+`resample`, `restriction`, `spline_coeff`, `pull`, `push`, `count`, `grad`,
+on all three backends, cupy included. cupy's `dt_spline_*` was the single
+place in the Python surface that still said `spline`, so aligning it to
+`spline` would have meant renaming `order` in nine other operations across
+three backends, against this table, to chase a name the binding layer owns
+on purpose (see "Why the raw `fastfields.dlpack` binding signature differs"
+below). Two of three backends, this table's canonical row, and the wrapper
+layer's own vocabulary all say `order`.
+
+## Buffer-argument naming
+
+`fastfields.auto` forwards `**kwargs` unchanged, so the *name* of an
+operation's first argument is part of the contract, not an internal detail:
+if one backend calls it `inp` and another `x`, then
+`fastfields.auto.dt_euclidean(inp=a)` works for numpy arrays and raises
+`TypeError` for torch tensors, or the reverse. Three conventions, applied
+across all three backends:
+
+| First argument | Spelled | Examples |
+| --- | --- | --- |
+| the input array, not modified | `inp` | `dt_euclidean`, `dt_l1`, `resample`, `restriction`, `spline_coeff`, `pull`, `grad`, the `{field,flow}_*` accumulate ops |
+| a buffer read **and** written in place | `inp_out` | `dt_euclidean_`, `dt_l1_`, `spline_coeff_`, `sym_solve_` |
+| an accumulator written through, whose prior contents are an input | `out0` | `sym_addmatvec_`, `sym_submatvec_` |
+
+`inp_out` is the hub's own name for a read-and-written tensor
+(`void dt_euclidean(DLTensor & inp_out, ...)`, likewise `spline_coeff`), and
+`sym_solve_` already used it on all three backends; `dt_euclidean_`/`dt_l1_`/
+`spline_coeff_` were the stragglers (`x` on numpy, `inp` on torch). The
+compact-symmetric operands are `mat`/`vec`/`grad` in the wrapper layer, where
+the hub says `hessian`/`inp`/`grd` — cupy had been following the hub and now
+follows the wrappers, for the same reason `order` won above.
+
+## Where a backend's signature may legitimately differ
+
+Two exemptions, and only two. Both are enforced by name in
+`tests/test_signature_conformance.py` rather than inferred, so widening them
+is a reviewable edit.
+
+- **`dtype` defaults.** `{field,flow}_{diag,kernel}` and
+  `{field,flow}_diag_rls` allocate their own output and so take a `dtype`.
+  Its default cannot be spelled portably: `np.float64` on numpy,
+  `torch.float64` on torch, and `None` on cupy — because
+  `fastfields.cupy` imports cupy lazily and cannot name `cupy.float64` at
+  module scope, so the body resolves `dtype or cp.float64`. All three mean
+  float64. The parameter's name, kind and position are still identical on
+  every backend; only the default *expression* differs.
+- **`device` on torch.** A trailing keyword-only parameter with a default, on
+  the same six builders. numpy and cupy have no device to choose. This is the
+  golden rule working as intended: a call written against the shared
+  signature keeps working on torch.
 
 ## Why the raw `fastfields.dlpack` binding signature differs from the wrappers
 
@@ -233,9 +289,8 @@ Because these live outside the canonical set, `fastfields.auto` never routes to 
 
 Beyond the regulariser accumulate set, **numpy, torch and cupy now all expose
 the same in-place surface**: `dt_euclidean_`, `dt_l1_`, `spline_coeff_`,
-`sym_solve_`, `sym_invert_` (plus `sym_addmatvec_`/`sym_submatvec_` on numpy
-and cupy, which have no torch equivalent — see below). Neither numpy nor cupy
-has autograd, so nothing blocks in-place there; earlier revisions had numpy
+`sym_solve_`, `sym_invert_`, `sym_addmatvec_`, `sym_submatvec_`. Neither numpy
+nor cupy has autograd, so nothing blocks in-place there; earlier revisions had numpy
 spell some of these as an `inplace=` keyword and were missing
 `sym_solve_`/`sym_invert_` outright — that was an accidental gap (not a
 deliberate difference) and has been closed (fastfields#4; see
@@ -245,34 +300,48 @@ section above and its "in-place autograd-safe" fixes for `sym_solve_`/
 `spline_coeff_`).
 
 `sym_addmatvec_`/`sym_submatvec_` (the posdef accumulate ops, distinct from
-the regulariser `{field,flow}_{add,sub}matvec_` family above) remain
-numpy/cupy-only: they have no torch wrapper at all — differentiable
-accumulation for compact-symmetric matvec was never wired up as a torch
-op, out-of-place or in-place, so there is no `sym_addmatvec`/`sym_submatvec`
-to add an in-place form of. This is a real, currently-open gap, not a
-reviewed-and-rejected one; flagged here rather than silently left
-undocumented.
+the regulariser `{field,flow}_{add,sub}matvec_` family above) **are on torch
+too**, as of fastfields-torch#35; an earlier revision of this section
+described them as numpy/cupy-only with no torch wrapper at all, which stopped
+being true when that landed. There is still no out-of-place
+`sym_addmatvec`/`sym_submatvec` on any backend — the C primitive is in-place
+only, and unlike the regulariser accumulate pair these were never given the
+clone-then-accumulate spelling (see "One kernel, two spellings"). That is the
+remaining asymmetry, and it is the same on all three backends rather than a
+cross-backend divergence.
 
 ## Backend-specific extensions (allowed)
 
 Beyond the canonical set, backends may add:
 
-- **numpy** — `sym_matvec_backward`, `sym_channels_from_packed`, and the
-  in-place set
+- **numpy** — `field_cg` (+ the `CGInfo` record it returns; the CG driver is
+  CPU-only in `fastfields-lib`, see fastfields-lib#34),
+  `sym_channels_from_packed`, `sym_matvec_backward`,
+  `field_precond_`/`flow_precond_`, and the in-place set
   `dt_euclidean_`/`dt_l1_`/`spline_coeff_`/`sym_solve_`/`sym_invert_`/
   `sym_addmatvec_`/`sym_submatvec_`.
 - **torch** — the regulariser accumulate set
-  (`{field,flow}_{add,sub}{matvec,diag}` and their `_` in-place forms), which
-  are autograd-safe by the rule above; and the in-place set
-  `dt_euclidean_`/`dt_l1_`/`spline_coeff_`/`sym_solve_`/`sym_invert_`
-  (mirroring numpy/cupy — see "Availability" above). `spline_coeff_`/
-  `sym_solve_` are differentiable; `dt_euclidean_`/`dt_l1_`/`sym_invert_`
-  raise a clear `RuntimeError` from `.backward()` (see "Non-differentiable
-  ops" above). Nothing else beyond the canonical set.
-- **cupy** — the regulariser accumulate set above, plus
+  (`{field,flow}_{add,sub}{matvec,diag,kernel}` and their `_` in-place forms),
+  which are autograd-safe by the rule above; and the in-place set
+  `dt_euclidean_`/`dt_l1_`/`spline_coeff_`/`sym_solve_`/`sym_invert_`/
+  `sym_addmatvec_`/`sym_submatvec_` (mirroring numpy/cupy — see
+  "Availability" above). `spline_coeff_`/`sym_solve_` are differentiable;
+  `dt_euclidean_`/`dt_l1_`/`sym_invert_` raise a clear `RuntimeError` from
+  `.backward()` (see "Non-differentiable ops" above). Nothing else beyond the
+  canonical set — in particular, no `field_cg` and no
+  `field_precond_`/`flow_precond_`.
+- **cupy** — the regulariser accumulate set above, plus `sym_matvec_backward`,
+  `field_precond_`/`flow_precond_`,
   `dt_euclidean_`/`dt_l1_`/`spline_coeff_`/`sym_solve_`/`sym_invert_`/
   `sym_addmatvec_`/`sym_submatvec_` (identical to numpy's in-place set) and
   `current_stream_ptr`.
+
+That list is the presence matrix, and
+`tests/test_signature_conformance.py::test_partial_op_is_on_exactly_the_documented_backends`
+asserts it **exactly**, in both directions: a backend that loses one of these
+fails, and so does a backend that quietly gains one — which is how the
+"`sym_addmatvec_` has no torch wrapper at all" claim above managed to go stale
+for a release cycle.
 
 These are not part of the `auto` contract; code that relies on them targets a
 specific backend on purpose. In particular, `fastfields.auto` never routes to
@@ -301,3 +370,52 @@ backend and taking on that backend's differentiability behavior yourself.
 4. **`dt_mesh` positional compatibility** — `signed`/`naive`/`return_nearest`
    are not keyword-only on any backend, so a positional call cannot silently
    work on some backends and raise `TypeError` on others.
+
+That suite checks **names**, and it checks them by importing. Both limits
+matter, and `tests/test_signature_conformance.py` exists because of them:
+
+- A name check cannot see a divergence in *parameters*, *defaults* or
+  *return order* — which is the whole of what cupy's `dt_spline_*` got wrong
+  while every name assertion passed.
+- `import fastfields.cupy` deliberately refuses a CPU-only
+  `fastfields-dlpack`, which is the build CI has, so every cupy
+  parametrisation of an importing suite **skips** — in exactly the
+  environment that has to catch a cupy divergence. A test that skips in CI
+  catches nothing.
+
+So `tests/test_signature_conformance.py` imports none of numpy, torch, cupy or
+`fastfields.dlpack`. It finds each `fastfields/<backend>/` through the
+namespace package's search locations and parses the sources with `ast` — the
+pattern `tests/test_dt_spline_return_order_cupy.py` and
+`tests/test_reg_family_routing_cupy.py` already use. It cannot skip, and it
+reports all three backends on a CPU runner with no GPU and no torch
+installed. It checks:
+
+1. **Signature agreement** — for every operation all three backends export,
+   the parameter names, kinds (positional-or-keyword vs keyword-only), order
+   and defaults are identical, modulo the two exemptions in "Where a
+   backend's signature may legitimately differ". A parameter only one backend
+   has must be declared in `BACKEND_ONLY_PARAMS` there, and must be
+   keyword-only with a default.
+2. **The `dt_spline_*` family by value** — the three signatures are pinned
+   literally, so "align all three onto the wrong spelling" fails as loudly as
+   leaving one behind.
+3. **Buffer-argument naming** — the `inp` / `inp_out` / `out0` conventions
+   above, checked on the first parameter of each op that has one. `auto`
+   forwards `**kwargs`, so these names are contract.
+4. **The presence matrix** — `PARTIAL_OPS` lists every operation that is
+   deliberately on a subset of backends, and is asserted exactly; everything
+   else must be on all three.
+5. **`fastfields.auto`'s routing tables** — read out of the `_ALIASES` /
+   `_DISPATCHED` / `_PARTIAL` literals and cross-checked against what the
+   backends actually define, both ways. `make_dispatcher` resolves
+   `getattr(backend, attr)` at *call* time, so a stale table entry would
+   otherwise surface as a `NotImplementedError` inside a user's call rather
+   than as a red CI job. Every operation all three backends expose must have
+   a dispatcher, or be listed in `AUTO_EXEMPT` with the reason it has no
+   array argument to dispatch on.
+6. **Return tuples** — numpy and cupy return plain local names, so their
+   return *order* is readable from the source and is required to match.
+   (torch returns `_SomeFunction.apply(...)`, whose order lives in that
+   `Function`'s `forward`; that stays covered at runtime by
+   `tests/test_new_surface_torch.py`, which can import torch in CI.)

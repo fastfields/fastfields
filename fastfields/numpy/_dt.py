@@ -43,12 +43,12 @@ __all__ = [
 # rest of the package and from cupy -- see fastfields#4.
 
 
-def dt_euclidean(x: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
+def dt_euclidean(inp: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
     """Squared Euclidean distance transform along the **last** axis.
 
     Parameters
     ----------
-    x : numpy.ndarray
+    inp : numpy.ndarray
         Input holding ``0`` at feature locations and ``+inf`` elsewhere.
     voxel_spacing : float, default=1.0
         Physical spacing between samples along the last axis.
@@ -56,20 +56,22 @@ def dt_euclidean(x: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        The distance transform, a newly allocated array; ``x`` is left
+        The distance transform, a newly allocated array; ``inp`` is left
         untouched. See :func:`dt_euclidean_` for the in-place variant.
     """
-    out = _as_float_array(x, "x", copy=True)
+    out = _as_float_array(inp, "inp", copy=True)
     _ff.dt_euclidean(out, float(voxel_spacing))
     return out
 
 
-def dt_euclidean_(x: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
+def dt_euclidean_(
+    inp_out: np.ndarray, voxel_spacing: float = 1.0
+) -> np.ndarray:
     """In-place squared Euclidean distance transform along the **last** axis.
 
     Parameters
     ----------
-    x : numpy.ndarray
+    inp_out : numpy.ndarray
         Input holding ``0`` at feature locations and ``+inf`` elsewhere.
         Must be a float32/float64 array; mutated in place and returned. Any
         memory layout is fine -- the write is zero-copy via DLPack strides.
@@ -79,14 +81,15 @@ def dt_euclidean_(x: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        ``x`` (the same array object), now holding the distance transform.
+        ``inp_out`` (the same array object), now holding the distance
+        transform.
     """
-    _validate_inplace(x)
-    _ff.dt_euclidean(x, float(voxel_spacing))
-    return x
+    _validate_inplace(inp_out, "inp_out")
+    _ff.dt_euclidean(inp_out, float(voxel_spacing))
+    return inp_out
 
 
-def dt_l1(x: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
+def dt_l1(inp: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
     """L1 distance transform along the **last** axis.
 
     See :func:`dt_euclidean` for the input convention and the meaning of the
@@ -94,7 +97,7 @@ def dt_l1(x: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
 
     Parameters
     ----------
-    x : numpy.ndarray
+    inp : numpy.ndarray
         Input holding ``0`` at feature locations and ``+inf`` elsewhere.
     voxel_spacing : float, default=1.0
         Physical spacing between samples along the last axis.
@@ -102,20 +105,20 @@ def dt_l1(x: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        The distance transform, a newly allocated array; ``x`` is left
+        The distance transform, a newly allocated array; ``inp`` is left
         untouched. See :func:`dt_l1_` for the in-place variant.
     """
-    out = _as_float_array(x, "x", copy=True)
+    out = _as_float_array(inp, "inp", copy=True)
     _ff.dt_l1(out, float(voxel_spacing))
     return out
 
 
-def dt_l1_(x: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
+def dt_l1_(inp_out: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
     """In-place L1 distance transform along the **last** axis.
 
     Parameters
     ----------
-    x : numpy.ndarray
+    inp_out : numpy.ndarray
         Input holding ``0`` at feature locations and ``+inf`` elsewhere.
         Must be a float32/float64 array; mutated in place and returned.
     voxel_spacing : float, default=1.0
@@ -124,11 +127,12 @@ def dt_l1_(x: np.ndarray, voxel_spacing: float = 1.0) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        ``x`` (the same array object), now holding the distance transform.
+        ``inp_out`` (the same array object), now holding the distance
+        transform.
     """
-    _validate_inplace(x)
-    _ff.dt_l1(x, float(voxel_spacing))
-    return x
+    _validate_inplace(inp_out, "inp_out")
+    _ff.dt_l1(inp_out, float(voxel_spacing))
+    return inp_out
 
 
 # --------------------------------------------------------------------------- #
