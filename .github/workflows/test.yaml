@@ -27,33 +27,31 @@ jobs:
   pytest:
     uses: fastfields/.github/.github/workflows/python-test.yml@main
     with:
-      # The shared defaults are '["ubuntu-latest", "macos-latest"]' x
-      # '["3.9", "3.11", "3.12"]'. Both axes are overridden here, for reasons
-      # that are about the runner images rather than about this repo -- stated
-      # in full because an unexplained matrix override is the kind of thing
-      # that gets "tidied" back to the default:
+      # Both axes are overridden here, for reasons that are about the runner
+      # images rather than about this repo -- stated in full because an
+      # unexplained matrix override is the kind of thing that gets "tidied"
+      # back to the default:
       #
-      # * `ubuntu-latest` has moved to Ubuntu 26.04, and
-      #   actions/python-versions publishes no 3.9 build for it (3.9.25 exists
-      #   for linux-22.04 and linux-24.04 only). The 3.9 leg therefore fails
-      #   in `actions/setup-python` before it can install a Python at all.
-      #   24.04 is the newest image this distribution's declared floor
-      #   (`requires-python = ">=3.9"`) can actually be tested on.
       # * macOS is dropped. The org's macOS runners did not pick these jobs
-      #   up -- three legs sat queued and were cancelled after 15 minutes --
-      #   and the 3.9 x macOS cell could not have run regardless, since
-      #   actions/python-versions ships darwin 3.9 for x64 only while
-      #   `macos-latest` is arm64. It also buys the least here: this
-      #   distribution is a single `py3-none-any` wheel with no compiled
-      #   content, so the Python-version axis is the one that finds bugs. The
-      #   platform axis matters for `fastfields-dlpack`, which is where the
-      #   compiled artifacts live and where that leg belongs; its own release
-      #   workflow already excludes macOS for a separate reason
+      #   up -- three legs sat queued and were cancelled after 15 minutes.
+      #   It also buys the least here: this distribution is a single
+      #   `py3-none-any` wheel with no compiled content, so the
+      #   Python-version axis is the one that finds bugs. The platform axis
+      #   matters for `fastfields-dlpack`, which is where the compiled
+      #   artifacts live and where that leg belongs; its own release workflow
+      #   already excludes macOS for a separate reason
       #   (fastfields-dlpack#8).
+      # * The Python list starts at 3.10, which is this distribution's floor
+      #   now that its hard dependency `fastfields-dlpack` ships one abi3
+      #   wheel for CPython >= 3.10. A 3.9 leg would fail in pip's resolver
+      #   rather than in a test. The leg used to be 3.9 and used to need
+      #   `ubuntu-24.04` because `ubuntu-latest` (26.04) publishes no 3.9;
+      #   3.10 through 3.12 are published for every current image, so 24.04
+      #   is now a plain pin rather than a workaround.
       #
-      # Both are overrides of shared defaults that are stale for every
-      # caller, not just this one. Fixing the defaults is a separate call
-      # about which Pythons and platforms the project supports.
+      # The shared default is a pair list covering 3.10-3.13 across four
+      # Ubuntu images; whether this repo should just use it is a separate
+      # call about which Pythons and platforms the project supports.
       os: '["ubuntu-24.04"]'
-      python-versions: '["3.9", "3.11", "3.12"]'
+      python-versions: '["3.10", "3.11", "3.12"]'
     secrets: inherit
