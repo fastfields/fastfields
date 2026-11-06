@@ -70,8 +70,11 @@ Backends are imported **lazily** (only the one whose array type is passed), so
 `fastfields.auto` works with whatever subset of the array libraries is
 installed. Every backend exposes the same canonical `dt_*` / `sym_*` names, and
 each unified name maps straight onto that function in the selected backend.
-Arguments are forwarded unchanged, so each dispatched call shares the signature
-of the selected backend's function. A clear `TypeError` is raised for an
+Arguments are forwarded unchanged — including keyword arguments, which is why
+the backends are held to *identical* signatures (parameter names, kinds, order
+and defaults), not merely identical names; `tests/test_signature_conformance.py`
+is the gate, and it parses the sources rather than importing them so the cupy
+side is checked on a CPU runner too. A clear `TypeError` is raised for an
 unrecognised array type, and a clear `ImportError` if the needed array library
 is not installed. `fastfields.auto.dlpack_backend()` reports which compiled
 lane you are on.

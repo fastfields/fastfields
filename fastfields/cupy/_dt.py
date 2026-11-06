@@ -6,6 +6,8 @@ from typing import Any
 
 import fastfields.dlpack as _ff
 
+from fastfields.helpers import as_bound, as_spline
+
 from ._util import (
     as_gpu_array,
     broadcast_batch,
@@ -75,14 +77,36 @@ def dt_spline_table(
     loc: Any,
     coeff: Any,
     times: Any,
-    spline: int = 3,
-    bound: int = 3,
+    *,
+    order: int | str = 3,
+    bound: int | str = "dct2",
 ) -> tuple[Any, Any]:
     """Point-to-spline distance via a dictionary of candidate ``times``.
 
     ``loc`` core ``(D,)``, ``coeff`` core ``(N, D)``, ``times`` core ``(K,)``;
     batch dims are broadcast (zero-copy) and ``dist``/``time`` are allocated
     with the broadcast batch shape. Returns ``(dist, time)``.
+
+    Parameters
+    ----------
+    loc : cupy.ndarray
+        Query points, shape ``(*B, D)``.
+    coeff : cupy.ndarray
+        Spline coefficients, shape ``(*B, N, D)``.
+    times : cupy.ndarray
+        Candidate times, shape ``(*B, K)``.
+    order : int or str, default=3
+        Spline order. Accepts an int, a :class:`Spline` enum, or a name such
+        as ``"cubic"``.
+    bound : int or str, default="dct2"
+        Boundary condition (int, a :class:`Bound` enum, or a name).
+
+    Returns
+    -------
+    dist : cupy.ndarray
+        Squared distance per query point, shape ``(*B,)``.
+    time : cupy.ndarray
+        Best time per query point, shape ``(*B,)``.
     """
     cp = cupy()
     loc = as_gpu_array(loc, name="loc")
@@ -99,8 +123,8 @@ def dt_spline_table(
         loc_b,
         coeff_b,
         times_b,
-        spline,
-        bound,
+        as_spline(order),
+        as_bound(bound),
         current_stream_ptr(),
     )
     return dist, time
@@ -109,15 +133,41 @@ def dt_spline_table(
 def dt_spline_brent(
     loc: Any,
     coeff: Any,
-    max_iter: int,
-    tol: float,
-    step: float,
-    spline: int = 3,
-    bound: int = 3,
+    *,
+    max_iter: int = 64,
+    tol: float = 1e-6,
+    step: float = 0.1,
+    order: int | str = 3,
+    bound: int | str = "dct2",
 ) -> tuple[Any, Any]:
     """Point-to-spline distance via Brent's method. Returns ``(dist, time)``.
 
     ``loc`` core ``(D,)``, ``coeff`` core ``(N, D)``; batch dims broadcast.
+
+    Parameters
+    ----------
+    loc : cupy.ndarray
+        Query points, shape ``(*B, D)``.
+    coeff : cupy.ndarray
+        Spline coefficients, shape ``(*B, N, D)``.
+    max_iter : int, default=64
+        Maximum number of Brent iterations.
+    tol : float, default=1e-6
+        Convergence tolerance.
+    step : float, default=0.1
+        Initial bracketing step.
+    order : int or str, default=3
+        Spline order. Accepts an int, a :class:`Spline` enum, or a name such
+        as ``"cubic"``.
+    bound : int or str, default="dct2"
+        Boundary condition (int, a :class:`Bound` enum, or a name).
+
+    Returns
+    -------
+    dist : cupy.ndarray
+        Squared distance per query point, shape ``(*B,)``.
+    time : cupy.ndarray
+        Best time per query point, shape ``(*B,)``.
     """
     cp = cupy()
     loc = as_gpu_array(loc, name="loc")
@@ -130,11 +180,11 @@ def dt_spline_brent(
         dist,
         loc_b,
         coeff_b,
-        max_iter,
-        tol,
-        step,
-        spline,
-        bound,
+        int(max_iter),
+        float(tol),
+        float(step),
+        as_spline(order),
+        as_bound(bound),
         current_stream_ptr(),
     )
     return dist, time
@@ -143,14 +193,38 @@ def dt_spline_brent(
 def dt_spline_gaussnewton(
     loc: Any,
     coeff: Any,
-    max_iter: int,
-    tol: float,
-    spline: int = 3,
-    bound: int = 3,
+    *,
+    max_iter: int = 64,
+    tol: float = 1e-6,
+    order: int | str = 3,
+    bound: int | str = "dct2",
 ) -> tuple[Any, Any]:
     """Point-to-spline distance via Gauss-Newton. Returns ``(dist, time)``.
 
     ``loc`` core ``(D,)``, ``coeff`` core ``(N, D)``; batch dims broadcast.
+
+    Parameters
+    ----------
+    loc : cupy.ndarray
+        Query points, shape ``(*B, D)``.
+    coeff : cupy.ndarray
+        Spline coefficients, shape ``(*B, N, D)``.
+    max_iter : int, default=64
+        Maximum number of Gauss-Newton iterations.
+    tol : float, default=1e-6
+        Convergence tolerance.
+    order : int or str, default=3
+        Spline order. Accepts an int, a :class:`Spline` enum, or a name such
+        as ``"cubic"``.
+    bound : int or str, default="dct2"
+        Boundary condition (int, a :class:`Bound` enum, or a name).
+
+    Returns
+    -------
+    dist : cupy.ndarray
+        Squared distance per query point, shape ``(*B,)``.
+    time : cupy.ndarray
+        Best time per query point, shape ``(*B,)``.
     """
     cp = cupy()
     loc = as_gpu_array(loc, name="loc")
@@ -163,10 +237,10 @@ def dt_spline_gaussnewton(
         dist,
         loc_b,
         coeff_b,
-        max_iter,
-        tol,
-        spline,
-        bound,
+        int(max_iter),
+        float(tol),
+        as_spline(order),
+        as_bound(bound),
         current_stream_ptr(),
     )
     return dist, time

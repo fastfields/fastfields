@@ -116,7 +116,7 @@ def dt_euclidean(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
     return _DtEuclidean.apply(inp, voxel_spacing)
 
 
-def dt_euclidean_(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
+def dt_euclidean_(inp_out: Tensor, voxel_spacing: float = 1.0) -> Tensor:
     """In-place squared Euclidean distance transform along the last axis.
 
     Not differentiable -- calling ``.backward()`` through this raises
@@ -125,7 +125,7 @@ def dt_euclidean_(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
 
     Parameters
     ----------
-    inp : torch.Tensor
+    inp_out : torch.Tensor
         Input holding ``0`` at feature locations and ``+inf`` elsewhere.
         Mutated in place and returned.
     voxel_spacing : float, default=1.0
@@ -134,19 +134,19 @@ def dt_euclidean_(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
     Returns
     -------
     torch.Tensor
-        ``inp`` (the same tensor object), now holding the distance
+        ``inp_out`` (the same tensor object), now holding the distance
         transform.
 
     Raises
     ------
     TypeError
-        If ``inp`` is not float32/float64.
+        If ``inp_out`` is not float32/float64.
     RuntimeError
         If ``.backward()`` is called through the output.
     """
-    check_dtype(inp)
-    check_inplace_leaf("dt_euclidean_", inp)
-    return _DtEuclidean_.apply(inp, voxel_spacing)
+    check_dtype(inp_out)
+    check_inplace_leaf("dt_euclidean_", inp_out)
+    return _DtEuclidean_.apply(inp_out, voxel_spacing)
 
 
 class _DtL1(torch.autograd.Function):
@@ -211,7 +211,7 @@ def dt_l1(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
     return _DtL1.apply(inp, voxel_spacing)
 
 
-def dt_l1_(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
+def dt_l1_(inp_out: Tensor, voxel_spacing: float = 1.0) -> Tensor:
     """In-place L1 distance transform along the last axis.
 
     Not differentiable -- calling ``.backward()`` through this raises
@@ -220,7 +220,7 @@ def dt_l1_(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
 
     Parameters
     ----------
-    inp : torch.Tensor
+    inp_out : torch.Tensor
         Input holding ``0`` at feature locations and ``+inf`` elsewhere.
         Mutated in place and returned.
     voxel_spacing : float, default=1.0
@@ -229,19 +229,19 @@ def dt_l1_(inp: Tensor, voxel_spacing: float = 1.0) -> Tensor:
     Returns
     -------
     torch.Tensor
-        ``inp`` (the same tensor object), now holding the distance
+        ``inp_out`` (the same tensor object), now holding the distance
         transform.
 
     Raises
     ------
     TypeError
-        If ``inp`` is not float32/float64.
+        If ``inp_out`` is not float32/float64.
     RuntimeError
         If ``.backward()`` is called through the output.
     """
-    check_dtype(inp)
-    check_inplace_leaf("dt_l1_", inp)
-    return _DtL1_.apply(inp, voxel_spacing)
+    check_dtype(inp_out)
+    check_inplace_leaf("dt_l1_", inp_out)
+    return _DtL1_.apply(inp_out, voxel_spacing)
 
 
 class _DtMesh(torch.autograd.Function):

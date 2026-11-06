@@ -283,18 +283,18 @@ def spline_coeff(
 
 
 def spline_coeff_(
-    inp: Tensor, order: int | str = 3, bound: int | str = "dct2"
+    inp_out: Tensor, order: int | str = 3, bound: int | str = "dct2"
 ) -> Tensor:
     """In-place interpolating spline-coefficient prefilter, last axis.
 
-    Differentiable with respect to ``inp`` (mirrors :func:`spline_coeff`):
+    Differentiable with respect to ``inp_out`` (mirrors :func:`spline_coeff`):
     the prefilter is linear, so its backward applies the prefilter's
-    transpose to the gradient and never reads the pre-mutation ``inp`` --
-    only the saved ``order``/``bound`` scalars -- so overwriting ``inp`` in
+    transpose to the gradient and never reads the pre-mutation ``inp_out`` --
+    only the saved ``order``/``bound`` scalars -- so overwriting ``inp_out`` in
     place destroys no information backward needs (see ``API_CONTRACT.md``,
     "In-place policy"). As with any in-place op, a leaf tensor with
     ``requires_grad=True`` cannot be mutated (torch's ordinary leaf rule);
-    that is checked before ``inp`` is touched, so the call raises without
+    that is checked before ``inp_out`` is touched, so the call raises without
     corrupting it.
 
     Only the boundary conditions the prefilter actually implements are
@@ -306,11 +306,11 @@ def spline_coeff_(
     ValueError
         If ``bound`` is not an implemented boundary condition.
     RuntimeError
-        If ``inp`` is a leaf tensor that requires grad.
+        If ``inp_out`` is a leaf tensor that requires grad.
 
     Parameters
     ----------
-    inp : torch.Tensor
+    inp_out : torch.Tensor
         Input samples, shape ``(..., N)``. Mutated in place and returned.
     order : int or str, default=3
         Spline order (orders 0 and 1 are no-ops); accepts an int, a
@@ -321,14 +321,14 @@ def spline_coeff_(
     Returns
     -------
     torch.Tensor
-        ``inp`` (the same tensor object), now holding the spline
+        ``inp_out`` (the same tensor object), now holding the spline
         coefficients.
     """
-    check_dtype(inp)
-    check_inplace_leaf("spline_coeff_", inp)
+    check_dtype(inp_out)
+    check_inplace_leaf("spline_coeff_", inp_out)
     spline, bound = as_spline(order), as_bound(bound)
     _check_splinc_bound(spline, bound)
-    return _SplineCoeffInPlace.apply(inp, spline, bound)
+    return _SplineCoeffInPlace.apply(inp_out, spline, bound)
 
 
 # --------------------------------------------------------------------------- #

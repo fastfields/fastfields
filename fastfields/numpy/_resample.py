@@ -24,13 +24,13 @@ __all__ = [
 
 
 def spline_coeff(
-    x: np.ndarray, order: int | str = 3, bound: int | str = "dct2"
+    inp: np.ndarray, order: int | str = 3, bound: int | str = "dct2"
 ) -> np.ndarray:
     """Spline-coefficient prefilter along the **last** axis.
 
     Parameters
     ----------
-    x : numpy.ndarray
+    inp : numpy.ndarray
         Input samples.
     order : int or str, default=3
         Spline order (orders 0 and 1 are no-ops).
@@ -40,22 +40,22 @@ def spline_coeff(
     Returns
     -------
     numpy.ndarray
-        Spline coefficients, a newly allocated array; ``x`` is left
+        Spline coefficients, a newly allocated array; ``inp`` is left
         untouched. See :func:`spline_coeff_` for the in-place variant.
     """
-    out = _as_float_array(x, "x", copy=True)
+    out = _as_float_array(inp, "inp", copy=True)
     _ff.spline_coeff(out, _as_spline(order), _as_bound(bound))
     return out
 
 
 def spline_coeff_(
-    x: np.ndarray, order: int | str = 3, bound: int | str = "dct2"
+    inp_out: np.ndarray, order: int | str = 3, bound: int | str = "dct2"
 ) -> np.ndarray:
     """In-place spline-coefficient prefilter along the **last** axis.
 
     Parameters
     ----------
-    x : numpy.ndarray
+    inp_out : numpy.ndarray
         Input samples. Must be a float32/float64 array; mutated in place and
         returned.
     order : int or str, default=3
@@ -66,11 +66,12 @@ def spline_coeff_(
     Returns
     -------
     numpy.ndarray
-        ``x`` (the same array object), now holding the spline coefficients.
+        ``inp_out`` (the same array object), now holding the spline
+        coefficients.
     """
-    _validate_inplace(x)
-    _ff.spline_coeff(x, _as_spline(order), _as_bound(bound))
-    return x
+    _validate_inplace(inp_out, "inp_out")
+    _ff.spline_coeff(inp_out, _as_spline(order), _as_bound(bound))
+    return inp_out
 
 
 def _resize_shapes(
@@ -93,7 +94,7 @@ def _resize_shapes(
 
 
 def resample(
-    x: np.ndarray,
+    inp: np.ndarray,
     factor: float | Sequence[float] | None = None,
     shape: int | Sequence[int] | None = None,
     *,
@@ -108,7 +109,7 @@ def resample(
 
     Parameters
     ----------
-    x : numpy.ndarray
+    inp : numpy.ndarray
         Input array.
     factor : float or sequence of float, optional
         Per-axis multiplier (scalar or sequence). Mutually exclusive with
@@ -146,14 +147,14 @@ def resample(
     Raises
     ------
     ValueError
-        If ``ndim`` is outside ``1..x.ndim`` or ``anchor`` is unknown.
+        If ``ndim`` is outside ``1..inp.ndim`` or ``anchor`` is unknown.
     """
-    x = _as_float_array(x, "x")
+    inp = _as_float_array(inp, "inp")
     ndim = infer_ndim(ndim, factor, shape)
-    if ndim < 1 or ndim > x.ndim:
-        raise ValueError(f"ndim must be in 1..{x.ndim}, got {ndim}")
+    if ndim < 1 or ndim > inp.ndim:
+        raise ValueError(f"ndim must be in 1..{inp.ndim}, got {ndim}")
     batch, spatial_in, out_spatial = _resize_shapes(
-        x.shape, ndim, factor, shape
+        inp.shape, ndim, factor, shape
     )
     eff_scale, anchor_shift = anchor_scale_shift(
         anchor, spatial_in, out_spatial, ndim
@@ -164,10 +165,10 @@ def resample(
             raise ValueError(
                 f"Expected scale of length ndim={ndim}, got {scale}."
             )
-    out = np.zeros(batch + out_spatial, dtype=x.dtype)
+    out = np.zeros(batch + out_spatial, dtype=inp.dtype)
     _ff.resample(
         out,
-        x,
+        inp,
         spline=_as_spline(order),
         bound=_as_bound(bound),
         shift=anchor_shift if shift is None else float(shift),
@@ -178,7 +179,7 @@ def resample(
 
 
 def restriction(
-    x: np.ndarray,
+    inp: np.ndarray,
     factor: float | Sequence[float] | None = None,
     shape: int | Sequence[int] | None = None,
     *,
@@ -199,7 +200,7 @@ def restriction(
 
     Parameters
     ----------
-    x : numpy.ndarray
+    inp : numpy.ndarray
         Input array.
     factor : float or sequence of float, optional
         Per-axis multiplier (scalar or sequence). Mutually exclusive with
@@ -227,14 +228,14 @@ def restriction(
     Raises
     ------
     ValueError
-        If ``ndim`` is outside ``1..x.ndim`` or ``anchor`` is unknown.
+        If ``ndim`` is outside ``1..inp.ndim`` or ``anchor`` is unknown.
     """
-    x = _as_float_array(x, "x")
+    inp = _as_float_array(inp, "inp")
     ndim = infer_ndim(ndim, factor, shape)
-    if ndim < 1 or ndim > x.ndim:
-        raise ValueError(f"ndim must be in 1..{x.ndim}, got {ndim}")
+    if ndim < 1 or ndim > inp.ndim:
+        raise ValueError(f"ndim must be in 1..{inp.ndim}, got {ndim}")
     batch, spatial_in, out_spatial = _resize_shapes(
-        x.shape, ndim, factor, shape
+        inp.shape, ndim, factor, shape
     )
     eff_scale, anchor_shift = anchor_scale_shift(
         anchor, spatial_in, out_spatial, ndim
@@ -246,10 +247,10 @@ def restriction(
                 f"Expected scale of length ndim={ndim}, got {scale}."
             )
     # pre-zeroed (the binding accumulates into `out`)
-    out = np.zeros(batch + out_spatial, dtype=x.dtype)
+    out = np.zeros(batch + out_spatial, dtype=inp.dtype)
     _ff.restriction(
         out,
-        x,
+        inp,
         spline=_as_spline(order),
         bound=_as_bound(bound),
         shift=anchor_shift if shift is None else float(shift),

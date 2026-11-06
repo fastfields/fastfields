@@ -111,6 +111,14 @@ call raises `NotImplementedError` saying which package to upgrade, not a bare
     three names are part of the canonical surface the cross-backend
     conformance suite checks, so a namespace cannot quietly drift again.
 
+    Their *signatures* agreed later than their return order did.
+    `fastfields.cupy` spelled the spline order `spline` and made
+    `max_iter`/`tol`/`step` required positional arguments, where numpy and
+    torch had keyword-only `order`/`bound` with defaults. All three now use
+    the numpy/torch spelling, and signature drift — parameter names, kinds,
+    order, defaults — fails CI in `tests/test_signature_conformance.py`
+    rather than at a user's call.
+
     [ff38]: https://github.com/fastfields/fastfields/issues/38
 
 ## Status
