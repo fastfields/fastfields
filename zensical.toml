@@ -10,13 +10,19 @@ copyright = "Copyright &copy; 2026 The fastfields authors"
 # absolute URL so the four sections look alike from one source -- and so no
 # docs build has to fetch another repository.
 extra_css = ["https://fastfields.github.io/stylesheets/extra.css"]
-# The canonical fastfields menu: one entry per fastfields namespace, plus Home
-# and the wheel index. The nine top-level entries, these labels and this order
-# are identical in all four sections (see DOCS-THEME.md in the fastfields/.github
-# repo) and tools/check-docs-nav.py fails the build if they drift. A section
-# expands the entries it owns into its own pages and links the rest absolutely:
-# a relative target keeps in-site navigation native (active-page highlight, no
-# full page reload), an absolute one crosses to another section's site.
+# The canonical fastfields menu: one entry per installable fastfields
+# namespace, plus Home and the wheel index. The eight top-level entries, these
+# labels and this order are identical in all four sections (see DOCS-THEME.md
+# in the fastfields/.github repo) and tools/check-docs-nav.py fails the build
+# if they drift. A section expands the entries it owns into its own pages and
+# links the rest absolutely: a relative target keeps in-site navigation native
+# (active-page highlight, no full page reload), an absolute one crosses to
+# another section's site.
+#
+# `fastfields.helpers` is not one of the eight: it ships inside the base
+# distribution rather than being installed or imported on its own, so it is
+# not a listed namespace. Its pages stay published, nested under
+# `fastfields.auto` on the /python/ section.
 #
 # `index.md` leads the auto group on purpose. It is the Python section overview,
 # and `navigation.indexes` therefore makes the `fastfields.auto` entry itself
@@ -30,6 +36,8 @@ nav = [
     "index.md",
     {"Overview" = "auto.md"},
     {"API reference" = "api/auto.md"},
+    {"Shared arguments" = "helpers.md"},
+    {"Shared arguments API" = "api/helpers.md"},
     {"All API pages" = "api/index.md"},
     {"Packaging" = "monorepo.md"},
   ]},
@@ -44,10 +52,6 @@ nav = [
   {"fastfields.cupy" = [
     {"Overview" = "cupy.md"},
     {"API reference" = "api/cupy.md"},
-  ]},
-  {"fastfields.helpers" = [
-    {"Overview" = "helpers.md"},
-    {"API reference" = "api/helpers.md"},
   ]},
   {"fastfields.dlpack" = "https://fastfields.github.io/dlpack/"},
   {"libfastfields" = "https://fastfields.github.io/lib/"},
