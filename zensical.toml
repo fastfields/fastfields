@@ -10,26 +10,47 @@ copyright = "Copyright &copy; 2026 The fastfields authors"
 # absolute URL so the four sections look alike from one source -- and so no
 # docs build has to fetch another repository.
 extra_css = ["https://fastfields.github.io/stylesheets/extra.css"]
+# The canonical fastfields menu: one entry per fastfields namespace, plus Home
+# and the wheel index. The nine top-level entries, these labels and this order
+# are identical in all four sections (see DOCS-THEME.md in the fastfields/.github
+# repo) and tools/check-docs-nav.py fails the build if they drift. A section
+# expands the entries it owns into its own pages and links the rest absolutely:
+# a relative target keeps in-site navigation native (active-page highlight, no
+# full page reload), an absolute one crosses to another section's site.
+#
+# `index.md` leads the auto group on purpose. It is the Python section overview,
+# and `navigation.indexes` therefore makes the `fastfields.auto` entry itself
+# land on it -- a page whose opening paragraph is the auto-dispatch story. The
+# API index and `monorepo.md` describe the distribution as a whole rather than
+# one namespace, and the base distribution -- a plain `pip install fastfields`,
+# which is exactly what ships `fastfields.auto` -- is where they belong.
 nav = [
-  {"fastfields home" = "https://fastfields.github.io/"},
-  {"Home" = "index.md"},
-  {"Backends" = [
-    "numpy.md",
-    "torch.md",
-    "cupy.md",
-    "helpers.md",
+  {"Home" = "https://fastfields.github.io/"},
+  {"fastfields.auto" = [
+    "index.md",
+    {"Overview" = "auto.md"},
+    {"API reference" = "api/auto.md"},
+    {"All API pages" = "api/index.md"},
+    {"Packaging" = "monorepo.md"},
   ]},
-  {"Packaging" = "monorepo.md"},
-  {"API" = [
-    "api/index.md",
-    "api/auto.md",
-    "api/numpy.md",
-    "api/torch.md",
-    "api/cupy.md",
-    "api/helpers.md",
+  {"fastfields.numpy" = [
+    {"Overview" = "numpy.md"},
+    {"API reference" = "api/numpy.md"},
   ]},
-  {"Raw DLPack binding" = "https://fastfields.github.io/dlpack/"},
-  {"C++/CUDA library" = "https://fastfields.github.io/lib/"},
+  {"fastfields.torch" = [
+    {"Overview" = "torch.md"},
+    {"API reference" = "api/torch.md"},
+  ]},
+  {"fastfields.cupy" = [
+    {"Overview" = "cupy.md"},
+    {"API reference" = "api/cupy.md"},
+  ]},
+  {"fastfields.helpers" = [
+    {"Overview" = "helpers.md"},
+    {"API reference" = "api/helpers.md"},
+  ]},
+  {"fastfields.dlpack" = "https://fastfields.github.io/dlpack/"},
+  {"libfastfields" = "https://fastfields.github.io/lib/"},
   {"Wheel index" = "https://fastfields.github.io/whl/"},
 ]
 [project.theme]
